@@ -7,6 +7,11 @@ on:
         type: boolean
         required: true
         default: false
+      publish_to_website:
+        description: 'After the install test passes, publish this installer to the server (website download + automatic client update)'
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -107,7 +112,7 @@ jobs:
       - name: Silent install on this disposable Windows machine
         shell: pwsh
         run: |
-          $setup = Get-ChildItem artifacts/LEYRAConnect-*-setup.exe | Select-Object -First 1
+          $setup = Get-ChildItem artifacts/Leyra-*-setup.exe | Select-Object -First 1
           $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait -PassThru
           $log = Join-Path $env:TEMP 'LEYRAConnect-setup.log'
           if (Test-Path $log) { Get-Content $log }
@@ -143,9 +148,38 @@ jobs:
       - name: Upload installer for download
         uses: actions/upload-artifact@v4
         with:
-          name: LEYRAConnect-windows-installer
+          name: Leyra-windows-installer
           path: |
-            artifacts/LEYRAConnect-*-setup.exe
-            artifacts/LEYRAConnect-*-setup.sha256
+            artifacts/Leyra-*-setup.exe
+            artifacts/Leyra-*-setup.sha256
           retention-days: 30
           compression-level: 0
+  publish:
+    if: ${{ inputs.allow_hosted_compute == true && inputs.publish_to_website == true }}
+    needs: [native, installer]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Leyra-windows-installer
+          path: release
+      - name: Upload the tested installer to the server and publish it
+        env:
+          LEYRA_SSH_KEY: ${{ secrets.LEYRA_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          setup=$(ls release/Leyra-*-setup.exe | head -n1)
+          version=$(basename "$setup" | sed -E 's/^Leyra-(.+)-setup\.exe$/\1/')
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]
+          (cd release && sha256sum -c "$(basename "$setup" .exe).sha256")
+          key_file="$RUNNER_TEMP/leyra-key"; umask 077
+          printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
+          stage="/tmp/leyra-release-${GITHUB_RUN_ID}"
+          ssh_options=(-T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$GITHUB_WORKSPACE/deploy/known_hosts")
+          trap 'ssh "${ssh_options[@]}" ubuntu@43.129.187.240 "rm -rf -- $stage" >/dev/null 2>&1 || true; rm -f "$key_file"' EXIT
+          ssh "${ssh_options[@]}" ubuntu@43.129.187.240 "mkdir -m 700 -- $stage && cat > $stage/setup.exe" < "$setup"
+          ssh "${ssh_options[@]}" ubuntu@43.129.187.240 "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 publish-update $version $stage/setup.exe --notes 'Leyra $version' | tail -n1"
+          echo "LEYRA_RELEASE_PUBLISHED=$version"

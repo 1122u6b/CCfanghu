@@ -6,8 +6,12 @@ from install_existing_server import install,read_service,systemctl
 def main():
  if os.geteuid()!=0:raise PermissionError('root_required')
  # Installer privately backs up old service overrides before replacing either command.
- with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):install('43.129.187.240')
+ with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):extras=install('43.129.187.240') or {}
  print('LEYRA_DEPLOY_APPLICATION_APPLIED=YES',flush=True)
+ # Fixed status words only: no configuration contents leave the server.
+ print('LEYRA_DEPLOY_SERVER_KERNEL='+('YES' if extras.get('kernel') else 'NO'),flush=True)
+ website=str(extras.get('website','NO'))
+ print('LEYRA_DEPLOY_WEBSITE='+(website if website.replace('_','').isalnum() else 'NO'),flush=True)
  path,conf=read_service('leyra-server.service','gateway.py')
  pid=systemctl('show','leyra-server.service','--property=MainPID','--value')
  status=Path('/proc/'+pid+'/status').read_text().splitlines();fields={line.split(':',1)[0]:line.split(':',1)[1].split() for line in status if ':' in line}

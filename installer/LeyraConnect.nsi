@@ -16,7 +16,7 @@ Unicode true
 !ifndef OUTPUT
  !error "OUTPUT must name the output installer"
 !endif
-Name "LEYRA 连接助手"
+Name "Leyra"
 OutFile "${OUTPUT}"
 InstallDir "$PROGRAMFILES64\LEYRAConnect"
 RequestExecutionLevel admin
@@ -27,7 +27,7 @@ ShowUninstDetails show
 !define MUI_WELCOMEPAGE_TEXT "安装桌面程序、后台服务和所需运行环境。服务器连接信息会在首次打开时导入。$\r$\n$\r$\n安装包包含离线运行环境。"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_TEXT "安装完成。请从桌面打开 LEYRA 连接助手。$\r$\n$\r$\n如需退出后台防护，请使用程序中的暂停功能；网络异常时可使用开始菜单中的网络恢复工具。"
+!define MUI_FINISHPAGE_TEXT "安装完成。请从桌面打开 Leyra。$\r$\n$\r$\n如需退出后台防护，请使用程序中的暂停功能；网络异常时可使用开始菜单中的网络恢复工具。"
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -87,12 +87,12 @@ Section "安装" SEC_MAIN
   MessageBox MB_ICONSTOP "后台服务安装未完成，请保留安装详情。此安装不会创建可用状态的快捷方式。" /SD IDOK
   Abort
  ${EndIf}
- CreateDirectory "$SMPROGRAMS\LEYRA 连接助手"
- CreateShortcut "$DESKTOP\LEYRA 连接助手.lnk" "$INSTDIR\versions\${VERSION}\LeyraConnect.exe"
- CreateShortcut "$SMPROGRAMS\LEYRA 连接助手\LEYRA 连接助手.lnk" "$INSTDIR\versions\${VERSION}\LeyraConnect.exe"
- CreateShortcut "$SMPROGRAMS\LEYRA 连接助手\网络恢复工具（管理员）.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" '-NoProfile -Command "Start-Process -FilePath $\"$INSTDIR\versions\${VERSION}\Leyra.Agent.exe$\" -ArgumentList $\"--recover$\" -Verb RunAs"'
+ CreateDirectory "$SMPROGRAMS\Leyra"
+ CreateShortcut "$DESKTOP\Leyra.lnk" "$INSTDIR\versions\${VERSION}\LeyraConnect.exe"
+ CreateShortcut "$SMPROGRAMS\Leyra\Leyra.lnk" "$INSTDIR\versions\${VERSION}\LeyraConnect.exe"
+ CreateShortcut "$SMPROGRAMS\Leyra\网络恢复工具（管理员）.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" '-NoProfile -Command "Start-Process -FilePath $\"$INSTDIR\versions\${VERSION}\Leyra.Agent.exe$\" -ArgumentList $\"--recover$\" -Verb RunAs"'
  WriteUninstaller "$INSTDIR\Uninstall.exe"
- WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect" "DisplayName" "LEYRA 连接助手"
+ WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect" "DisplayName" "Leyra"
  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect" "DisplayVersion" "${VERSION}"
  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect" "DisplayIcon" "$INSTDIR\versions\${VERSION}\LeyraConnect.exe"
@@ -108,8 +108,8 @@ Section "Uninstall"
   MessageBox MB_ICONSTOP "网络恢复或后台卸载未完成。程序文件已保留，请先使用网络恢复工具。" /SD IDOK
   Abort
  ${EndIf}
- Delete "$DESKTOP\LEYRA 连接助手.lnk"
- RMDir /r "$SMPROGRAMS\LEYRA 连接助手"
+ Delete "$DESKTOP\Leyra.lnk"
+ RMDir /r "$SMPROGRAMS\Leyra"
  ; Older side-by-side versions left after automatic updates are removed together.
  RMDir /r "$INSTDIR\versions"
  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect"

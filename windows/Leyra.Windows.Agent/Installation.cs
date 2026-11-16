@@ -90,7 +90,7 @@ static class Installation
   try
   {
    var command=existed?"config":"create";
-   if(Sc(command,ServiceName,"binPath=","\""+binary+"\" --service","start=","auto","obj=","LocalSystem","DisplayName=","LEYRA 连接助手后台")!=0)throw new InvalidOperationException("无法注册后台服务");
+   if(Sc(command,ServiceName,"binPath=","\""+binary+"\" --service","start=","auto","obj=","LocalSystem","DisplayName=","Leyra 后台服务")!=0)throw new InvalidOperationException("无法注册后台服务");
    if(Sc("failure",ServiceName,"reset=","86400","actions=","restart/5000/restart/10000/restart/30000")!=0)throw new InvalidOperationException("无法设置后台服务恢复策略");
    if(Sc("start",ServiceName)!=0)throw new InvalidOperationException("后台服务启动失败");
    using var service=new ServiceController(ServiceName);service.WaitForStatus(ServiceControllerStatus.Running,TimeSpan.FromSeconds(20));

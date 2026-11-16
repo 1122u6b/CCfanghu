@@ -1110,7 +1110,7 @@
   /* ---------------- 整页：激活 / 向导 ---------------- */
   function activateScreen() {
     // LEYRA_FREE_SETUP: imports a device connection profile, not a license code.
-    return '<div class="p-full"><div class="p-wordmark" style="margin-bottom:20px"><span class="p-logo" aria-hidden="true"></span>LEYRA</div><div class="p-act"><div class="hx-card"><h1 class="hx-title">连接你的服务器</h1><p class="p-sub">选择管理员提供的服务器连接文件，客户端会校验证书并登记这台设备。</p>' + btn('primary', '导入服务器连接文件', 'connectServer') + '<p class="p-sub">连接文件包含设备凭据，请妥善保管。</p></div></div></div>';
+    return '<div class="p-full"><div class="p-wordmark" style="margin-bottom:20px"><span class="p-logo" aria-hidden="true"></span>Leyra</div><div class="p-act"><div class="hx-card"><h1 class="hx-title">连接你的服务器</h1><p class="p-sub">选择管理员提供的服务器连接文件，客户端会校验证书并登记这台设备。</p>' + btn('primary', '导入服务器连接文件', 'connectServer') + '<p class="p-sub">连接文件包含设备凭据，请妥善保管。</p></div></div></div>';
   }
   function stepper(n) {
     var names = ['时区', '局域网', '安全检查'], heads = ['检查电脑时区', '确认局域网设备', '安全检查'];
@@ -1347,7 +1347,7 @@
   function trayView() {
     if (!S.tray) { fx('tray', ''); return ''; }
     // 免费试用停用：只有到期说明和两个动作（01 §4 第 8 步）
-    if (S.screen === 'trialStopped') return '<div class="p-traypop"><div class="p-menu' + fx('tray', 'open') + '" role="menu" aria-label="LEYRA 状态菜单"><div class="hd neutral"><b><i aria-hidden="true"></i>免费试用已到期</b><span>现在没有保护，电脑照常上网</span></div><hr>' +
+    if (S.screen === 'trialStopped') return '<div class="p-traypop"><div class="p-menu' + fx('tray', 'open') + '" role="menu" aria-label="Leyra 状态菜单"><div class="hd neutral"><b><i aria-hidden="true"></i>免费试用已到期</b><span>现在没有保护，电脑照常上网</span></div><hr>' +
       '<button class="mi" role="menuitem" data-act="buySoft">购买单独软件…</button><button class="mi" role="menuitem" data-act="trialExit">退出软件</button></div></div>';
     var st = S.status, hd, acts = [], unread = unreadMsgs(), renewAct = A.renewOpen ? 'renewOpen' : 'renew';
     var ipLine = cityDot() + IP, line = (curExit() ? esc(curExit().name) + ' · ' : '') + routeName(S.route) + (ROUTES[S.route].ms == null ? '' : ' · ' + ROUTES[S.route].ms + ' ms');
@@ -1367,7 +1367,7 @@
     else if (st === 'starting') { hd = ['neutral', '启动中', '正在建立独享线路']; }
     else { hd = ['neutral', S.ownExit === 'waiting' ? '准备中 · 还没接出口' : '准备中 · 线路开通中', S.prepPaused ? '已先断网，只能访问局域网' : S.ownExit === 'waiting' ? '接上之前网站能看到你的真实 IP' : '开通前网站能看到你的真实 IP']; }
     if (S.busy.tray) hd[2] = S.busy.tray.text;
-    return '<div class="p-traypop"><div class="p-menu' + fx('tray', 'open') + '" role="menu" aria-label="LEYRA 状态菜单"><div class="hd ' + hd[0] + '"><b><i aria-hidden="true"></i>' + hd[1] + '</b><span>' + hd[2] + '</span>' + (st === 'ok' || st === 'starting' ? '<span>' + ipLine + '</span>' : '') + '</div>' +
+    return '<div class="p-traypop"><div class="p-menu' + fx('tray', 'open') + '" role="menu" aria-label="Leyra 状态菜单"><div class="hd ' + hd[0] + '"><b><i aria-hidden="true"></i>' + hd[1] + '</b><span>' + hd[2] + '</span>' + (st === 'ok' || st === 'starting' ? '<span>' + ipLine + '</span>' : '') + '</div>' +
       (acts.length ? '<hr>' + acts.join('') : '') + '<hr>' + mi('消息' + (unread ? ' · ' + unread + ' 条未读' : ''), 'go:messages') + mi('打开主窗口', 'openMain') + '<hr>' + mi('退出（后台继续保护）', 'trayQuit') + mi('彻底退出（会暴露真实 IP）…', 'dialog:quitAll') + '</div></div>';
   }
 
@@ -1391,7 +1391,7 @@
     if (!S.notes.length || S.tray) return '';
     return '<div class="p-notes" aria-live="polite">' + S.notes.map(function (n) {
       var N = NOTES[n.kind];
-      return '<div class="p-note' + fx('note' + n.id, 'on') + '" role="status"><div class="app">' + I('shield', 16) + '<span>LEYRA</span><button class="hx-icon-btn" aria-label="关闭通知" data-act="noteClose:' + n.id + '">' + I('close', 16) + '</button></div>' +
+      return '<div class="p-note' + fx('note' + n.id, 'on') + '" role="status"><div class="app">' + I('shield', 16) + '<span>Leyra</span><button class="hx-icon-btn" aria-label="关闭通知" data-act="noteClose:' + n.id + '">' + I('close', 16) + '</button></div>' +
         '<div class="bd"><b>' + N.title + '</b><p>' + N.body + '</p></div><div class="acts">' + N.btns.map(function (b) { return btn(b[0], b[1], 'noteDo:' + n.id + ':' + b[2]); }).join('') + '</div></div>';
     }).join('') + '</div>';
   }
@@ -1516,9 +1516,9 @@
     var trayCls = trayIconCls();
     var html =
       trayView() +
-      '<div class="p-desk"><div class="p-stage"><div class="hx-win win11 p-win" role="application" aria-label="LEYRA 主窗口"' + winStyle() + '><div class="w11-bar"><span class="ttl">LEYRA</span>' + '<div class="w11-caps" aria-hidden="true"><span>' + capIcon('min') + '</span><span>' + capIcon('max') + '</span><span class="cls">' + capIcon('close') + '</span></div>' + '</div>' +
+      '<div class="p-desk"><div class="p-stage"><div class="hx-win win11 p-win" role="application" aria-label="Leyra 主窗口"' + winStyle() + '><div class="w11-bar"><span class="ttl">Leyra</span>' + '<div class="w11-caps" aria-hidden="true"><span>' + capIcon('min') + '</span><span>' + capIcon('max') + '</span><span class="cls">' + capIcon('close') + '</span></div>' + '</div>' +
       bodyView() + (consentGate() ? '' : dialogView()) + (needConsent() ? '' : popupView()) + toastView() + lightboxView() + ctxView() + '</div></div>' + demoView() + '</div>' + rescueView() + notesView() +
-      '<div class="p-taskbar" role="toolbar" aria-label="任务栏"><span class="tb-more" aria-hidden="true">' + I('chevron', 16) + '</span><button class="hx-trayicon ' + trayCls + '" aria-label="LEYRA 托盘图标" aria-expanded="' + S.tray + '" data-act="trayToggle">' + TRAY_SVG[trayKind()] + (redDot() ? '<span class="p-reddot" aria-hidden="true"></span>' : '') + '</button><span class="tb-clock"><span data-clock>' + hhmm(new Date()) + '</span><span data-date>' + ymd(new Date()) + '</span></span></div>';
+      '<div class="p-taskbar" role="toolbar" aria-label="任务栏"><span class="tb-more" aria-hidden="true">' + I('chevron', 16) + '</span><button class="hx-trayicon ' + trayCls + '" aria-label="Leyra 托盘图标" aria-expanded="' + S.tray + '" data-act="trayToggle">' + TRAY_SVG[trayKind()] + (redDot() ? '<span class="p-reddot" aria-hidden="true"></span>' : '') + '</button><span class="tb-clock"><span data-clock>' + hhmm(new Date()) + '</span><span data-date>' + ymd(new Date()) + '</span></span></div>';
     lastKeys = nextKeys;
     var commit = function () {
     if (seq !== renderSeq) return;

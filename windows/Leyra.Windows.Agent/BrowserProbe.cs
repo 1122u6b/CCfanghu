@@ -54,7 +54,7 @@ sealed class BrowserProbe(Action<string,string?,IReadOnlyList<(string Ip,string 
   var path=line[1];var parts=path.Split('/',StringSplitOptions.RemoveEmptyEntries);
   if(parts.Length<2||parts[0]!="probe"||parts[1].Length!=32){await Reply(stream,404,"text/plain","not found",deadline.Token);return;}
   string browser;lock(pending){if(!pending.TryGetValue(parts[1],out var p)||p.Expires<DateTimeOffset.UtcNow){browser="";}else browser=p.Browser;}
-  if(browser.Length==0){await Reply(stream,410,"text/html; charset=utf-8",Page("这个检查链接已失效，请回到 LEYRA 再点一次「检查」。",""),deadline.Token);return;}
+  if(browser.Length==0){await Reply(stream,410,"text/html; charset=utf-8",Page("这个检查链接已失效，请回到 Leyra 再点一次「检查」。",""),deadline.Token);return;}
   if(line[0]=="GET"&&parts.Length==2){await Reply(stream,200,"text/html; charset=utf-8",Page("",parts[1]),deadline.Token);return;}
   if(line[0]=="POST"&&parts.Length==3&&parts[2]=="result")
   {
@@ -84,19 +84,19 @@ sealed class BrowserProbe(Action<string,string?,IReadOnlyList<(string Ip,string 
   await stream.WriteAsync(Encoding.ASCII.GetBytes(head),token);await stream.WriteAsync(bytes,token);
  }
  static string Page(string error,string nonce)=>"""
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>LEYRA 浏览器检查</title>
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Leyra 浏览器检查</title>
 <style>body{font:15px/1.6 system-ui,"Microsoft YaHei",sans-serif;max-width:560px;margin:12vh auto;padding:0 16px;color:#222}h1{font-size:20px}.ok{color:#137333}.muted{color:#666}</style>
-<h1>LEYRA 浏览器检查</h1><p id="s">
+<h1>Leyra 浏览器检查</h1><p id="s">
 """ + (error.Length>0?error+"</p>":"""
-正在检查这个浏览器会不会绕开独享线路……</p><p class="muted">只收集这个浏览器的网络地址候选，检查完会自动回传给 LEYRA，可以关掉这个页面。</p>
+正在检查这个浏览器会不会绕开独享线路……</p><p class="muted">只收集这个浏览器的网络地址候选，检查完会自动回传给 Leyra，可以关掉这个页面。</p>
 <script>
 (function(){
  var nonce=__NONCE__,cands=[],seen=null,sent=false;
  function send(){
   if(sent)return;sent=true;
   fetch('/probe/'+nonce+'/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seen_ip:seen,candidates:cands})})
-   .then(function(){document.getElementById('s').innerHTML='<b class="ok">检查完成</b>，请回到 LEYRA 查看结果。这个页面可以关掉了。';})
-   .catch(function(){document.getElementById('s').textContent='没能把结果交回 LEYRA，请回到 LEYRA 再查一次。';});
+   .then(function(){document.getElementById('s').innerHTML='<b class="ok">检查完成</b>，请回到 Leyra 查看结果。这个页面可以关掉了。';})
+   .catch(function(){document.getElementById('s').textContent='没能把结果交回 Leyra，请回到 Leyra 再查一次。';});
  }
  var ipDone=fetch('https://api64.ipify.org?format=json').then(function(r){return r.json();}).then(function(j){seen=j.ip;}).catch(function(){});
  var iceDone=new Promise(function(resolve){

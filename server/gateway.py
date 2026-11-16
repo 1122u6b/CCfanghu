@@ -106,6 +106,8 @@ class Gateway:
         from upstream_kernel import KernelUpstreams,find_binary
         binary=config.get('kernel_binary') or find_binary()
         self.kernel=KernelUpstreams(Path(self.management.root)/'upstream-kernel',Path(binary) if binary else None)
+        from website import Site
+        self.site=Site(self)
     def upstreams(self,management=None):
         selected=(management or self.management).selected_upstream()
         if selected:return [validate_node(x) for x in selected]
@@ -197,6 +199,12 @@ class Gateway:
                 request=json.loads(await asyncio.wait_for(r.readexactly(n),60))
                 if is_admin and isinstance(request,dict) and request.get('type') in ('create_device_profile','rotate_device_profile'):
                     return await self.response(w,200,self.device_profile(request))
+                if is_admin and isinstance(request,dict) and request.get('type')=='customers':
+                    return await self.response(w,200,self.site.customers.admin_list())
+                if is_admin and isinstance(request,dict) and request.get('type')=='customer_update':
+                    from customers import CustomerError
+                    try:return await self.response(w,200,self.site.customers.admin_update(request.get('id',0),self.devices,request.get('status'),request.get('max_devices'),request.get('note')))
+                    except CustomerError as e:raise ManagementError(str(e)) from None
                 call=(lambda:self.devices.rpc(self.management,request)) if is_admin else (lambda:self.devices.device_rpc(self.management,device,request))
                 # Subscription imports fetch from the internet; keep the event loop free meanwhile.
                 result=await asyncio.to_thread(call) if isinstance(request,dict) and request.get('type')=='import_exit_links' else call()
@@ -217,11 +225,13 @@ class Gateway:
             with os.fdopen(fd,'w') as f:json.dump(up,f)
             os.replace(temp,dest);self.management.clear_selection();return await self.response(w,200,{'saved':True})
         return await self.response(w,404,{'error':'not found'})
+    def profile_for(self,issued):
+        # The customer's connection file: device credentials only, never the owner token.
+        return {'leyra_server':{'host':self.config['public_host'],'port':int(self.config['port']),'token':issued['token'],
+                'certificate':Path(self.config['cert']).read_text(),'fingerprint':self.config['fingerprint'],'role':'device','device_id':issued['id']}}
     def device_profile(self,request):
-        # Builds the customer's connection file: device credentials only, never the owner token.
         issued=self.devices.issue(request.get('name')) if request['type']=='create_device_profile' else self.devices.rotate(request.get('id'))
-        return {'id':issued['id'],'profile':{'leyra_server':{'host':self.config['public_host'],'port':int(self.config['port']),'token':issued['token'],
-                'certificate':Path(self.config['cert']).read_text(),'fingerprint':self.config['fingerprint'],'role':'device','device_id':issued['id']}}}
+        return {'id':issued['id'],'profile':self.profile_for(issued)}
     async def admin_page(self,w):
         page=Path(__file__).with_name('admin.html')
         data=page.read_bytes() if page.is_file() else b'admin page missing'
@@ -290,6 +300,9 @@ class Gateway:
             try:await self.kernel.preload(self.kernel_exits())
             except Exception as e:print('kernel preload skipped: '+type(e).__name__,flush=True)
         asyncio.get_running_loop().create_task(preload())
+        if self.config.get('site_port'):
+            # Website for the domain; loopback only, Caddy provides HTTPS in front of it.
+            self.site_server=await asyncio.start_server(self.site.handle,'127.0.0.1',int(self.config['site_port']),limit=16384)
         return await asyncio.start_server(self.handle,self.config.get('listen','0.0.0.0'),int(self.config['port']),ssl=context,ssl_handshake_timeout=10,limit=16384)
 async def main(path):
     g=Gateway(json.loads(Path(path).read_text()));server=await g.start()

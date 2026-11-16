@@ -89,3 +89,21 @@ class ExistingStoreTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CaddyWebsiteTests(unittest.TestCase):
+    def test_merge_keeps_other_sites_and_is_idempotent(self):
+        merge_caddyfile, CADDY_BEGIN = installer.merge_caddyfile, installer.CADDY_BEGIN
+        original = 'api.leyra.xin {\n\treverse_proxy /api/* https://127.0.0.1:24443\n}\n'
+        merged = merge_caddyfile(original, 24480)
+        self.assertTrue(merged.startswith(original.rstrip('\n')))
+        self.assertIn('leyra.xin, www.leyra.xin {', merged); self.assertIn('reverse_proxy 127.0.0.1:24480', merged)
+        self.assertEqual(merge_caddyfile(merged, 24480), merged)
+        self.assertEqual(merged.count(CADDY_BEGIN), 1)
+
+    def test_existing_domain_block_is_never_overwritten(self):
+        merge_caddyfile = installer.merge_caddyfile
+        with self.assertRaises(ValueError):
+            merge_caddyfile('leyra.xin {\n\troot * /srv\n}\n', 24480)
+        # A different subdomain is not a conflict.
+        self.assertIn('leyra.xin, www', merge_caddyfile('api.leyra.xin {\n}\n', 24480))

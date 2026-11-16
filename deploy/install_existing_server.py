@@ -94,6 +94,55 @@ def validate_existing_data(data,owner,infrastructure):
  previous=json.loads(row[0])
  if any(previous.get(k)!=infrastructure.get(k) for k in ('zone','answer_ip','resolver_url')):raise ValueError('existing_store_infrastructure_mismatch')
 
+SITE_PORT=24480
+SITE_DOMAINS=('leyra.xin','www.leyra.xin')
+CADDY_BEGIN='# BEGIN LEYRA WEBSITE (managed by deploy/install_existing_server.py)'
+CADDY_END='# END LEYRA WEBSITE'
+
+def caddy_block(port):
+ return CADDY_BEGIN+'\n'+', '.join(SITE_DOMAINS)+' {\n\tencode gzip\n\treverse_proxy 127.0.0.1:'+str(port)+'\n}\n'+CADDY_END+'\n'
+
+def merge_caddyfile(text,port):
+ # Replace only our own marked block; every other site stays byte-for-byte unchanged.
+ if CADDY_BEGIN in text and CADDY_END in text:
+  head,_,rest=text.partition(CADDY_BEGIN);_,_,tail=rest.partition(CADDY_END)
+  text=head.rstrip('\n')+'\n'+tail.lstrip('\n')
+ for domain in SITE_DOMAINS:
+  for line in text.splitlines():
+   names=[x.strip().rstrip('{').strip() for x in line.split(',')]
+   if line.strip().endswith('{') and any(n in (domain,'https://'+domain,'http://'+domain,domain+':443') for n in names):
+    raise ValueError('domain_already_configured')
+ return text.rstrip('\n')+'\n\n'+caddy_block(port)
+
+def configure_caddy(port):
+ """Point leyra.xin at the website. Returns a fixed status word; Caddy is restored on any failure."""
+ try:
+  if systemctl('is-active','caddy.service')!='active':return 'NO_CADDY'
+  command=systemctl('show','caddy.service','--property=ExecStart','--value')
+  argv=command.split('argv[]=',1)[1].split(';',1)[0].split() if 'argv[]=' in command else command.split()
+  binary=argv[0];config=Path(argv[argv.index('--config')+1]) if '--config' in argv else Path('/etc/caddy/Caddyfile')
+  adapter=argv[argv.index('--adapter')+1] if '--adapter' in argv else ('caddyfile' if config.name.lower().startswith('caddyfile') else '')
+  if adapter!='caddyfile' or not config.is_file() or config.is_symlink():return 'NO_CADDYFILE'
+  original=config.read_text()
+  merged=merge_caddyfile(original,port)
+  if merged==original:return 'YES'
+  candidate=config.with_name(config.name+'.leyra-candidate')
+  candidate.write_text(merged);os.chmod(candidate,config.stat().st_mode&0o777)
+  try:
+   check=subprocess.run([binary,'validate','--config',str(candidate),'--adapter','caddyfile'],capture_output=True,timeout=60)
+   if check.returncode!=0:return 'NO_VALIDATION'
+   backup=config.with_name(config.name+'.before-leyra-'+time.strftime('%Y%m%d-%H%M%S'))
+   shutil.copy2(config,backup);os.replace(candidate,config)
+   try:systemctl('reload','caddy.service')
+   except Exception:
+    shutil.copy2(backup,config);systemctl('reload','caddy.service');return 'NO_RELOAD_RESTORED'
+   return 'YES'
+  finally:candidate.unlink(missing_ok=True)
+ except ValueError as error:
+  return 'NO_'+str(error).upper() if str(error).replace('_','').isalpha() else 'NO_ERROR'
+ except Exception:
+  return 'NO_ERROR'
+
 def install_kernel(release):
  # Official Mihomo for ss/vmess/vless/trojan/hysteria2/tuic exits. Without it the gateway
  # still serves SOCKS5/HTTP exits and reports kernel exits as unavailable.
@@ -111,7 +160,7 @@ def install(address):
  if os.geteuid()!=0:raise PermissionError('Run this installer as root on the existing server')
  if not ipaddress.ip_address(address).is_global:raise ValueError('A public literal server IP is required')
  source=Path(__file__).resolve().parents[1]/'server'
- files=['gateway.py','management.py','devices.py','dns_probe.py','ai_login.py','verify_live.py','admin.py','links.py','upstream_kernel.py','admin.html']
+ files=['gateway.py','management.py','devices.py','dns_probe.py','ai_login.py','verify_live.py','admin.py','links.py','upstream_kernel.py','admin.html','website.py','customers.py','site/index.html','site/favicon.svg']
  for name in files:
   if name.endswith('.py'):compile((source/name).read_bytes(),name,'exec')
  records={service:read_service(service,entry) for service,entry in SERVICES.items()}
@@ -134,10 +183,12 @@ def install(address):
   if candidate.is_symlink():raise ValueError('Linked deployment path refused')
  release.mkdir(parents=True,mode=0o755);data.mkdir(mode=0o700,exist_ok=True)
  for candidate in [Path('/opt/leyra-connect'),Path('/opt/leyra-connect/releases'),release]:os.chmod(candidate,0o755)
+ (release/'site').mkdir(mode=0o755,exist_ok=True)
  for name in files:shutil.copy2(source/name,release/name);os.chmod(release/name,0o644)
- install_kernel(release)
+ kernel_ready=install_kernel(release)
  upgrading=Path(gateway.get('data_dir','/nonexistent')).resolve()==data
  gateway.update(data_dir=str(data),public_host=address,fingerprint=fingerprint)
+ gateway.setdefault('site_port',SITE_PORT)
  if not upgrading:gateway.update(api_token=secrets.token_urlsafe(48),client_user='owner',client_password=secrets.token_urlsafe(48))
  dns['data_dir']=str(data);infrastructure['resolver_ip']=address
  sys.path.insert(0,str(release));from management import Management
@@ -170,6 +221,8 @@ def install(address):
   print('Gateway and DNS services upgraded; authenticated local TLS check passed.')
   print('Private owner connection file: /root/leyra-server-connection.json')
   print('Public domain routing, device DoH, Windows TUN and end-to-end acceptance still require validation.')
+  website=configure_caddy(int(gateway['site_port']))
+  return {'kernel':kernel_ready,'website':website}
  except BaseException:
   restore_services(overrides,changed)
   print('Upgrade failed; previous service commands restored. New private data retained for diagnosis.',file=sys.stderr)

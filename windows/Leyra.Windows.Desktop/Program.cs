@@ -18,7 +18,7 @@ static class Program
  {
   ApplicationConfiguration.Initialize();
   Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-  Application.ThreadException+=(_,e)=>MessageBox.Show(e.Exception.Message,"LEYRA",MessageBoxButtons.OK,MessageBoxIcon.Error);
+  Application.ThreadException+=(_,e)=>MessageBox.Show(e.Exception.Message,"Leyra",MessageBoxButtons.OK,MessageBoxIcon.Error);
   Application.Run(new MainWindow());
  }
 }
@@ -28,14 +28,14 @@ sealed class MainWindow:Form
  const string Origin="https://app.leyra.local";
  readonly WebView2 browser=new(){Dock=DockStyle.Fill};
  readonly ConcurrentQueue<string> trayActions=new();
- readonly NotifyIcon tray=new(){Icon=SystemIcons.Shield,Text="LEYRA 连接助手",Visible=true};
+ readonly NotifyIcon tray=new(){Icon=SystemIcons.Shield,Text="Leyra",Visible=true};
  readonly SemaphoreSlim requests=new(4,4);
  string? ownerProof;int authenticating;
  bool quitting;
  public MainWindow()
  {
   Icon=Icon.ExtractAssociatedIcon(Environment.ProcessPath!)??SystemIcons.Shield;tray.Icon=Icon;
-  Text="LEYRA 连接助手";Width=1120;Height=820;MinimumSize=new Size(900,650);StartPosition=FormStartPosition.CenterScreen;
+  Text="Leyra";Width=1120;Height=820;MinimumSize=new Size(900,650);StartPosition=FormStartPosition.CenterScreen;
   Controls.Add(browser);
   var menu=new ContextMenuStrip();
   menu.Items.Add("打开主窗口",null,(_,_)=>ShowMain());
@@ -68,7 +68,7 @@ sealed class MainWindow:Form
   }
   catch(Exception e)
   {
-   MessageBox.Show("客户端界面无法启动："+e.Message+"\n请确认 Microsoft Edge WebView2 Runtime 已安装。","LEYRA",MessageBoxButtons.OK,MessageBoxIcon.Error);
+   MessageBox.Show("客户端界面无法启动："+e.Message+"\n请确认 Microsoft Edge WebView2 Runtime 已安装。","Leyra",MessageBoxButtons.OK,MessageBoxIcon.Error);
    Quit();
   }
  }
@@ -197,7 +197,7 @@ sealed class MainWindow:Form
  }
  void UpdateTray(JsonElement state)
  {
-  var tooltip=TextField(state,"tooltip",63);tray.Text=tooltip.Length>0?tooltip:"LEYRA 连接助手";
+  var tooltip=TextField(state,"tooltip",63);tray.Text=tooltip.Length>0?tooltip:"Leyra";
   if(tray.ContextMenuStrip?.Visible==true)return;
   var menu=new ContextMenuStrip();
   void Add(string label,string action)=>menu.Items.Add(label,null,(_,_)=>{ShowMain();trayActions.Enqueue(action);});

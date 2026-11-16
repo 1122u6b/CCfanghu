@@ -22,7 +22,7 @@ public static class NativeCredentials
  static extern bool LogonUser(IntPtr user,IntPtr domain,IntPtr password,int type,int provider,out SafeAccessTokenHandle token);
  public static byte[] Prompt(IntPtr parent,string message)
  {
-  var info=new Info{Size=Marshal.SizeOf<Info>(),Parent=parent,Caption="LEYRA · 验证电脑账户",Message=message+"\n请输入 Windows 账户密码，不是 PIN。"};
+  var info=new Info{Size=Marshal.SizeOf<Info>(),Parent=parent,Caption="Leyra · 验证电脑账户",Message=message+"\n请输入 Windows 账户密码，不是 PIN。"};
   uint package=0;bool save=false;IntPtr output=IntPtr.Zero;uint size=0;
   try
   {

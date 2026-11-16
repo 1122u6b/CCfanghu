@@ -199,7 +199,7 @@ def main(argv=None):
         offset = 0
         with open(path, 'rb') as f:
             while True:
-                chunk = f.read(65536)
+                chunk = f.read(786432)
                 if not chunk:
                     break
                 for attempt in range(4):
