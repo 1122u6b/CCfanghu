@@ -78,9 +78,17 @@ static class Installation
    }
   }
  }
- public static void Install()
+ static void ClearData()
  {
-  Admin();SecureInstallation();AgentStore.VerifyDataPath();var owner=File.Exists(Path.Combine(AgentStore.Root,"owner.sid"))?new SecurityIdentifier(File.ReadAllText(Path.Combine(AgentStore.Root,"owner.sid")).Trim()):InteractiveOwner();
+  // Only our own verified data folder (owned by SYSTEM/Administrators, no links) is removed.
+  AgentStore.VerifyDataPath();
+  if(Directory.Exists(AgentStore.Root))Directory.Delete(AgentStore.Root,true);
+ }
+ public static void Install(bool reset)
+ {
+  Admin();SecureInstallation();
+  if(reset&&!Exists())ClearData();
+  AgentStore.VerifyDataPath();var owner=File.Exists(Path.Combine(AgentStore.Root,"owner.sid"))?new SecurityIdentifier(File.ReadAllText(Path.Combine(AgentStore.Root,"owner.sid")).Trim()):InteractiveOwner();
   AgentStore.Initialize(owner);
   var binary=Path.GetFullPath(Environment.ProcessPath??throw new InvalidOperationException("安装程序路径无效"));
   var existed=Exists();string? old=null;
@@ -131,5 +139,10 @@ static class Installation
    try{Directory.Delete(directory,true);}catch(Exception e)when(e is IOException or UnauthorizedAccessException){}
   }
  }
- public static void RemoveService(){Admin();Stop();BrowserPolicies.Restore();if(Exists()&&Sc("delete",ServiceName)!=0)throw new InvalidOperationException("无法卸载后台服务");}
+ public static void RemoveService()
+ {
+  Admin();Stop();BrowserPolicies.Restore();if(Exists()&&Sc("delete",ServiceName)!=0)throw new InvalidOperationException("无法卸载后台服务");
+  // Uninstalling forgets this computer's activation; reinstalling with the same code restores it.
+  try{ClearData();}catch(Exception e)when(e is IOException or UnauthorizedAccessException){}
+ }
 }

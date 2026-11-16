@@ -113,6 +113,9 @@ jobs:
         shell: pwsh
         run: |
           $setup = Get-ChildItem artifacts/Leyra-*-setup.exe | Select-Object -First 1
+          # Leftover activation from an earlier, uninstalled version must not survive a fresh install.
+          New-Item -ItemType Directory -Force "$env:ProgramData\LeyraConnect" | Out-Null
+          Set-Content "$env:ProgramData\LeyraConnect\device-profile.json" '{"stale":true}'
           # Custom location, as a user would pick on the folder page.
           $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S','/D=C:\Apps\Leyra' -Wait -PassThru
           $log = Join-Path $env:TEMP 'LEYRAConnect-setup.log'
@@ -134,6 +137,7 @@ jobs:
           if ($svc.Status -ne 'Running') { throw 'Background service is not running' }
           if ($svc.StartType -ne 'Automatic') { throw 'Background service is not set to start automatically' }
           if (-not (Test-Path "$env:ProgramData\LeyraConnect\owner.sid")) { throw 'Runtime data directory not initialized' }
+          if (Test-Path "$env:ProgramData\LeyraConnect\device-profile.json") { throw 'Stale activation survived a fresh install' }
           Write-Host 'LEYRA_INSTALL_CHECK=PASS'
       - name: Silent uninstall and verify cleanup
         if: always()
@@ -146,6 +150,7 @@ jobs:
           }
           if (Get-Service LeyraConnect -ErrorAction SilentlyContinue) { throw 'Service still registered after uninstall' }
           if (Test-Path "$root\versions") { throw 'Program files left after uninstall' }
+          if (Test-Path "$env:ProgramData\LeyraConnect") { throw 'Activation data left after uninstall' }
           Write-Host 'LEYRA_UNINSTALL_CHECK=PASS'
       - name: Upload installer for download
         uses: actions/upload-artifact@v4

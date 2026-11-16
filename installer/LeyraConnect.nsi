@@ -38,6 +38,7 @@ ShowUninstDetails show
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "SimpChinese"
 Var Result
+Var Upgrade
 ; Each helper step's exit code and output go to %TEMP%\LEYRAConnect-setup.log, so a
 ; failed silent install (automatic update) can be diagnosed afterwards.
 Function RunLogged
@@ -57,6 +58,7 @@ Function .onInit
  SetRegView 64
  InitPluginsDir
  ; Updates and reinstalls go back to the folder the user chose the first time.
+ ReadRegStr $Upgrade HKLM "${UNINSTALL_KEY}" "UninstallString"
  ReadRegStr $R0 HKLM "${UNINSTALL_KEY}" "InstallLocation"
  ${If} $R0 == ""
   ReadRegStr $R0 HKLM "${UNINSTALL_KEY}" "UninstallString"
@@ -106,7 +108,12 @@ Section "安装" SEC_MAIN
  File /r "${PAYLOAD}\*"
  DetailPrint "正在注册后台服务……"
  StrCpy $0 "service-install"
- StrCpy $1 '"$INSTDIR\versions\${VERSION}\Leyra.Agent.exe" --install'
+ ${If} $Upgrade == ""
+  ; Nothing installed before: start clean so the activation page appears.
+  StrCpy $1 '"$INSTDIR\versions\${VERSION}\Leyra.Agent.exe" --install --reset'
+ ${Else}
+  StrCpy $1 '"$INSTDIR\versions\${VERSION}\Leyra.Agent.exe" --install'
+ ${EndIf}
  Call RunLogged
  ${If} $Result != 0
   MessageBox MB_ICONSTOP "后台服务安装未完成，请保留安装详情。此安装不会创建可用状态的快捷方式。" /SD IDOK

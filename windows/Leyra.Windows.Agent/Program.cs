@@ -18,7 +18,9 @@ static class Program
     if(!WindowsIdentity.GetCurrent().IsSystem)throw new UnauthorizedAccessException("后台服务必须由 Windows 服务管理器以系统身份启动");
     ServiceBase.Run(new AgentService());return 0;
    }
-   if(args.SequenceEqual(new[]{"--install"})){Installation.Install();return 0;}
+   if(args.SequenceEqual(new[]{"--install"})){Installation.Install(false);return 0;}
+   // Fresh install (nothing installed before): forget activation data left by an earlier installation.
+   if(args.SequenceEqual(new[]{"--install","--reset"})){Installation.Install(true);return 0;}
    if(args.SequenceEqual(new[]{"--recover"})){Installation.Recover();return 0;}
    if(args.SequenceEqual(new[]{"--remove-service"})){Installation.Recover();Installation.RemoveService();return 0;}
    Console.Error.WriteLine("Use the installed desktop application or network recovery shortcut.");return 11;
