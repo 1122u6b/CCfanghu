@@ -275,18 +275,18 @@
   var bypassShown = '';
   function applyBypass(st) {
     var c = (st.checks || []).filter(function (x) { return x.id === 'L8' && (x.verdict === 'fail' || x.verdict === 'warn'); })[0];
-    if (!c) { bypassShown = ''; return; }
+    if (!c) return;
     var who = (c.detail || '').split('：').slice(1).join('：').replace(/（\d+ 条）/g, '');
-    var key = c.verdict + ':' + who;
-    if (key === bypassShown) return;
-    bypassShown = key;
+    // 同一批软件一天只弹一次（状态短暂变化也不重复弹，不反复把窗口叫到前面）。
+    var key = c.verdict + ':' + who.split('、').sort().join('、') + ':' + new Date().toDateString();
+    if (key === bypassShown || popped.indexOf(key) >= 0) return;
+    bypassShown = key; popped.push(key); store('cc.popped', popped.slice(-200));
     var bad = c.verdict === 'fail';
     var title = bad ? '有软件绕过了保护，没能切断' : '有软件绕过了保护';
     var body = bad ? who + ' 正在绕过独享线路，可能暴露真实 IP，没能切断。请先退出它，不要访问重要网站。已通知客服。'
       : who + ' 绕过了独享线路，已被切断。它可能用了你的真实 IP，建议退出这个软件。';
     notifyOnce('bypass.' + key + '.' + new Date().toDateString(), title, body);
     P.showPopup({ id: 'bypass.' + key, lv: 'action', title: title, body: body });
-    if (bad) T.core.invoke('show_window').catch(function () {});
   }
 
   // 有网络过滤排在防护前面（docs/03 E6）：装机后一直在的，只在第一次发现时弹，换了内容再弹。
