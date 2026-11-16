@@ -2,6 +2,9 @@
 import importlib.util
 import tempfile
 import unittest
+import json
+import os
+import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 
@@ -61,6 +64,27 @@ class RollbackTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'service_rollback_incomplete'):
                 installer.restore_services({}, [])
         self.assertIn(('restart', 'leyra-server.service'), calls)
+
+
+class ExistingStoreTests(unittest.TestCase):
+    def test_retry_preserves_existing_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            dns={'zone':'fixture.test','answer_ip':'192.0.2.1','resolver_url':'https://fixture.test/private-dns/fixture'}
+            with sqlite3.connect(root/'management.sqlite3') as db:
+                db.execute('CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT)')
+                db.execute('INSERT INTO settings VALUES (?,?)',('dns',json.dumps(dns)))
+                db.execute('INSERT INTO settings VALUES (?,?)',('customer-record','preserve-me'))
+            installer.validate_existing_data(root,os.getuid(),dns)
+            with sqlite3.connect(root/'management.sqlite3') as db:
+                self.assertEqual(db.execute("SELECT value FROM settings WHERE key='customer-record'").fetchone()[0],'preserve-me')
+            with self.assertRaisesRegex(ValueError,'mismatch'):
+                installer.validate_existing_data(root,os.getuid(),{**dns,'zone':'different.test'})
+
+    def test_unknown_directory_is_not_adopted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError,'unrecognized'):
+                installer.validate_existing_data(Path(tmp),os.getuid(),{})
 
 
 if __name__ == '__main__':

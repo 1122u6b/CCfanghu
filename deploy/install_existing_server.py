@@ -6,7 +6,7 @@ Never prints credentials; exports an owner connection file with mode 0600.
 import argparse,hashlib,http.client,ipaddress,json,os,secrets,shlex,shutil,signal,socket,sqlite3,ssl,subprocess,sys,time
 from pathlib import Path
 SERVICES={'leyra-server.service':'gateway.py','leyra-dns.service':'dns_probe.py'}
-def systemctl(*args):return subprocess.run(['systemctl',*args],check=True,capture_output=True,text=True).stdout.strip()
+def systemctl(*args):return subprocess.run(['systemctl',*args],check=True,capture_output=True,text=True,timeout=40).stdout.strip()
 def atomic(path,data,mode=0o600):
  path.parent.mkdir(parents=True,exist_ok=True,mode=0o700);temp=path.with_name(path.name+'.new-'+secrets.token_hex(8))
  with temp.open('xb') as f:os.chmod(temp,mode);f.write(data);f.flush();os.fsync(f.fileno())
@@ -81,6 +81,19 @@ def restore_services(overrides,changed):
   except Exception as error:errors.append(error)
  if errors:raise RuntimeError('service_rollback_incomplete') from None
 
+def validate_existing_data(data,owner,infrastructure):
+ # Retry/upgrade only our recognized store. Never erase or import historical data.
+ if not data.is_dir() or data.is_symlink() or data.stat().st_uid!=owner:raise ValueError('unrecognized_existing_store')
+ if any(item.is_symlink() for item in data.rglob('*')):raise ValueError('linked_existing_store')
+ database=data/'management.sqlite3'
+ if not database.is_file():raise ValueError('unrecognized_existing_store')
+ with sqlite3.connect(database.as_uri()+'?mode=ro',uri=True) as db:
+  if db.execute('PRAGMA quick_check').fetchone()[0]!='ok':raise ValueError('existing_store_corrupt')
+  row=db.execute("SELECT value FROM settings WHERE key='dns'").fetchone()
+ if not row:raise ValueError('existing_store_dns_missing')
+ previous=json.loads(row[0])
+ if any(previous.get(k)!=infrastructure.get(k) for k in ('zone','answer_ip','resolver_url')):raise ValueError('existing_store_infrastructure_mismatch')
+
 def install(address):
  if os.geteuid()!=0:raise PermissionError('Run this installer as root on the existing server')
  if not ipaddress.ip_address(address).is_global:raise ValueError('A public literal server IP is required')
@@ -102,13 +115,15 @@ def install(address):
  subprocess.run(['openssl','x509','-in',gateway['cert'],'-noout','-checkend','86400'],check=True,capture_output=True)
  if dns.get('zone')!=infrastructure['zone']:raise ValueError('Existing authoritative DNS zone differs from private DNS settings')
  stamp=time.strftime('%Y%m%d-%H%M%S',time.gmtime());release=Path('/opt/leyra-connect/releases')/stamp;data=Path('/var/lib/leyra-connect')
- if data.exists():raise ValueError('Fresh data directory already exists; refusing to overwrite or reset it')
+ if data.exists():validate_existing_data(data,owner,infrastructure)
  for candidate in [Path('/opt/leyra-connect'),Path('/opt/leyra-connect/releases'),release,data]:
   if candidate.is_symlink():raise ValueError('Linked deployment path refused')
- release.mkdir(parents=True,mode=0o755);data.mkdir(mode=0o700)
+ release.mkdir(parents=True,mode=0o755);data.mkdir(mode=0o700,exist_ok=True)
  for candidate in [Path('/opt/leyra-connect'),Path('/opt/leyra-connect/releases'),release]:os.chmod(candidate,0o755)
  for name in files:shutil.copy2(source/name,release/name);os.chmod(release/name,0o644)
- gateway.update(data_dir=str(data),public_host=address,fingerprint=fingerprint,api_token=secrets.token_urlsafe(48),client_user='owner',client_password=secrets.token_urlsafe(48))
+ upgrading=Path(gateway.get('data_dir','/nonexistent')).resolve()==data
+ gateway.update(data_dir=str(data),public_host=address,fingerprint=fingerprint)
+ if not upgrading:gateway.update(api_token=secrets.token_urlsafe(48),client_user='owner',client_password=secrets.token_urlsafe(48))
  dns['data_dir']=str(data);infrastructure['resolver_ip']=address
  sys.path.insert(0,str(release));from management import Management
  Management(data).configure_dns(infrastructure)
