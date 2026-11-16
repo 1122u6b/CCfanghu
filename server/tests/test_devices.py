@@ -20,6 +20,7 @@ class MemoryWriter:
     async def drain(self): pass
     def close(self): self.closed = True
     async def wait_closed(self): pass
+    def get_extra_info(self,key): return ('198.51.100.9',54321) if key=='peername' else None
 
 
 class DeviceTests(unittest.TestCase):
@@ -140,6 +141,11 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(body['license_required'])
         self.assertNotIn('owner-pass', json.dumps(body))
         self.assertEqual((await self.request('GET', '/api/v1/config', 'invalid'))[0], 401)
+
+    async def test_egress_probe_requires_device_auth_and_reports_only_connection_source(self):
+        code,body=await self.request('GET','/api/v1/egress-probe',self.dev['token'])
+        self.assertEqual(code,200);self.assertEqual(body['observed_source'],'198.51.100.9')
+        self.assertEqual((await self.request('GET','/api/v1/egress-probe','invalid'))[0],401)
 
     async def test_admin_route_not_callable_by_device(self):
         code, body = await self.request('POST', '/api/v1/rpc', self.dev['token'], {'type': 'create_device', 'name': 'intrusion'})

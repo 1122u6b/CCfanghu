@@ -10,18 +10,18 @@ public sealed class PrivateServerClient : IDisposable
     readonly HttpClient http;
     readonly ServerProfile profile;
     readonly TimeSpan timeout;
-    public PrivateServerClient(ServerProfile profile,TimeSpan? requestTimeout=null)
+    public PrivateServerClient(ServerProfile profile,TimeSpan? requestTimeout=null,bool throughLocalProxy=false)
     {
         this.profile=profile;timeout=requestTimeout??TimeSpan.FromSeconds(15);
         if(timeout<TimeSpan.FromMilliseconds(100) || timeout>TimeSpan.FromSeconds(60))throw new ArgumentOutOfRangeException(nameof(requestTimeout));
-        var handler=new HttpClientHandler { UseProxy=false,AllowAutoRedirect=false,AutomaticDecompression=DecompressionMethods.None };
+        var handler=new HttpClientHandler { UseProxy=throughLocalProxy,Proxy=throughLocalProxy?new WebProxy("http://127.0.0.1:17890"):null,AllowAutoRedirect=false,AutomaticDecompression=DecompressionMethods.None };
         handler.ServerCertificateCustomValidationCallback=(_,cert,_,_)=>profile.AcceptCertificate(cert,DateTimeOffset.UtcNow);
         http=new HttpClient(handler) {Timeout=timeout};
         http.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",profile.Token);
     }
     public async Task<JsonElement> SendAsync(string path,object? body=null,CancellationToken cancellation=default)
     {
-        if (path!="/api/v1/config" && path!="/api/v1/status" && path!="/api/v1/rpc") throw new InvalidOperationException("不允许的服务接口");
+        if (path!="/api/v1/config" && path!="/api/v1/status" && path!="/api/v1/rpc" && path!="/api/v1/egress-probe") throw new InvalidOperationException("不允许的服务接口");
         using var deadline=CancellationTokenSource.CreateLinkedTokenSource(cancellation);deadline.CancelAfter(timeout);
         var bounded=deadline.Token;
         using var request=new HttpRequestMessage(body is null ? HttpMethod.Get : HttpMethod.Post,profile.Address(path));

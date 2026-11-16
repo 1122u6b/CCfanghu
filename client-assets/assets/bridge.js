@@ -156,6 +156,8 @@
     if (p.state !== 'paused') S.warnToast = null;
     else if (S.status !== 'paused') S.warnToast = '防护已暂停，你访问的网站能看到你的真实 IP';
     switch (p.state) {
+      case 'unprotected':
+        S.status = 'down'; S.pause = null; S.starting = null; S.warnToast = '防护未生效，当前网络可能直接连接'; break;
       case 'protected':
         S.status = 'ok'; S.pause = null; S.starting = null; break;
       case 'starting':
@@ -484,7 +486,7 @@
     S.dialog = null; P.render();
     withOwner('暂停防护后你的真实 IP 会暴露。确认是你本人后继续。', '没有暂停，防护照常').then(function (ok) { return ok && act(req); }).then(function () { if (S.status === 'paused') { S.warnToast = '防护已暂停，你访问的网站能看到你的真实 IP'; P.render(); } });
   };
-  A.resume = function () { S.tray = false; act({ type: 'resume' }, '已恢复防护'); };
+  A.resume = function () { S.tray = false; act({ type: 'resume' }, '正在恢复防护'); };
   // 免费试用到期「退出软件」（docs/01 §4 第 8 步）：和彻底退出一样要电脑密码；守护程序撤掉防护、记下停用（以后开机也不接管网络），
   // 界面再退出。停用以后到期页上的「退出」只退界面。
   A.trialQuitGo = function () {

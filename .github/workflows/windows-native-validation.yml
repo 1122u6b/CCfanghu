@@ -33,6 +33,8 @@ jobs:
           npm run test:ui
       - name: Compile desktop shell
         run: dotnet build windows/Leyra.Windows.Desktop -c Release -m:1 --nologo
+      - name: Compile privileged service
+        run: dotnet build windows/Leyra.Windows.Agent -c Release -m:1 --nologo
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

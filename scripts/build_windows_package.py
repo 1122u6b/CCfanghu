@@ -1,0 +1,24 @@
+"""Cross-publish native Windows binaries and compile an offline NSIS installer.
+This builds an INTERNAL candidate. Windows native acceptance is a separate required step.
+"""
+import argparse,hashlib,json,os,shutil,subprocess
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[1]
+def main():
+ p=argparse.ArgumentParser();p.add_argument('--dotnet',default='dotnet');p.add_argument('--makensis',default='makensis');a=p.parse_args()
+ payload=ROOT/'artifacts/payload';payload.mkdir(parents=True,exist_ok=True)
+ for project in ['Desktop','Agent']:
+  subprocess.run([a.dotnet,'publish',str(ROOT/f'windows/Leyra.Windows.{project}'),'-c','Release','-r','win-x64','--self-contained','true','-o',str(payload),'-m:1','-nr:false','-p:UseSharedCompilation=false'],check=True)
+ from prepare_kernel import prepare
+ prepare('windows',payload,ROOT/'artifacts/downloads')
+ shutil.copy2(ROOT/'THIRD-PARTY-NOTICES.txt',payload/'THIRD-PARTY-NOTICES.txt')
+ prerequisites=ROOT/'artifacts/prerequisites';runtime=prerequisites/'MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
+ if not runtime.is_file():raise SystemExit('Provide official Microsoft offline WebView2 runtime in artifacts/prerequisites')
+ digest=hashlib.sha256(runtime.read_bytes()).hexdigest()
+ manifest=json.loads((prerequisites/'runtime-origin.json').read_text())
+ if manifest['sha256']!=digest:raise SystemExit('Offline runtime checksum mismatch')
+ output=ROOT/'artifacts/LEYRAConnect-0.2.0-dev-internal-setup.exe'
+ subprocess.run([a.makensis,'-V2',f'-DPAYLOAD={payload}',f'-DPREREQUISITES={prerequisites}',f'-DWEBVIEW_SHA256={digest}',f'-DOUTPUT={output}','LeyraConnect.nsi'],cwd=ROOT/'installer',check=True)
+ (output.with_suffix('.sha256')).write_text(hashlib.sha256(output.read_bytes()).hexdigest()+'  '+output.name+'\n')
+ print('Internal candidate built; Windows native acceptance and live server provisioning still required:',output)
+if __name__=='__main__':main()

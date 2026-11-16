@@ -1,0 +1,11 @@
+Mihomo: MetaCubeX/mihomo v1.19.33, unmodified official compatible Windows x64 release.
+License: GNU General Public License v3, supplied in MIHOMO-LICENSE.txt next to the binary.
+Corresponding source: https://github.com/MetaCubeX/mihomo/tree/v1.19.33
+Release provenance and binary hash: kernel-origin.json next to the binary.
+
+Microsoft .NET 8: MIT license and third-party notices distributed with the self-contained runtime.
+Microsoft WebView2 SDK: Microsoft software license; runtime installer remains unmodified and must pass Microsoft Authenticode verification at installation time.
+
+Geist font: SIL Open Font License 1.1, supplied in client-assets/assets/fonts/geist/OFL.txt.
+
+Application UI resources: supplied by the repository owner from their original application.

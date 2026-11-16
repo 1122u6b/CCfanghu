@@ -9,15 +9,17 @@ void Require(bool value){if(!value)throw new Exception("Check failed");}
 void Reject(Action test){try{test();}catch(InvalidDataException){return;}throw new Exception("Invalid input accepted");}
 Check("WFP native ABI and owned cleanup identifiers",()=>{
  WfpLayout.Verify64Bit();var keys=new HashSet<Guid>();
- foreach(var family in new[]{false,true})for(var slot=0;slot<512;slot++)Require(keys.Add(WfpOwnership.Filter(family,slot)));
+ foreach(var family in new[]{false,true})for(var slot=0;slot<1024;slot++)Require(keys.Add(WfpOwnership.Filter(family,slot)));
  Require(!keys.Contains(WfpOwnership.Provider) && !keys.Contains(WfpOwnership.SubLayer));
 });
 Check("WFP plans scope kernel exceptions and retain IPv6 and DNS rejection",()=>{
  var plan=WfpPlan.Create("kernel.exe","service.exe",[new GatewayEndpoint(new System.Net.IPEndPoint(System.Net.IPAddress.Parse("203.0.113.9"),24443),6)],[new System.Net.IPEndPoint(System.Net.IPAddress.Parse("203.0.113.9"),24443)],123,[]);
- Require(plan.Filters.Count(x=>x.Slot==0 && !x.Permit)==2);
+ Require(plan.Filters.Count(x=>(x.Slot==0 || x.Slot==512) && !x.Permit)==4);
+ Require(plan.Filters.Where(x=>x.Transport).All(x=>x.Application is null && x.Slot>=512));
+ Require(plan.Filters.Any(x=>x.Transport && x.Name=="数据包 · 内核到加密通道" && x.Protocol==6 && x.RemotePort==24443));
  Require(plan.Filters.Where(x=>x.Name=="内核到加密通道").All(x=>x.Application=="kernel.exe" && x.RemotePort==24443 && x.Protocol==6));
  Require(plan.Filters.Single(x=>!x.Ipv6 && x.Name=="禁止物理 UDP DNS").Weight>plan.Filters.Single(x=>!x.Ipv6 && x.Slot==10).Weight);
- Require(plan.Filters.Single(x=>!x.Ipv6 && x.Interface==123).Weight>900);
+ Require(plan.Filters.Single(x=>!x.Ipv6 && !x.Transport && x.Interface==123).Weight>900);
  var cold=WfpPlan.Create("kernel.exe","service.exe",[new GatewayEndpoint(new System.Net.IPEndPoint(System.Net.IPAddress.Parse("203.0.113.9"),24443),6)],[],0,[]);
  Require(cold.Filters.All(x=>x.Interface is null));
 });
@@ -76,6 +78,13 @@ Check("independent device token and DNS credentials stay bound to the paired dev
  Require(PrivateDns.Parse(caps.RootElement,device).Resolver.AbsolutePath.EndsWith(device.Token));
  using var wrong=JsonDocument.Parse(JsonSerializer.Serialize(new{zone="probe.leyra.xin",resolver_url="https://api.leyra.xin/private-dns/"+new string('x',48),resolver_ip="127.0.0.1"}));Reject(()=>PrivateDns.Parse(wrong.RootElement,device));
 });
+Check("owner consent proof expires monotonically and is consumed exactly once",()=>{
+ var clock=new ControlledClock();var proof=new OwnerProof(clock);var first=proof.Grant();
+ Require(!proof.Consume("wrong"));Require(proof.Consume(first));Require(!proof.Consume(first));
+ var expired=proof.Grant();clock.Tick(TimeSpan.FromSeconds(31));Require(!proof.Consume(expired));
+ var replaced=proof.Grant();var valid=proof.Grant();Require(!proof.Consume(replaced));
+ var successes=0;Parallel.For(0,16,_=>{if(proof.Consume(valid))Interlocked.Increment(ref successes);});Require(successes==1);
+});
 Console.WriteLine($"{passed} controlled policy checks passed. Windows integration has not run.");
 
 if(args.Length==3 && args[0]=="--tls-fixture")
@@ -112,4 +121,20 @@ if(args.Length==1 && args[0]=="--cleanup-wfp-fixture")
 {
  if(!OperatingSystem.IsWindows())throw new PlatformNotSupportedException("Disposable Windows runner required");
  NativeFixture.Cleanup();
+}
+
+if(args.Length==3 && args[0]=="--kernel-config")
+{
+ var fixture=ServerProfile.Parse(await File.ReadAllBytesAsync(args[1]));
+ if(fixture.Host!="127.0.0.1")throw new Exception("Kernel fixture must be loopback");
+ using var client=new PrivateServerClient(fixture);var configuration=await client.SendAsync("/api/v1/config");
+ await File.WriteAllBytesAsync(args[2],MihomoConfiguration.Build(configuration.GetProperty("proxies"),Guid.NewGuid().ToString(),false,null,[]));
+}
+
+sealed class ControlledClock:TimeProvider
+{
+ long stamp;
+ public override long TimestampFrequency=>TimeSpan.TicksPerSecond;
+ public override long GetTimestamp()=>stamp;
+ public void Tick(TimeSpan duration)=>stamp+=duration.Ticks;
 }

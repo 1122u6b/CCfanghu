@@ -5,7 +5,9 @@
     if (!window.chrome || !window.chrome.webview) return Promise.reject(new Error('请在 Windows 客户端中打开'));
     return new Promise(function (resolve, reject) {
       var id = ++next;
-      var timer = setTimeout(function () { delete pending[id]; reject(new Error('本机操作超时，请查看后台服务状态')); }, 40000);
+      var req = args && args.request, deep = command === 'daemon' && req && req.type === 'doctor' && req.deep;
+      var interactive = command === 'verify_owner' || command === 'import_server' || command === 'run_rescue' || (req && /^(pause|pair|add_direct_rule|block_before_ready)$/.test(req.type));
+      var timer = setTimeout(function () { delete pending[id]; reject(new Error('本机操作超时，请查看后台服务状态')); }, interactive ? 300000 : deep ? 110000 : 40000);
       pending[id] = { resolve: resolve, reject: reject, timer: timer };
       window.chrome.webview.postMessage({ id: id, command: command, args: args || {} });
     });

@@ -15,6 +15,18 @@ public static class NativeFixture
     public static async Task Run()
     {
         if(!OperatingSystem.IsWindows())throw new PlatformNotSupportedException("Native fixture requires a disposable Windows machine");
+        var system=Environment.GetFolderPath(Environment.SpecialFolder.System);
+        using(var job=new NativeJob())
+        {
+            using(var child=job.Launch(Path.Combine(system,"cmd.exe"),["/c","exit 7"],system))
+            {
+                using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(5));await child.WaitForExitAsync(deadline.Token);
+                if(child.ExitCode!=7)throw new Exception("Native process exit code mismatch");
+            }
+            using(var child=job.Launch(Path.Combine(system,"WindowsPowerShell","v1.0","powershell.exe"),["-NoProfile","-NonInteractive","-Command","Start-Sleep -Seconds 30"],system))
+            {job.Stop();if(!child.WaitForExit(5000))throw new Exception("Job-owned child survived termination");}
+        }
+        Console.WriteLine("PASS atomic job-owned process launch, exit code and bounded teardown");
         using var engine=new WfpEngine();
         if(engine.DefaultGuardsInstalled())throw new InvalidOperationException("Existing LEYRA guard detected; refusing to replace it");
         // No customer endpoint, credentials, DNS queries or application content.

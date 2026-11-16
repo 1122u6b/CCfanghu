@@ -2,7 +2,7 @@ using System.Net;
 using Leyra.Windows.Core;
 namespace Leyra.Windows.Platform;
 public sealed record GatewayEndpoint(IPEndPoint Endpoint,byte Protocol);
-public sealed record FilterSpec(bool Ipv6,int Slot,string Name,bool Permit,ulong Weight,string? Network=null,int? RemotePort=null,int? LocalPort=null,byte? Protocol=null,bool Loopback=false,ulong? Interface=null,string? Application=null);
+public sealed record FilterSpec(bool Ipv6,int Slot,string Name,bool Permit,ulong Weight,string? Network=null,int? RemotePort=null,int? LocalPort=null,byte? Protocol=null,bool Loopback=false,ulong? Interface=null,string? Application=null,bool Transport=false);
 public sealed record WfpPlan(IReadOnlyList<FilterSpec> Filters)
 {
  public static WfpPlan Create(string kernel,string service,IReadOnlyList<GatewayEndpoint> gateways,IReadOnlyList<IPEndPoint> management,ulong tunnel,IReadOnlyList<DirectRule> direct)
@@ -46,6 +46,9 @@ public sealed record WfpPlan(IReadOnlyList<FilterSpec> Filters)
     filters.Add(new(false,300+i,"已确认直连例外",true,650,Network:item.Cidr));
    }
   }
+  // Transport-layer guards cover packets from connections established before activation.
+  // Application identity remains enforced by ALE; transport allows only the same endpoints.
+  filters.AddRange(filters.ToArray().Select(f=>f with {Slot=f.Slot+512,Name="数据包 · "+f.Name,Application=null,Transport=true}));
   return new(filters.AsReadOnly());
  }
 }

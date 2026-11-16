@@ -166,16 +166,29 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
                 if self.get(db,'selected_exit')==identity:raise ManagementError('select another exit first')
                 db.execute('DELETE FROM exits WHERE id=?',(identity,));return {'saved':True}
             if kind=='direct_rules':return {'items':[dict(r) for r in db.execute('SELECT * FROM direct_rules ORDER BY cidr')]}
-            if kind=='ai_accounts':return {'items':[{'id':r['id'],**json.loads(r['data'])} for r in db.execute('SELECT id,data FROM ai_accounts')]}
+            if kind=='ai_accounts':return {'items':[{**json.loads(r['data']),'id':r['id']} for r in db.execute('SELECT id,data FROM ai_accounts')]}
             if kind=='admin_ai_account':
                 value=req.get('account');secret=req.get('secret',{})
                 if not isinstance(value,dict) or not isinstance(secret,dict) or len(json.dumps([value,secret]))>16000:raise ManagementError('invalid account')
                 # Private single-owner store. Secrets are never included in the account list.
                 cur=db.execute('INSERT INTO ai_accounts(data,secret) VALUES (?,?)',(json.dumps(value),json.dumps(secret)));return {'id':cur.lastrowid}
+            if kind in ('ai_login_begin','ai_login_poll','ai_login_cancel'):
+                from ai_login import sessions_for,LoginError
+                sessions=sessions_for(self.root)
+                try:
+                    if kind=='ai_login_poll':return sessions.poll(text(req.get('session'),128,True))
+                    if kind=='ai_login_cancel':return sessions.cancel(text(req.get('session'),128,True))
+                    identity=int(req.get('id',0));row=db.execute('SELECT data,secret FROM ai_accounts WHERE id=?',(identity,)).fetchone()
+                    if not row:raise ManagementError('account not found')
+                    account=json.loads(row['data']);account['id']=identity;account['status']=account.get('state',account.get('status','active'))
+                    return sessions.begin(account,json.loads(row['secret']))
+                except LoginError as e:raise ManagementError(str(e)) from None
             if kind=='ai_secrets':
-                r=db.execute('SELECT secret FROM ai_accounts WHERE id=?',(int(req.get('id',0)),)).fetchone()
+                r=db.execute('SELECT data,secret FROM ai_accounts WHERE id=?',(int(req.get('id',0)),)).fetchone()
                 if not r:raise ManagementError('account not found')
-                return json.loads(r[0])
+                state=json.loads(r['data']).get('state',json.loads(r['data']).get('status','active'))
+                if state!='active':raise ManagementError('这个号已经收回，登录信息已隐藏')
+                return json.loads(r['secret'])
             if kind=='ai_report':
                 identity=int(req.get('id',0));r=db.execute('SELECT id FROM ai_accounts WHERE id=?',(identity,)).fetchone()
                 if not r:raise ManagementError('account not found')
