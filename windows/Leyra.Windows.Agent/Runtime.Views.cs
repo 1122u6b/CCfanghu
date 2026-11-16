@@ -11,7 +11,9 @@ sealed partial class Runtime
 {
  object Zone()
  {
-  var system=SystemClock.CurrentIana();return new{system,exit=store.Settings.ExitTimezone,matches=system==store.Settings.ExitTimezone,can_change=true,dismissed=false,location="",system_offset=TimeZoneInfo.Local.GetUtcOffset(DateTime.UtcNow).ToString()};
+  var system=SystemClock.CurrentIana();var exit=store.Settings.ExitTimezone;
+  var offset=TimeZoneInfo.Local.GetUtcOffset(DateTime.UtcNow);var text="UTC"+(offset<TimeSpan.Zero?"-":"+")+offset.ToString(@"hh\:mm");
+  return new{system,exit,matches=exit.Length>0&&system==exit,can_change=exit.Length>0,dismissed=exit.Length>0&&store.Settings.TimezoneDismissedFor==exit,location=exitGeo is not null&&exitGeoFor==exitIp?exitGeo.Label:"",system_offset=text,original=store.Settings.OriginalTimezone is not null};
  }
  async Task<object> Account(CancellationToken stop)
  {
@@ -25,20 +27,71 @@ sealed partial class Runtime
  {
   var items=new List<object>();
   void Add(string id,string verdict,string detail)=>items.Add(new{id,verdict,detail});
-  Add("E1","pass",System.Runtime.InteropServices.RuntimeInformation.OSDescription+" / "+System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
+  var guarded=filters.DefaultGuardsInstalled();var live=state=="protected";
+  Add("E1",Environment.OSVersion.Version.Build>=17763?"pass":"warn",System.Runtime.InteropServices.RuntimeInformation.OSDescription+" / "+System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
   Add("E2",System.Security.Principal.WindowsIdentity.GetCurrent().IsSystem?"pass":"fail","Windows 后台服务身份");
+  if(cloud is null)Add("E3","skipped","尚未连接自有服务器，无法对时");
+  else try
+  {
+   var clock=await Remote(new{type="server_time"},stop);var drift=Math.Abs(clock.GetProperty("unix").GetDouble()-DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()/1000.0);
+   Add("E3",!Bool(clock,"synchronized")?"info":drift<=60?"pass":drift<=300?"warn":"fail",!Bool(clock,"synchronized")?"服务器自身尚未完成时间同步，无法判断":drift<=60?"与服务器标准时间相差 "+(int)drift+" 秒":"电脑时间与标准时间相差 "+(int)drift+" 秒，建议校准");
+  }
+  catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidDataException or KeyNotFoundException){Add("E3","skipped","暂时取不到服务器时间："+e.Message);}
+  RefreshConflicts(true);
+  var conflictList=conflicts.Select(x=>JsonSerializer.SerializeToElement(x)).ToArray();
+  Add("E4",conflictList.Length==0?"pass":"fail",conflictList.Length==0?"没有发现其他代理、VPN 或虚拟网卡":string.Join("；",conflictList.Select(x=>Text(x,"message"))));
   Add("E5","pass","已打开 Windows 基础过滤接口");
+  var filtersFound=NetworkFilterSoftware();
+  Add("E6",filtersFound.Length==0?"pass":"warn",filtersFound.Length==0?"没有发现带网络过滤功能的安全软件":"已发现带网络过滤功能的安全软件："+string.Join("、",filtersFound));
+  Add("E7",KernelSession.Tunnel()!=0?"pass":live?"fail":"skipped",KernelSession.Tunnel()!=0?"独享线路虚拟网卡已建立":"虚拟网卡尚未建立");
   Add("E8",new DriveInfo(Path.GetPathRoot(AgentStore.Root)!).AvailableFreeSpace>200*1024*1024?"pass":"warn","运行目录所在磁盘的可用空间");
   Add("E9",cloud is null?"fail":"pass",cloud is null?"尚未登记自有服务器":"连接文件和独立设备身份已登记");
-  Add("P1",filters.DefaultGuardsInstalled()?"pass":"fail","读取本软件持久拒绝规则，包括连接层和传输层");
+  Add("E10",ServiceAutoStart()?"pass":"warn",ServiceAutoStart()?"后台服务设置为开机自动运行":"后台服务没有设置为开机自动运行，请重新安装");
+  Add("P1",guarded?"pass":"fail","读取本软件持久拒绝规则，包括连接层和传输层");
+  bool firewall;try{using var mpssvc=new System.ServiceProcess.ServiceController("mpssvc");firewall=mpssvc.Status==System.ServiceProcess.ServiceControllerStatus.Running;}catch(InvalidOperationException){firewall=false;}
+  Add("P2",firewall?"pass":"warn",firewall?"Windows 防火墙服务正在运行":"Windows 防火墙服务没有运行；防护规则仍由过滤平台执行");
   Add("P3",kernel.Alive?"pass":"fail",kernel.Alive?"内置网络进程正在运行":"内置网络进程未运行");
-  Add("P4",nodes.GetArrayLength()>0?"pass":"fail","自有服务器下发的设备线路");
+  Add("P4",nodes.ValueKind==JsonValueKind.Array&&nodes.GetArrayLength()>0?"pass":"fail","自有服务器下发的设备线路");
+  Add("P5",live&&exitVerified&&KernelSession.Tunnel()==tunnel&&guarded?"pass":"fail",live&&exitVerified?"经虚拟网卡的请求由自有服务器观察到出口 "+exitIp:"尚未确认流量经独享线路");
   Add("P6",dnsVerified?"pass":"fail",dnsVerified?"系统解析取得私有权威检测回执":"尚未取得系统 DNS 检测回执");
+  Add("P7",BrowserPolicyActive()?"pass":"warn",BrowserPolicyActive()?"Chrome 和 Edge 已限制 WebRTC 只走代理":"尚未设置浏览器保护（WebRTC 限制）");
   Add("P8",state=="paused"?"warn":"pass",state=="paused"?"防护正在暂停":"没有主动暂停防护");
-  Add("L1",exitVerified?"info":"fail",exitVerified?"经本机代理取得的出口 IP："+exitIp:"没有取得该请求的公网出口");
-  Add("C1",SystemClock.CurrentIana()==store.Settings.ExitTimezone?"pass":"warn","电脑时区与配置的出口时区对比");
+  Add("L1",exitVerified?"info":"fail",exitVerified?"经本机代理取得的出口 IP："+exitIp+(exitGeo is not null&&exitGeoFor==exitIp?"（"+exitGeo.Label+"）":""):"没有取得该请求的公网出口");
+  if(guarded)
+  {
+   var direct=await DirectTcpReachable(System.Net.Sockets.AddressFamily.InterNetwork,System.Net.IPAddress.Parse("1.0.0.1"),stop);
+   Add("L2",direct?"fail":"pass",direct?"绕开虚拟网卡、直接从物理网卡连到了公网，防护规则未生效":"从物理网卡直接连接公网被拒绝");
+   var dnsLeak=await DirectDnsAnswered(stop);
+   Add("L3",dnsLeak?"fail":"pass",dnsLeak?"从物理网卡发出的 DNS 查询得到了回应":"从物理网卡直接发出的 DNS 查询被拒绝");
+  }
+  else{Add("L2","skipped","防护规则未安装，未做直连实测");Add("L3","skipped","防护规则未安装，未做直连实测");}
+  Add("L4",dnsVerified?"pass":"skipped",dnsVerified?"系统解析经自有递归服务器到达权威服务器":"尚未取得私有 DNS 回执");
+  object[] browserItems;lock(browserResults)browserItems=browserResults.Values.ToArray();
+  var tested=browserItems.Select(x=>JsonSerializer.SerializeToElement(x)).ToArray();
+  if(tested.Length==0){Add("L5","skipped","还没有做浏览器实测");Add("L6","skipped","还没有做浏览器实测");}
+  else
+  {
+   var real=tested.Where(x=>Text(x,"exposure")=="real").Select(x=>Text(x,"browser")).ToArray();var lan=tested.Where(x=>Text(x,"exposure")=="lan").Select(x=>Text(x,"browser")).ToArray();
+   Add("L5",real.Length==0?"pass":"fail",real.Length==0?"已测浏览器看到的都是出口地址":"这些浏览器看到了真实地址："+string.Join("、",real));
+   Add("L6",real.Length>0?"fail":lan.Length>0?"warn":"pass",lan.Length>0?"这些浏览器暴露了局域网地址："+string.Join("、",lan):"已测浏览器的 WebRTC 没有绕开独享线路");
+  }
+  if(guarded&&HasGlobalIpv6())
+  {
+   var v6=await DirectTcpReachable(System.Net.Sockets.AddressFamily.InterNetworkV6,System.Net.IPAddress.Parse("2606:4700:4700::1001"),stop);
+   Add("L7",v6?"fail":"pass",v6?"IPv6 可以绕开独享线路直连公网":"电脑有公网 IPv6，直接连接已被拒绝");
+  }
+  else Add("L7",guarded?"pass":"skipped",guarded?"电脑没有公网 IPv6 地址":"防护规则未安装，未做 IPv6 实测");
+  Add("L8","skipped","需要 Windows 过滤平台审计日志，此项暂不检测");
+  Add("C1",store.Settings.ExitTimezone.Length==0?"info":SystemClock.CurrentIana()==store.Settings.ExitTimezone?"pass":"warn",store.Settings.ExitTimezone.Length==0?"还没有取得出口所在时区":"电脑时区与出口所在时区（"+store.Settings.ExitTimezone+"）对比");
   Add("S1",profile?.Role=="device"?"pass":"fail","独立设备身份；当前不使用商业激活码");
-  foreach(var id in new[]{"E3","E4","E6","E7","E10","P2","P5","P7","L2","L3","L4","L5","L6","L7","L8","S2","S3","S4","S5","S6"})Add(id,"skipped","此项尚无独立实测证据，未计入通过");
+  Add("S2",configAt>DateTimeOffset.UtcNow.AddHours(-24)?"pass":"warn",configAt==DateTimeOffset.MinValue?"本次启动后还没有取得服务器配置":"线路配置取得于 "+configAt.ToLocalTime().ToString("MM-dd HH:mm"));
+  var quality=nodes.ValueKind==JsonValueKind.Array?nodes.EnumerateArray().Select(n=>Quality(Text(n,"name"))).Where(q=>q.Success is not null).ToArray():[];
+  if(quality.Length==0)Add("S3","skipped","线路质量数据还在收集（每分钟测一次）");
+  else{var worst=quality.Min(q=>q.Success!.Value);Add("S3",worst>=90?"pass":worst>=60?"warn":"fail","最近一小时成功率 "+worst+"%"+(quality[0].Latency is int ms?"，当前延迟 "+ms+" 毫秒":""));}
+  Add("S4",lastSpeed is null?"skipped":"info",lastSpeed is {} sp?"最近测速 "+(sp.Down*8/1_000_000.0).ToString("0.0")+" Mbps":"还没有测速");
+  Add("S5",profile is not null&&live?"pass":"fail",profile is not null&&live?"证书固定的加密通道已连通":"加密通道未连通");
+  var age=DateTimeOffset.UtcNow-heartbeat;
+  Add("S6",age<TimeSpan.FromSeconds(30)?"pass":heartbeat==DateTimeOffset.MinValue?"fail":"warn",heartbeat==DateTimeOffset.MinValue?"还没有与服务器完成同步":"最近一次与服务器同步在 "+(int)age.TotalSeconds+" 秒前");
   if(deep)
   {
    var started=DateTimeOffset.UtcNow;var failed=false;
@@ -46,22 +99,27 @@ sealed partial class Runtime
    {
     stop.ThrowIfCancellationRequested();if(!kernel.Alive || !filters.DefaultGuardsInstalled() || KernelSession.Tunnel()==0){failed=true;break;}await Task.Delay(1000,stop);
    }
-   Add("L9",failed?"fail":"info",failed?"观察期间本机组件发生变化":"已观察一分钟的本机组件状态；不等同于全应用泄露测试");
+   var leak=!failed&&await DirectTcpReachable(System.Net.Sockets.AddressFamily.InterNetwork,System.Net.IPAddress.Parse("1.0.0.1"),stop);
+   Add("L9",failed||leak?"fail":"pass",failed?"观察期间本机组件发生变化":leak?"观察结束时物理网卡可以直连公网":"一分钟内防护组件持续在线，结束时直连仍被拒绝");
   }
   else Add("L9","skipped","尚未执行一分钟观察");
   var identity="CK-"+DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss")+"-"+Guid.NewGuid().ToString("N")[..6];
   var result=new{id=identity,items=items.ToArray(),at=DateTimeOffset.UtcNow.ToUnixTimeSeconds(),kind=deep?"deep":"manual",problems=items.Count(x=>JsonSerializer.SerializeToElement(x).GetProperty("verdict").GetString() is "fail" or "warn")};
   lock(checkHistory){checkHistory.Insert(0,result);if(checkHistory.Count>10)checkHistory.RemoveAt(10);}
+  Record("check",result.problems.ToString());
   return result;
  }
  async Task<object> AddExit(JsonElement request,CancellationToken stop)
  {
   if(request.TryGetProperty("node",out var direct))return await Remote(new{type="store_exit",name=Text(request,"name","我的出口"),node=direct},stop);
-  var raw=Text(request,"links").Trim();
-  if(!Uri.TryCreate(raw,UriKind.Absolute,out var uri) || uri.Scheme!="socks5" || uri.Port is <1 or >65535 || string.IsNullOrEmpty(uri.Host))throw new InvalidDataException("当前网关出口需提供带用户名密码的 socks5:// 连接，其他节点格式尚未接入");
-  var user=uri.UserInfo.Split(':',2);if(user.Length!=2)throw new InvalidDataException("出口连接缺少用户名或密码");
-  var result=await Remote(new{type="store_exit",name=Text(request,"name","我的出口"),node=new{type="socks5",server=uri.Host,port=uri.Port,username=Uri.UnescapeDataString(user[0]),password=Uri.UnescapeDataString(user[1])}},stop);
-  await Remote(new{type="select_exit",id=result.GetProperty("id").GetInt32()},stop);configured=false;return new{id=result.GetProperty("id").GetInt32(),lines=1,skipped=0};
+  var (parsed,skipped)=ExitLinks.Parse(Text(request,"links"));
+  if(parsed.Count==0)throw new InvalidDataException(skipped.Count>0?"没有可用的出口："+skipped[0]:"请粘贴出口链接");
+  var wire=parsed.Select(x=>x.Wire()).ToArray();int id;
+  if(request.TryGetProperty("exit_id",out var existing)&&existing.TryGetInt32(out var target))
+  {await Remote(new{type="update_exit",id=target,nodes=wire},stop);id=target;}
+  else id=(await Remote(new{type="store_exit",name=Text(request,"name","我的出口"),nodes=wire},stop)).GetProperty("id").GetInt32();
+  await Remote(new{type="select_exit",id},stop);configured=false;Record("exit",Text(request,"name","我的出口"));
+  return new{id,lines=parsed.Count,skipped};
  }
  async Task<object> MeasureSpeed(CancellationToken stop)
  {
@@ -72,6 +130,7 @@ sealed partial class Runtime
   using var input=await response.Content.ReadAsStreamAsync(deadline.Token);var bytes=new byte[32768];long count=0;int n;
   while((n=await input.ReadAsync(bytes,deadline.Token))>0){count+=n;if(count>1048576)throw new InvalidDataException("测速响应超过上限");}
   if(count==0)throw new InvalidDataException("测速没有收到数据");
+  lastSpeed=((long)(count/Math.Max(.001,started.Elapsed.TotalSeconds)),DateTimeOffset.UtcNow);
   return new{down_bps=(long)(count/Math.Max(.001,started.Elapsed.TotalSeconds)),measured=true,ago_secs=0};
  }
  string? aiSession;int? aiIdentity;
@@ -80,7 +139,15 @@ sealed partial class Runtime
   var command=Text(request,"command");
   if(command=="install_webrtc_profile")return BrowserPolicies.Install();
   var args=request.GetProperty("args");
-  if(command=="open_web_center")return new{url="https://leyra.xin"};
+  if(command=="open_web_center")
+  {
+   var help=await Remote(new{type="help"},stop);var center=Text(help,"web_center");
+   if(!Uri.TryCreate(center,UriKind.Absolute,out var url)||url.Scheme!="https")throw new InvalidOperationException("管理员还没有设置网页个人中心地址");
+   return new{url=url.AbsoluteUri};
+  }
+  if(command=="test_browser")return StartBrowserTest(Text(args,"browser"));
+  if(command=="quit_conflict")return new{images=ConflictImages(Text(args,"id"))};
+  if(command=="force_quit_conflict")return ForceQuit(Text(args,"id"));
   if(command=="open_guide")
   {
    var help=await Remote(new{type="help"},stop);var guides=help.GetProperty("guides");var index=args.GetProperty("index").GetInt32();

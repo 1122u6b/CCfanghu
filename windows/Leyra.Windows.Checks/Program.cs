@@ -45,6 +45,16 @@ Check("stale service or missing filters never shows protected",()=>{
  Require((ready with {Kernel=false}).Assess(now)==ProtectionPhase.GuardedFailure);
  Require((ready with {ExitMatches=false}).Assess(now)==ProtectionPhase.GuardedFailure);
 });
+Check("exit links accept seller formats and never echo passwords",()=>{
+ var (nodes,skipped)=ExitLinks.Parse("socks5://u%40x:p%3Ass@203.0.113.5:1080\nhttp://user:pass@proxy.example.com:8080\nres.example.net:7000:alice:s3cret\nbob:pw@198.51.100.7:1081\n203.0.113.9:1082\n# comment\nvmess://abc\nsocks5://u:hidden@10.0.0.1:1080\nhttp://h.example.com\n203.0.113.9:1082");
+ Require(nodes.Count==5);Require(nodes[0]==new ExitNode("socks5","203.0.113.5",1080,"u@x","p:ss"));Require(nodes[1].Type=="http"&&nodes[1].Port==8080);
+ Require(nodes[2]==new ExitNode("socks5","res.example.net",7000,"alice","s3cret"));Require(nodes[3].Username=="bob"&&nodes[3].Server=="198.51.100.7");Require(nodes[4].Username is null);
+ Require(skipped.Count==4);Require(!string.Join("|",skipped).Contains("hidden"));
+ Require(ExitLinks.Parse("a.example.com:1:"+new string('x',300)+":p").Nodes.Count==0);
+});
+Check("product versions order releases after pre-releases",()=>{
+ Require(ProductInfo.Compare("0.3.0","0.2.0-dev")>0);Require(ProductInfo.Compare("0.3.0","0.3.0-beta.1")>0);Require(ProductInfo.Compare("0.10.0","0.9.9")>0);Require(ProductInfo.Compare("1.0.0","1.0.0")==0);
+});
 Check("skipped audits are counted independently",()=>{
  var count=AuditSummary.Count([new("A","DNS","source",AuditVerdict.Skipped,"no receipt"),new("B","exit","HTTPS",AuditVerdict.Passed,"controlled")]);Require(count==(1,0,0,1));
 });

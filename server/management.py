@@ -6,6 +6,18 @@ from pathlib import Path
 
 class ManagementError(ValueError):pass
 
+UPDATE_MAX=400*1024*1024
+UPDATE_CHUNK=786432
+VERSION_PATTERN=r'[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(?:-[A-Za-z0-9.]{1,24})?'
+
+def exit_nodes(value):
+    """Exits hold one or more upstream nodes; the gateway fails over in order."""
+    from gateway import validate_upstream
+    nodes=value if isinstance(value,list) else [value]
+    if not 1<=len(nodes)<=32:raise ManagementError('an exit needs 1 to 32 upstream nodes')
+    try:return [validate_upstream(x if isinstance(x,dict) else {}) for x in nodes]
+    except (ValueError,TypeError,KeyError) as e:raise ManagementError(str(e)) from None
+
 def text(value,limit,required=False):
     if not isinstance(value,str) or len(value)>limit or (required and not value.strip()):raise ManagementError('invalid text')
     return value.strip()
@@ -71,7 +83,57 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
             identity=self.get(db,'selected_exit')
             if identity is None:return None
             row=db.execute('SELECT node FROM exits WHERE id=?',(identity,)).fetchone()
-            return json.loads(row[0]) if row else None
+            if not row:return None
+            value=json.loads(row[0])
+            return value if isinstance(value,list) else [value]
+    def updates_dir(self):
+        d=self.root/'updates';d.mkdir(mode=0o700,exist_ok=True);return d
+    def update_manifest(self):
+        path=self.updates_dir()/'manifest.json'
+        if not path.exists():return None
+        return json.loads(path.read_text())
+    def update_rpc(self,kind,req):
+        d=self.updates_dir();staging=d/'staging.bin';meta_path=d/'staging.json';release=d/'release.bin'
+        if kind=='admin_update_begin':
+            version=text(req.get('version'),40,True)
+            if not re.fullmatch(VERSION_PATTERN,version):raise ManagementError('invalid version')
+            size=req.get('size');digest=text(req.get('sha256'),64,True).lower()
+            if not isinstance(size,int) or not 0<size<=UPDATE_MAX or not re.fullmatch(r'[0-9a-f]{64}',digest):raise ManagementError('invalid update size or digest')
+            notes=text(req.get('notes',''),4000)
+            fd=os.open(staging,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600);os.close(fd)
+            meta_path.write_text(json.dumps({'version':version,'size':size,'sha256':digest,'notes':notes}));return {'offset':0}
+        if kind=='admin_update_chunk':
+            if not meta_path.exists():raise ManagementError('no update upload in progress')
+            meta=json.loads(meta_path.read_text());raw=base64.b64decode(text(req.get('data'),90000,True),validate=True)
+            current=staging.stat().st_size
+            if req.get('offset')!=current:raise ManagementError('upload offset mismatch')
+            if not raw or current+len(raw)>meta['size']:raise ManagementError('chunk exceeds declared size')
+            with open(staging,'ab') as f:f.write(raw)
+            return {'offset':current+len(raw)}
+        if kind=='admin_update_commit':
+            import hashlib
+            if not meta_path.exists():raise ManagementError('no update upload in progress')
+            meta=json.loads(meta_path.read_text());h=hashlib.sha256()
+            with open(staging,'rb') as f:
+                for block in iter(lambda:f.read(1<<20),b''):h.update(block)
+            if staging.stat().st_size!=meta['size'] or h.hexdigest()!=meta['sha256']:raise ManagementError('uploaded update does not match declared size or SHA-256')
+            os.replace(staging,release);meta['published_at']=int(time.time())
+            temp=d/'manifest.new';temp.write_text(json.dumps(meta));os.replace(temp,d/'manifest.json');meta_path.unlink();return {'saved':True,**meta}
+        if kind=='admin_update_withdraw':
+            for p in (d/'manifest.json',release):
+                with contextlib.suppress(FileNotFoundError):p.unlink()
+            return {'saved':True}
+        if kind=='update_manifest':
+            meta=self.update_manifest()
+            return {'version':None} if meta is None else {k:meta[k] for k in ('version','size','sha256','notes','published_at')}
+        if kind=='update_chunk':
+            meta=self.update_manifest()
+            if meta is None or req.get('version')!=meta['version']:raise ManagementError('update is no longer published')
+            offset=req.get('offset')
+            if not isinstance(offset,int) or not 0<=offset<meta['size']:raise ManagementError('invalid offset')
+            with open(release,'rb') as f:f.seek(offset);part=f.read(UPDATE_CHUNK)
+            return {'data':base64.b64encode(part).decode(),'offset':offset,'total':meta['size']}
+        raise ManagementError('unsupported update command')
     def clear_selection(self):
         with self.db() as db:self.put(db,'selected_exit',None)
     def record_dns_observation(self,nonce,source):
@@ -90,6 +152,7 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
     def rpc(self,req):
         if not isinstance(req,dict):raise ManagementError('object required')
         kind=req.get('type');now=int(time.time())
+        if kind in ('admin_update_begin','admin_update_chunk','admin_update_commit','admin_update_withdraw','update_manifest','update_chunk'):return self.update_rpc(kind,req)
         with self.db() as db:
             # Expire incomplete/consumed uploads and bound per-owner disk use.
             db.execute('DELETE FROM uploads WHERE at<? OR used=1',(now-86400,))
@@ -164,12 +227,20 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
                 value=req.get('content')
                 if not isinstance(value,dict) or len(json.dumps(value))>64000:raise ManagementError('invalid help content')
                 self.put(db,'help',value);return {'saved':True}
-            if kind=='exits':return {'items':[{k:r[k] for k in ('id','name','created_at')} for r in db.execute('SELECT * FROM exits ORDER BY id')],'selected':self.get(db,'selected_exit')}
+            if kind=='exits':
+                def summary(r):
+                    nodes=json.loads(r['node']);nodes=nodes if isinstance(nodes,list) else [nodes]
+                    return {'id':r['id'],'name':r['name'],'created_at':r['created_at'],'lines':len(nodes),'types':sorted({n.get('type','socks5') for n in nodes})}
+                return {'items':[summary(r) for r in db.execute('SELECT * FROM exits ORDER BY id')],'selected':self.get(db,'selected_exit')}
             if kind=='store_exit':
-                from gateway import validate_upstream
-                node=validate_upstream(req.get('node',{}))
+                nodes=exit_nodes(req.get('nodes',req.get('node',{})))
                 if db.execute('SELECT COUNT(*) FROM exits').fetchone()[0]>=20:raise ManagementError('maximum 20 exits')
-                cur=db.execute('INSERT INTO exits(name,node,created_at) VALUES (?,?,?)',(text(req.get('name'),80,True),json.dumps(node),now));return {'id':cur.lastrowid}
+                cur=db.execute('INSERT INTO exits(name,node,created_at) VALUES (?,?,?)',(text(req.get('name'),80,True),json.dumps(nodes),now));return {'id':cur.lastrowid,'lines':len(nodes)}
+            if kind=='update_exit':
+                identity=int(req.get('id',0));nodes=exit_nodes(req.get('nodes',req.get('node',{})))
+                if db.execute('UPDATE exits SET node=? WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
+                if req.get('name') is not None:db.execute('UPDATE exits SET name=? WHERE id=?',(text(req.get('name'),80,True),identity))
+                return {'id':identity,'lines':len(nodes),'saved':True}
             if kind=='select_exit':
                 identity=int(req.get('id',0));row=db.execute('SELECT node FROM exits WHERE id=?',(identity,)).fetchone()
                 if not row:raise ManagementError('exit not found')

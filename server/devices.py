@@ -139,6 +139,23 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,tar
             if not any(row['id'] == identity for row in self.list()['items']):
                 raise ManagementError('device not found')
             return Management(self.root / identity).rpc(req.get('request'))
+        if kind == 'broadcast_message':
+            sent = 0
+            for row in self.list()['items']:
+                if row['enabled']:
+                    Management(self.root / row['id']).rpc({'type': 'admin_message', 'title': req.get('title'), 'body': req.get('body'), 'important': req.get('important') is True})
+                    sent += 1
+            return {'sent': sent}
+        if kind == 'all_tickets':
+            # Owner overview across devices; ticket bodies stay in each device store.
+            items = []
+            for row in self.list()['items']:
+                for t in Management(self.root / row['id']).rpc({'type': 'tickets'})['items']:
+                    last = t['messages'][-1] if t['messages'] else None
+                    items.append({'device': row['id'], 'device_name': row['name'], 'id': t['id'], 'title': t['title'], 'state': t['state'],
+                                  'updated_at': t['updated_at'], 'waiting_for_admin': bool(last and not last['from_admin'] and t['state'] != 'closed')})
+            items.sort(key=lambda x: x['updated_at'], reverse=True)
+            return {'items': items[:500]}
         return owner.rpc(req)
 
     def device_rpc(self, owner, device, req):
@@ -148,9 +165,13 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,tar
         allowed = {'server_time','account','set_contact','messages','mark_read','tickets','new_ticket',
                    'ticket_reply','ticket_rate','upload_chunk','ticket_image','help','exits','store_exit',
                    'select_exit','delete_exit','direct_rules','ai_accounts','ai_secrets','ai_report',
-                   'add_direct_rule','remove_direct_rule','set_direct_note','dns_config','dns_probe_begin','dns_probe_result','ai_login_begin','ai_login_poll','ai_login_cancel'}
+                   'add_direct_rule','remove_direct_rule','set_direct_note','dns_config','dns_probe_begin','dns_probe_result','ai_login_begin','ai_login_poll','ai_login_cancel',
+                   'update_exit','update_manifest','update_chunk'}
         if kind not in allowed:
             raise ManagementError('device is not allowed to perform this command')
+        # Help and signed-off releases are published once by the owner and shared read-only.
+        if kind in ('help', 'update_manifest', 'update_chunk'):
+            return owner.rpc({k: v for k, v in req.items() if k in ('type', 'version', 'offset')})
         if kind == 'dns_config':
             conf = owner.rpc(req)
             # Never distribute the existing shared DoH secret to customer devices.

@@ -18,7 +18,7 @@
 
 ## 验证边界与待完成项
 
-**开发候选，尚未达到用户要求的完整成品。不要用于客户交付。**
+**0.3.0：代码层面的缺项已补齐（见验收清单「0.3.0 已补齐」），尚需用户服务器重新部署和 Windows 实机验收后才能交付客户。**
 
 仓库逐项核查及真实任务记录见 [成品缺项与验收清单](validation/product-acceptance.md)。界面迁入、接口存在及专项测试通过，均不能代表全部功能接入或完整成品验收。
 
@@ -30,12 +30,25 @@
 
 运行目录中的 `artifacts/LEYRAConnect-0.2.0-dev-internal-setup.exe` 仅为内部验证候选，不能作为“已通过完整验收”的安装包发布。脚本生成安装器并不证明 Windows 原生功能已经通过。
 
+## 服务器运营（server/admin.py）
+
+在服务器上（或持有管理员连接文件的电脑上）运行，默认读取 `/root/leyra-server-connection.json`。**管理员连接文件含管理令牌，不要发给客户。**
+
+```text
+python3 admin.py device-new "客户A的电脑" --out 客户A.json   # 每台电脑一个文件，客户在软件里导入
+python3 admin.py devices | device-disable ID | device-rotate ID --out 新.json
+python3 admin.py tickets --waiting ; python3 admin.py ticket ID 3 ; python3 admin.py reply ID 3 "已处理"
+python3 admin.py broadcast "维护通知" "今晚维护 10 分钟"
+python3 admin.py help-set help.json        # {"faq":[...],"guides":[...],"web_center":"https://..."}
+python3 admin.py publish-update 0.3.1 artifacts/LEYRAConnect-0.3.1-setup.exe --notes "说明"
+```
+
 ## 开发检查
 
 ```text
 npm ci
 npm run test:ui
-dotnet build windows/Leyra.Windows.Checks -m:1
+dotnet build windows/Leyra.Windows.Checks -m:1   # Linux 上加 -p:EnableWindowsTargeting=true
 dotnet windows/Leyra.Windows.Checks/bin/Debug/net8.0/Leyra.Windows.Checks.dll
 dotnet build windows/Leyra.Windows.Desktop -m:1
 dotnet build windows/Leyra.Windows.Agent -m:1

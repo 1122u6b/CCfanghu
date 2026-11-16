@@ -133,7 +133,7 @@ sealed class MainWindow:Form
   switch(command)
   {
    case "shell_info":return Result(new{glass=false,platform="windows"});
-   case "app_version":return Result("0.2.0-dev");
+   case "app_version":return Result(ProductInfo.Version);
    case "verify_owner":ownerProof=await AuthenticateOwner(TextField(args,"reason",200));return Result(new{});
    case "run_rescue":return await ElevatedHelper("--recover");
    case "open_login_items":Process.Start(new ProcessStartInfo("ms-settings:startupapps"){UseShellExecute=true});return Result(new{});
@@ -157,10 +157,36 @@ sealed class MainWindow:Form
     using(var start=Process.Start(new ProcessStartInfo{FileName=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"sc.exe"),Arguments="start LeyraConnect",UseShellExecute=true,Verb="runas",WindowStyle=ProcessWindowStyle.Hidden}))
     {if(start is not null)await start.WaitForExitAsync();}
     return Result(new{});
+   case "test_browser":
+   {
+    var probe=await Service(new{type="shell_action",command,args});
+    var launch=probe.GetProperty("launch").GetString()??"";var target=probe.GetProperty("url").GetString()??"";
+    var allowed=new[]{"chrome.exe","msedge.exe","firefox.exe","brave.exe"};
+    if(!File.Exists(launch)||!allowed.Contains(Path.GetFileName(launch).ToLowerInvariant())||!target.StartsWith("http://127.0.0.1:17892/probe/",StringComparison.Ordinal)||target.Length!=61)throw new InvalidDataException("浏览器检查参数无效");
+    var start=new ProcessStartInfo(launch){UseShellExecute=false};start.ArgumentList.Add(target);Process.Start(start)?.Dispose();
+    return Result(new{});
+   }
+   case "quit_conflict":
+   {
+    // Graceful close runs as the desktop user: the service cannot reach windows in this session.
+    var info=await Service(new{type="shell_action",command,args});var asked=0;
+    foreach(var image in info.GetProperty("images").EnumerateArray().Select(x=>x.GetString()??"").Where(x=>x.Length>0))
+     foreach(var p in Process.GetProcessesByName(image))using(p){try{if(p.SessionId==Process.GetCurrentProcess().SessionId&&p.CloseMainWindow())asked++;}catch(InvalidOperationException){}}
+    return Result(new{asked});
+   }
+   case "relaunch_new_version":
+   {
+    var current=new DirectoryInfo(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar));var versions=current.Parent;
+    if(versions is null||versions.Name!="versions")return Result(new{relaunched=false});
+    var newest=versions.EnumerateDirectories().Where(d=>File.Exists(Path.Combine(d.FullName,"LeyraConnect.exe"))&&Version.TryParse(d.Name.Split('-')[0],out _)).OrderByDescending(d=>Version.Parse(d.Name.Split('-')[0])).FirstOrDefault();
+    if(newest is null||newest.FullName.Equals(current.FullName,StringComparison.OrdinalIgnoreCase)||Version.Parse(newest.Name.Split('-')[0])<=Version.Parse(ProductInfo.Version.Split('-')[0]))return Result(new{relaunched=false});
+    Process.Start(new ProcessStartInfo(Path.Combine(newest.FullName,"LeyraConnect.exe")){UseShellExecute=false})?.Dispose();
+    BeginInvoke(new Action(Quit));return Result(new{relaunched=true});
+   }
    // Security-sensitive operations stay in the authenticated service boundary.
-   case "install_webrtc_profile":case "test_browser":
-   case "open_guide":case "open_web_center":case "quit_conflict":
-   case "force_quit_conflict":case "ai_login":case "ai_login_poll":case "ai_login_cancel":case "relaunch_new_version":
+   case "install_webrtc_profile":
+   case "open_guide":case "open_web_center":
+   case "force_quit_conflict":case "ai_login":case "ai_login_poll":case "ai_login_cancel":
     var action=await Service(new{type="shell_action",command,args});
     if(action.TryGetProperty("url",out var link))OpenBrowser(link.GetString(),false);
     if(action.TryGetProperty("open_url",out var open))OpenBrowser(open.GetString(),command.StartsWith("ai_login",StringComparison.Ordinal));

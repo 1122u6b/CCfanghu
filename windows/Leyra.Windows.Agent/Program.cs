@@ -7,7 +7,7 @@ namespace Leyra.Windows.Agent;
 
 static class Program
 {
- public const string Version="0.2.0-dev";
+ public const string Version=Leyra.Windows.Core.ProductInfo.Version;
  static int Main(string[] args)
  {
   if(!OperatingSystem.IsWindows())return 10;
@@ -36,6 +36,7 @@ sealed class AgentService:ServiceBase
   AgentStore.VerifyDataPath();var store=new AgentStore();runtime=new Runtime(store);stop=new CancellationTokenSource();
   task=Task.WhenAll(runtime.Run(stop.Token),new LocalPipe(runtime,store.Owner).Run(stop.Token));
   _=task.ContinueWith(t=>{if(t.IsFaulted)Environment.Exit(2);},TaskScheduler.Default);
+  _=Task.Run(async()=>{try{await Task.Delay(TimeSpan.FromMinutes(1),stop.Token);Installation.CleanupOldVersions();}catch(OperationCanceledException){}});
  }
  protected override void OnStop()
  {

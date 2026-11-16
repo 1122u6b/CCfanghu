@@ -34,28 +34,60 @@ def pack_address(host,port):
         data=b'\x03'+bytes([len(raw)])+raw
     if not 1<=port<=65535:raise ValueError('invalid port')
     return data+struct.pack('!H',port)
+UPSTREAM_TYPES=('socks5','http')
 def validate_upstream(o):
-    if o.get('type','socks5')!='socks5':raise ValueError('this gateway requires a SOCKS5 upstream')
+    if not isinstance(o,dict):raise ValueError('upstream object required')
+    kind=o.get('type','socks5')
+    if kind not in UPSTREAM_TYPES:raise ValueError('this gateway supports SOCKS5 and HTTP CONNECT upstreams')
     host=str(o['server']);port=int(o['port'])
-    if not host or any(c in host for c in '\r\n/ ') or not 1<=port<=65535:raise ValueError('invalid upstream address')
-    for k in ('username','password'):
-        if not 0<len(str(o[k]).encode())<=255:raise ValueError('invalid credentials length')
-    return {'type':'socks5','server':host,'port':port,'username':str(o['username']),'password':str(o['password'])}
+    if host.startswith('[') and host.endswith(']'):host=host[1:-1]
+    if not host or len(host)>253 or any(c in host for c in '\r\n/ @') or not 1<=port<=65535:raise ValueError('invalid upstream address')
+    user=o.get('username');password=o.get('password')
+    if (user in (None,''))!=(password in (None,'')):raise ValueError('username and password must be given together')
+    result={'type':kind,'server':host,'port':port}
+    if user not in (None,''):
+        for v in (user,password):
+            if not 0<len(str(v).encode())<=255 or any(c in str(v) for c in '\r\n'):raise ValueError('invalid credentials length')
+        result.update(username=str(user),password=str(password))
+    return result
 async def upstream_connect(o,target):
     o=validate_upstream(o)
     r,w=await asyncio.wait_for(asyncio.open_connection(o['server'],o['port']),12)
     try:
-        w.write(b'\x05\x01\x02');await w.drain()
-        if await exact(r,2)!=b'\x05\x02':raise ValueError('upstream did not accept password authentication')
-        u=o['username'].encode();p=o['password'].encode()
-        w.write(b'\x01'+bytes([len(u)])+u+bytes([len(p)])+p);await w.drain()
-        if await exact(r,2)!=b'\x01\x00':raise ValueError('upstream authentication rejected')
+        if o['type']=='http':
+            host,port=target
+            authority=('['+host+']' if ':' in host else host)+':'+str(port)
+            head='CONNECT '+authority+' HTTP/1.1\r\nHost: '+authority+'\r\n'
+            if 'username' in o:head+='Proxy-Authorization: Basic '+base64.b64encode((o['username']+':'+o['password']).encode()).decode()+'\r\n'
+            w.write((head+'\r\n').encode());await w.drain()
+            reply=await asyncio.wait_for(r.readuntil(b'\r\n\r\n'),15)
+            status=reply.split(b'\r\n',1)[0].split(b' ')
+            if len(status)<2 or status[1]!=b'200':raise ValueError('upstream CONNECT rejected: '+(status[1].decode('ascii','replace') if len(status)>1 else 'invalid'))
+            return r,w
+        if 'username' in o:
+            w.write(b'\x05\x01\x02');await w.drain()
+            if await exact(r,2)!=b'\x05\x02':raise ValueError('upstream did not accept password authentication')
+            u=o['username'].encode();p=o['password'].encode()
+            w.write(b'\x01'+bytes([len(u)])+u+bytes([len(p)])+p);await w.drain()
+            if await exact(r,2)!=b'\x01\x00':raise ValueError('upstream authentication rejected')
+        else:
+            w.write(b'\x05\x01\x00');await w.drain()
+            if await exact(r,2)!=b'\x05\x00':raise ValueError('upstream requires authentication')
         w.write(b'\x05\x01\x00'+pack_address(*target));await w.drain()
         head=await exact(r,4)
         if head[:2]!=b'\x05\x00':raise ValueError('upstream CONNECT rejected: '+str(head[1]))
         await address(r,head[3]);return r,w
     except BaseException:
-        w.close();await w.wait_closed();raise
+        w.close()
+        with contextlib.suppress(Exception):await w.wait_closed()
+        raise
+async def connect_any(nodes,target):
+    """Try each upstream of the selected exit in order; the first that completes CONNECT wins."""
+    last=None
+    for node in nodes:
+        try:return await upstream_connect(node,target)
+        except (OSError,ValueError,asyncio.TimeoutError,asyncio.IncompleteReadError,asyncio.LimitOverrunError) as e:last=e
+    raise last or ValueError('no upstream configured')
 
 class Gateway:
     def __init__(self,config):
@@ -64,11 +96,13 @@ class Gateway:
         self.management=Management(config.get('data_dir') or str(Path(config.get('upstream_file',config['cert'])).parent))
         self.devices=Devices(self.management.root)
         self.device_active={}
-    def upstream(self,management=None):
+    def upstreams(self,management=None):
         selected=(management or self.management).selected_upstream()
-        if selected is not None:return validate_upstream(selected)
-        if 'upstream_file' in self.config:return validate_upstream(json.loads(Path(self.config['upstream_file']).read_text()))
-        return validate_upstream(self.config['upstream'])
+        if selected:return [validate_upstream(x) for x in selected]
+        if 'upstream_file' in self.config:value=json.loads(Path(self.config['upstream_file']).read_text())
+        else:value=self.config['upstream']
+        return [validate_upstream(x) for x in (value if isinstance(value,list) else [value])]
+    def upstream(self,management=None):return self.upstreams(management)[0]
     def node(self,device=None):
         return {'name':'自建前置 · 住宅出口','type':'socks5','server':self.config['public_host'],'port':int(self.config['port']),'username':device.id if device else self.config['client_user'],'password':device.secret if device else self.config['client_password'],'tls':True,'fingerprint':self.config['fingerprint'],'udp':False}
     async def response(self,w,status,obj):
@@ -182,7 +216,7 @@ class Gateway:
                 self.device_active[device.id]=self.device_active.get(device.id,0)+1;counted_device=True
             head=await exact(r,4)
             if head[:3]!=b'\x05\x01\x00':w.write(b'\x05\x07\x00\x01'+b'\x00'*6);await w.drain();return
-            target=await address(r,head[3]);upr,upwriter=await upstream_connect(self.upstream(device.management if device else None),target)
+            target=await address(r,head[3]);upr,upwriter=await connect_any(self.upstreams(device.management if device else None),target)
             w.write(b'\x05\x00\x00\x01'+b'\x00'*6);await w.drain()
             tasks=[asyncio.create_task(self.pipe(r,upwriter)),asyncio.create_task(self.pipe(upr,w))]
             if device:tasks.append(asyncio.create_task(self.watch_device(device)))

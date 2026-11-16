@@ -110,5 +110,19 @@ static class Installation
   using(var engine=new WfpEngine())engine.RemoveOwned();
 
  }
+ // After an automatic update the previous side-by-side version is no longer referenced by the
+ // service. Its desktop process may still be open for a moment, so failures are retried next start.
+ public static void CleanupOldVersions()
+ {
+  var root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"LEYRAConnect","versions");
+  var current=Path.Combine(root,Program.Version);
+  if(!string.Equals(Path.GetDirectoryName(Environment.ProcessPath),current,StringComparison.OrdinalIgnoreCase)||!Directory.Exists(root))return;
+  foreach(var directory in Directory.EnumerateDirectories(root))
+  {
+   var name=Path.GetFileName(directory);
+   if(name==Program.Version||Leyra.Windows.Core.ProductInfo.Compare(name,Program.Version)>=0)continue;
+   try{Directory.Delete(directory,true);}catch(Exception e)when(e is IOException or UnauthorizedAccessException){}
+  }
+ }
  public static void RemoveService(){Admin();Stop();BrowserPolicies.Restore();if(Exists()&&Sc("delete",ServiceName)!=0)throw new InvalidOperationException("无法卸载后台服务");}
 }

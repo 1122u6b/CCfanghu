@@ -86,7 +86,7 @@ class DeviceTests(unittest.TestCase):
         node = {'type': 'socks5', 'server': 'example.test', 'port': 1080, 'username': 'test-user', 'password': 'test-password'}
         result = self.rpc(self.da, {'type': 'store_exit', 'name': 'A exit', 'node': node})
         self.rpc(self.da, {'type': 'select_exit', 'id': result['id']})
-        self.assertEqual(self.da.management.selected_upstream(), node)
+        self.assertEqual(self.da.management.selected_upstream(), [node])
         self.assertIsNone(self.db.management.selected_upstream())
         self.assertIsNone(self.owner.selected_upstream())
 

@@ -98,7 +98,7 @@ def install(address):
  if os.geteuid()!=0:raise PermissionError('Run this installer as root on the existing server')
  if not ipaddress.ip_address(address).is_global:raise ValueError('A public literal server IP is required')
  source=Path(__file__).resolve().parents[1]/'server'
- files=['gateway.py','management.py','devices.py','dns_probe.py','ai_login.py','verify_live.py']
+ files=['gateway.py','management.py','devices.py','dns_probe.py','ai_login.py','verify_live.py','admin.py']
  for name in files:compile((source/name).read_bytes(),name,'exec')
  records={service:read_service(service,entry) for service,entry in SERVICES.items()}
  identities={}

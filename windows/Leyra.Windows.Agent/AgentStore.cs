@@ -13,7 +13,9 @@ sealed class AgentSettings
  public bool QuitPause{get;set;}
  public int ConsentVersion{get;set;}
  public string? OriginalTimezone{get;set;}
- public string ExitTimezone{get;set;}="Asia/Hong_Kong";
+ // 由出口 IP 归属地自动取得；还没取得时为空，界面显示「还不知道」。
+ public string ExitTimezone{get;set;}="";
+ public string? TimezoneDismissedFor{get;set;}
  public List<DirectRule> DirectRules{get;set;}=[];
 }
 sealed class AgentStore
