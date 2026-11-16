@@ -1,0 +1,28 @@
+/* 在 App 里（Tauri 窗口）：去掉原型里模拟的桌面——菜单栏（macOS）/ 任务栏（Windows）、托盘弹出、演示条、窗口标题栏，
+   内容铺满真窗口。 */
+html.app, html.app body { height: 100%; overflow: hidden; }
+html.app .p-menubar, html.app .p-taskbar, html.app .p-demo, html.app .p-traypop, html.app .p-win > .hx-winbar, html.app .p-win > .w11-bar { display: none !important; }
+html.app .p-desk { display: block; padding: 0; min-width: 0; gap: 0; }
+/* 原型的演示条会给窗口写内联的宽高（960 × 620 等），App 里窗口多大内容就多大，所以要 !important */
+html.app .p-stage, html.app .p-win { width: 100vw !important; height: 100vh !important; }
+html.app .p-win { border: 0; border-radius: 0; box-shadow: none; }
+html.app .p-body { flex: 1; height: auto; }
+/* macOS：标题栏透明，红绿灯由系统画在侧栏顶上（位置在 tauri.conf.json 里）；原型里画的假灯不显示，位置留着 */
+html.app .hx-lights { visibility: hidden; }
+/* 壳开了窗口材质（macOS 侧栏半透明、Windows 11 Mica，appshell 的 shell_info 说了算）：窗口底透明，侧栏露出材质，内容区自己铺底色 */
+html.app.glass, html.app.glass body, html.app.glass .p-desk, html.app.glass .p-stage, html.app.glass .hx-win { background: transparent; }
+html.app.glass .hx-nav { background: transparent; }
+html.app.glass .p-body > :not(.hx-nav):not(.p-lightsfloat) { background: var(--window); }
+/* 网络恢复工具：原型里是摆在桌面上的另一个小窗（正式的恢复工具是独立程序）；App 里从设置打开时当作主窗口里的弹窗——
+   压一层遮罩、居中，不画假的红绿灯和标题栏按钮。 */
+html.app .p-rescue { position: fixed; inset: 0; top: 0; left: 0; width: auto; max-height: none; transform: none; z-index: 35; display: grid; place-items: center; padding: 24px; background: var(--scrim); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+html.app .p-rescue > .hx-win { width: min(440px, 100%); max-height: 100%; overflow: auto; border-radius: var(--hx-r-card-lg); border-color: var(--border); }
+html.app .p-rescue .hx-winbar { height: auto; padding: 18px 20px 0; background: transparent; border: 0; font-size: 16px; line-height: 24px; font-weight: 600; color: var(--text); }
+html.app .p-rescue .hx-winbar .hx-lights, html.app .p-rescue .w11-caps { display: none; }
+html.app .p-rescue .hx-winbar > span { margin: 0 !important; padding: 0 !important; }
+html.app .p-rescue .w11-bar { height: auto; padding: 18px 20px 0; background: transparent; border: 0; font-size: 16px; line-height: 24px; font-weight: 600; color: var(--text); -webkit-backdrop-filter: none; backdrop-filter: none; }
+html.app .p-rescue .in { padding: 12px 20px 20px; min-height: 0; }
+html.app .p-rescue .p-modal { inset: 0; border-radius: var(--hx-r-card-lg); }
+
+/* 30 天没连上服务端：红灯（原型的公告只有普通和重要两种）。 */
+.hx-announce.important.danger { background: var(--danger-soft); }

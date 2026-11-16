@@ -1,0 +1,58 @@
+name: Windows native validation (explicit compute opt-in)
+on:
+  workflow_dispatch:
+    inputs:
+      allow_hosted_compute:
+        description: 'Allow this one Windows run to consume included Actions minutes or incur metered compute charges'
+        type: boolean
+        required: true
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: windows-native-validation-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  native:
+    if: ${{ inputs.allow_hosted_compute == true }}
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Compile Windows components
+        run: dotnet build windows/Leyra.Windows.Checks -c Release -m:1 --nologo
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check original interface integration
+        run: |
+          npm ci
+          npm run test:ui
+      - name: Compile desktop shell
+        run: dotnet build windows/Leyra.Windows.Desktop -c Release -m:1 --nologo
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test device isolation and actual TLS interop
+        shell: pwsh
+        run: |
+          python -m pip install -r requirements-dev.txt
+          $env:PYTHONPATH = "$pwd/server"
+          $env:LEYRA_CHECKS_DLL = "$pwd/windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll"
+          python -m unittest discover -s server/tests -v
+      - name: Execute existing assertions
+        run: dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll
+      - name: Exercise actual WFP only on this disposable hosted runner
+        run: dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll --native-wfp-fixture
+      - name: Remove fixture-owned filters even after a failed check
+        if: always()
+        shell: pwsh
+        run: |
+          $fixture = 'windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll'
+          if (Test-Path $fixture) {
+            dotnet $fixture --cleanup-wfp-fixture
+            if ($LASTEXITCODE -ne 0) { throw 'WFP cleanup failed; runner must be discarded' }
+          }

@@ -1,0 +1,7 @@
+{
+ "name":"leyra-windows-product",
+ "private":true,
+ "type":"module",
+ "scripts":{"test:ui":"node --test tests/ui.test.mjs"},
+ "devDependencies":{"happy-dom":"21.0.4"}
+}
