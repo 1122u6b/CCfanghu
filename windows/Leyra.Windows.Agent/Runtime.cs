@@ -41,7 +41,9 @@ sealed partial class Runtime:IDisposable
   _=Task.Run(()=>UpdateLoop(stop),CancellationToken.None);
   while(!stop.IsCancellationRequested)
   {
-   RefreshConflicts();RefreshBypass();
+   // Helper checks must never take the protection loop down with them.
+   try{RefreshConflicts();RefreshBypass();}
+   catch(Exception e)when(e is not OperationCanceledException){Program.Log("helper check failed",e);}
    await gate.WaitAsync(stop);
    try
    {
@@ -146,7 +148,14 @@ sealed partial class Runtime:IDisposable
   var remaining=Math.Max(0,store.Settings.PausedUntil-DateTimeOffset.UtcNow.ToUnixTimeSeconds());
   return new{version=Program.Version,consent_version=store.Settings.ConsentVersion,protection=new{state=visible,reason,remaining_secs=remaining,auto_resume_on_node=false,quit=store.Settings.QuitPause,blocked=visible=="blocked",since_secs=0},lines,current_line=index==0?"1":index.ToString(),line_mode=new{mode},rate=visible=="protected"?new{up_bps=up,down_bps=down}:null,guard=visible=="protected"?new{since=guardSince.ToUnixTimeSeconds(),blocked=(int?)null}:null,checks=bypassCheck is not null&&visible=="protected"&&JsonSerializer.SerializeToElement(bypassCheck).GetProperty("verdict").GetString()=="fail"?new[]{bypassCheck}:Array.Empty<object>(),conflicts,proxy_undo=proxy.UndoAvailable,last_error=lastError,update=updateReady,last_check=lastCheck is JsonElement lc?new{at=lc.GetProperty("at").GetInt64(),kind=Text(lc,"kind"),problems=lc.GetProperty("problems").GetInt32()}:null};
  }
- void Publish(){snapshot=new Snapshot(Json(BuildStatus()),heartbeat,state=="protected");}
+ string writtenState="";
+ void Publish()
+ {
+  snapshot=new Snapshot(Json(BuildStatus()),heartbeat,state=="protected");
+  // A tiny state file for support and automated checks (no credentials, written only on change).
+  var now=state+" "+reason;
+  if(now!=writtenState){writtenState=now;try{AgentStore.Atomic(Path.Combine(AgentStore.Root,"agent-state.txt"),System.Text.Encoding.UTF8.GetBytes(Program.Version+" "+now));}catch(Exception e)when(e is IOException or UnauthorizedAccessException){}}
+ }
  object Status()
  {
   var value=snapshot;var now=DateTimeOffset.UtcNow;

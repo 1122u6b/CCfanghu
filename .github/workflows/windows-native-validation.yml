@@ -138,6 +138,17 @@ jobs:
           if ($svc.StartType -ne 'Automatic') { throw 'Background service is not set to start automatically' }
           if (-not (Test-Path "$env:ProgramData\LeyraConnect\owner.sid")) { throw 'Runtime data directory not initialized' }
           if (Test-Path "$env:ProgramData\LeyraConnect\device-profile.json") { throw 'Stale activation survived a fresh install' }
+          # The service must stay up (no crash loop) and reach the unactivated state.
+          $pid1 = (Get-CimInstance Win32_Service -Filter "Name='LeyraConnect'").ProcessId
+          Start-Sleep -Seconds 30
+          $pid2 = (Get-CimInstance Win32_Service -Filter "Name='LeyraConnect'").ProcessId
+          $log = "$env:ProgramData\LeyraConnect\agent-error.log"
+          if (Test-Path $log) { Write-Host '--- agent-error.log ---'; Get-Content $log }
+          $stateFile = "$env:ProgramData\LeyraConnect\agent-state.txt"
+          $state = if (Test-Path $stateFile) { Get-Content $stateFile -Raw } else { '(missing)' }
+          Write-Host "Agent state: $state  pid $pid1 -> $pid2"
+          if ($pid1 -ne $pid2 -or $pid2 -eq 0) { throw 'Background service restarted (crash loop)' }
+          if ($state -notmatch 'not_activated') { throw "Fresh install did not reach the activation state: $state" }
           Write-Host 'LEYRA_INSTALL_CHECK=PASS'
       - name: Silent uninstall and verify cleanup
         if: always()
