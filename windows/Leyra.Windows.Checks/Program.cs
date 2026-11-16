@@ -115,6 +115,11 @@ if(args.Length==2 && args[0]=="--timeout-fixture")
 }
 
 
+if(args.Length==1 && args[0]=="--native-credential-fixture")
+{
+ if(!OperatingSystem.IsWindows())throw new PlatformNotSupportedException("Disposable Windows runner required");
+ CredentialFixture.Run();
+}
 if(args.Length==1 && args[0]=="--native-tun-fixture")
 {
  if(!OperatingSystem.IsWindows())throw new PlatformNotSupportedException("Disposable Windows runner required");

@@ -1,5 +1,7 @@
 name: Windows native validation (explicit compute opt-in)
 on:
+  push:
+    branches: [windows-validation-once-20261116-allow1]
   workflow_dispatch:
     inputs:
       allow_hosted_compute:
@@ -14,9 +16,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   native:
-    if: ${{ inputs.allow_hosted_compute == true }}
+    if: ${{ inputs.allow_hosted_compute == true || (github.event_name == 'push' && github.ref == 'refs/heads/windows-validation-once-20261116-allow1') }}
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -47,6 +49,8 @@ jobs:
           python -m unittest discover -s server/tests -v
       - name: Execute existing assertions
         run: dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll
+      - name: Exercise actual account credential verification
+        run: dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll --native-credential-fixture
       - name: Prepare verified official Windows kernel
         run: python scripts/prepare_kernel.py windows artifacts/native-kernel
       - name: Exercise actual job-owned process management
