@@ -1,7 +1,5 @@
 name: Windows native validation (explicit compute opt-in)
 on:
-  push:
-    branches: [windows-validation-once-20261116-allow1]
   workflow_dispatch:
     inputs:
       allow_hosted_compute:
@@ -16,9 +14,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   native:
-    if: ${{ inputs.allow_hosted_compute == true || (github.event_name == 'push' && github.ref == 'refs/heads/windows-validation-once-20261116-allow1') }}
+    if: ${{ inputs.allow_hosted_compute == true }}
     runs-on: windows-2022
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
