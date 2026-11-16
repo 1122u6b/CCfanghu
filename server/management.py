@@ -10,6 +10,19 @@ def text(value,limit,required=False):
     if not isinstance(value,str) or len(value)>limit or (required and not value.strip()):raise ManagementError('invalid text')
     return value.strip()
 
+def direct_rule(cidr,note,confirmed):
+    import ipaddress
+    cidr=text(cidr,80,True);note=text(note,200)
+    if any(ord(c)<32 or ord(c)==127 for c in note):raise ManagementError('invalid note')
+    try:network=ipaddress.IPv4Network(cidr,strict=False)
+    except ValueError:raise ManagementError('literal IPv4 network required') from None
+    if not 8<=network.prefixlen<=32:raise ManagementError('network prefix must be /8 to /32')
+    first=int(network.network_address)>>24
+    if first in (0,127) or first>=224 or network.network_address in ipaddress.IPv4Network('169.254.0.0/16'):raise ManagementError('reserved direct network')
+    private=any(network.subnet_of(ipaddress.IPv4Network(x)) for x in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16'))
+    if not private and confirmed is not True:raise ManagementError('public direct network requires confirmation')
+    return {'cidr':str(network),'note':note,'public_ip':not private}
+
 class Management:
     def __init__(self,root):
         self.root=Path(root);self.root.mkdir(mode=0o700,parents=True,exist_ok=True)
@@ -165,7 +178,22 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
                 identity=int(req.get('id',0))
                 if self.get(db,'selected_exit')==identity:raise ManagementError('select another exit first')
                 db.execute('DELETE FROM exits WHERE id=?',(identity,));return {'saved':True}
-            if kind=='direct_rules':return {'items':[dict(r) for r in db.execute('SELECT * FROM direct_rules ORDER BY cidr')]}
+            if kind=='direct_rules':return {'items':self.get(db,'client_direct_rules_v1',[])}
+            if kind in ('add_direct_rule','remove_direct_rule','set_direct_note'):
+                rules=self.get(db,'client_direct_rules_v1',[])
+                if kind=='add_direct_rule':
+                    value=direct_rule(req.get('rule'),req.get('note',''),req.get('confirm_public',False))
+                    rules=[x for x in rules if x['cidr']!=value['cidr']]
+                    if len(rules)>=64:raise ManagementError('maximum 64 direct rules')
+                    rules.append(value)
+                elif kind=='remove_direct_rule':rules=[x for x in rules if x['cidr']!=req.get('cidr')]
+                else:
+                    found=False
+                    for index,item in enumerate(rules):
+                        if item['cidr']==req.get('cidr'):
+                            rules[index]=direct_rule(item['cidr'],req.get('note',''),item['public_ip']);found=True;break
+                    if not found:raise ManagementError('direct rule not found')
+                self.put(db,'client_direct_rules_v1',rules);return {'saved':True,'items':rules}
             if kind=='ai_accounts':return {'items':[{**json.loads(r['data']),'id':r['id']} for r in db.execute('SELECT id,data FROM ai_accounts')]}
             if kind=='admin_ai_account':
                 value=req.get('account');secret=req.get('secret',{})

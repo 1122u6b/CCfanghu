@@ -565,7 +565,7 @@
       var items = (r.items || []).filter(function (c) { return c.severity === 'warn'; });
       results.E4 = items.length
         ? { id: 'E4', verdict: 'fail', detail: items.map(function (c) { return c.message; }).join('；') }
-        : { id: 'E4', verdict: 'pass', detail: '正常' };
+        : r.complete === false ? { id: 'E4', verdict: 'skipped', detail: '已检查系统代理；其他网络软件尚未完成检测' } : { id: 'E4', verdict: 'pass', detail: '正常' };
       P.render();
     }).catch(function () {});
   }

@@ -70,6 +70,18 @@ class DeviceTests(unittest.TestCase):
         with self.assertRaises(ManagementError): self.rpc(self.db, {'type': 'ticket_image', 'ticket': ticket['id'], 'id': image})
         self.assertEqual(base64.b64decode(self.rpc(self.da, {'type': 'ticket_image', 'ticket': ticket['id'], 'id': image})['data']), png)
 
+    def test_direct_rules_are_server_persisted_and_device_isolated(self):
+        self.rpc(self.da,{'type':'add_direct_rule','rule':'192.168.8.9/24','note':'printer'})
+        self.assertEqual(self.rpc(self.da,{'type':'direct_rules'})['items'][0]['cidr'],'192.168.8.0/24')
+        self.assertEqual(self.rpc(self.db,{'type':'direct_rules'})['items'],[])
+        with self.assertRaises(ManagementError):self.rpc(self.da,{'type':'add_direct_rule','rule':'203.0.113.8','note':''})
+        with self.assertRaises(ManagementError):self.rpc(self.da,{'type':'add_direct_rule','rule':'0.0.0.0/0','confirm_public':True})
+        self.rpc(self.da,{'type':'set_direct_note','cidr':'192.168.8.0/24','note':'updated'})
+        fresh=self.registry.authenticate(self.a['token'])
+        self.assertEqual(self.rpc(fresh,{'type':'direct_rules'})['items'][0]['note'],'updated')
+        self.rpc(fresh,{'type':'remove_direct_rule','cidr':'192.168.8.0/24'})
+        self.assertEqual(self.rpc(self.da,{'type':'direct_rules'})['items'],[])
+
     def test_upstream_selection_isolated(self):
         node = {'type': 'socks5', 'server': 'example.test', 'port': 1080, 'username': 'test-user', 'password': 'test-password'}
         result = self.rpc(self.da, {'type': 'store_exit', 'name': 'A exit', 'node': node})

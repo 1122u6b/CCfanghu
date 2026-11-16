@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,tar
         allowed = {'server_time','account','set_contact','messages','mark_read','tickets','new_ticket',
                    'ticket_reply','ticket_rate','upload_chunk','ticket_image','help','exits','store_exit',
                    'select_exit','delete_exit','direct_rules','ai_accounts','ai_secrets','ai_report',
-                   'dns_config','dns_probe_begin','dns_probe_result','ai_login_begin','ai_login_poll','ai_login_cancel'}
+                   'add_direct_rule','remove_direct_rule','set_direct_note','dns_config','dns_probe_begin','dns_probe_result','ai_login_begin','ai_login_poll','ai_login_cancel'}
         if kind not in allowed:
             raise ManagementError('device is not allowed to perform this command')
         if kind == 'dns_config':

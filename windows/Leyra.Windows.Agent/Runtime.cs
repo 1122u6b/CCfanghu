@@ -74,6 +74,7 @@ sealed partial class Runtime:IDisposable
   var config=await cloud.SendAsync("/api/v1/config",cancellation:ct);nodes=config.GetProperty("proxies").Clone();
   if(!config.TryGetProperty("identity",out var identity)||Text(identity,"role")!="device"||Text(identity,"id")!=profile.DeviceId)throw new InvalidDataException("服务器没有返回当前设备的独立身份");
   MihomoConfiguration.ValidateNodes(nodes);
+  var remoteRules=await Remote(new{type="direct_rules"},ct);ReadRules(remoteRules);
   var dns=PrivateDns.Parse(await cloud.RpcAsync(new{type="dns_config"},ct),profile);
   await kernel.Start(MihomoConfiguration.Build(nodes,kernel.Secret,true,dns,store.Settings.DirectRules),ct);
   for(var i=0;i<40;i++){tunnel=KernelSession.Tunnel();if(tunnel!=0)break;await Task.Delay(200,ct);}
@@ -151,7 +152,7 @@ sealed partial class Runtime:IDisposable
   if(type=="timezone")return Zone();
   if(type=="doctor")return await Doctor(Bool(request,"deep"),stop);
   if(type=="browser_results")return new{items=Array.Empty<object>()};
-  if(type=="check_conflicts")return new{items=proxy.Conflicts()};
+  if(type=="check_conflicts")return new{items=proxy.Conflicts(),complete=false};
   await gate.WaitAsync(stop);
   try
   {
@@ -185,12 +186,12 @@ sealed partial class Runtime:IDisposable
     case "direct_rules":return new{items=store.Settings.DirectRules.Select(x=>new{cidr=x.Cidr,note=x.Note,public_ip=x.Public}).ToArray()};
     case "add_direct_rule":
      var rule=DirectRule.Parse(Text(request,"rule"),Text(request,"note"),Bool(request,"confirm_public"));if(rule.Public)NeedOwner(request);
-     if(store.Settings.DirectRules.Count>=64)throw new InvalidOperationException("直连规则最多 64 条");
-     store.Settings.DirectRules.RemoveAll(r=>r.Cidr==rule.Cidr);store.Settings.DirectRules.Add(rule);store.Save();configured=false;return new{saved=true};
-    case "remove_direct_rule":store.Settings.DirectRules.RemoveAll(r=>r.Cidr==Text(request,"cidr"));store.Save();configured=false;return new{saved=true};
+     if(store.Settings.DirectRules.Count>=64&&!store.Settings.DirectRules.Any(x=>x.Cidr==rule.Cidr))throw new InvalidOperationException("直连规则最多 64 条");
+     var added=await Remote(new{type="add_direct_rule",rule=rule.Cidr,note=rule.Note,confirm_public=rule.Public},stop);ReadRules(added);configured=false;return new{saved=true};
+    case "remove_direct_rule":var removed=await Remote(request,stop);ReadRules(removed);configured=false;return new{saved=true};
     case "set_direct_note":
      var at=store.Settings.DirectRules.FindIndex(r=>r.Cidr==Text(request,"cidr"));if(at<0)throw new InvalidOperationException("找不到这条规则");
-     var old=store.Settings.DirectRules[at];store.Settings.DirectRules[at]=DirectRule.Parse(old.Cidr,Text(request,"note"),old.Public);store.Save();return new{saved=true};
+     var old=store.Settings.DirectRules[at];DirectRule.Parse(old.Cidr,Text(request,"note"),old.Public);var edited=await Remote(request,stop);ReadRules(edited);return new{saved=true};
     case "set_timezone":
      store.Settings.OriginalTimezone??=TimeZoneInfo.Local.Id;store.Save();await SystemClock.SetTimezone(store.Settings.ExitTimezone,stop);return Zone();
     case "restore_timezone":
@@ -217,6 +218,11 @@ sealed partial class Runtime:IDisposable
    }
   }
   finally{Publish();gate.Release();}
+ }
+ void ReadRules(JsonElement result)
+ {
+  var items=result.GetProperty("items");if(items.ValueKind!=JsonValueKind.Array||items.GetArrayLength()>64)throw new InvalidDataException("服务端直连规则无效");
+  store.Settings.DirectRules=items.EnumerateArray().Select(x=>DirectRule.Parse(Text(x,"cidr"),Text(x,"note"),Bool(x,"public_ip"))).ToList();store.Save();
  }
  async Task<JsonElement> Remote(object request,CancellationToken stop)
  {
