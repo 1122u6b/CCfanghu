@@ -33,16 +33,17 @@ static class CredentialFixture
   {
    var account=Environment.MachineName+"\\"+name;
    var sid=(SecurityIdentifier)new NTAccount(Environment.MachineName,name).Translate(typeof(SecurityIdentifier));
-   void Verify(byte[] bytes,SecurityIdentifier owner,bool expected)
+   void Verify(string label,byte[] bytes,SecurityIdentifier owner,bool expected)
    {
-    if(NativeCredentials.Verify(bytes,owner)!=expected)throw new Exception("Windows credential verification result mismatch");
+    var actual=NativeCredentials.Verify(bytes,owner);
+    if(actual!=expected)throw new Exception($"Windows credential case {label}: expected {expected}, got {actual}, Win32 {Marshal.GetLastWin32Error()}");
     if(bytes.Any(x=>x!=0))throw new Exception("Packed credentials were not cleared");
    }
-   Verify(Pack(account,password),sid,true);
-   Verify(Pack(account,password),WindowsIdentity.GetCurrent().User!,false);
-   Verify(Pack(account,password+"-wrong"),sid,false);
-   Verify(new byte[]{1,2,3},sid,false);
-   Verify(Enumerable.Repeat((byte)65,65537).ToArray(),sid,false);
+   Verify("correct-owner",Pack(account,password),sid,true);
+   Verify("different-owner",Pack(account,password),WindowsIdentity.GetCurrent().User!,false);
+   Verify("wrong-password",Pack(account,password+"-wrong"),sid,false);
+   Verify("malformed",new byte[]{1,2,3},sid,false);
+   Verify("oversized",Enumerable.Repeat((byte)65,65537).ToArray(),sid,false);
    Console.WriteLine("PASS real Windows account password and exact owner SID binding, wrong-password/malformed rejection and credential-buffer clearing");
   }
   finally{var deleted=NetUserDel(null,name);if(deleted!=0)throw new Win32Exception((int)deleted,"Temporary test account cleanup failed");}
