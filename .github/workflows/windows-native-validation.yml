@@ -187,7 +187,26 @@ jobs:
           $tool = (Resolve-Path 'windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll').Path
           $agent = (Get-ChildItem 'C:\Apps\Leyra\versions\*\Leyra.Agent.exe' | Select-Object -First 1).FullName
           $stateFile = "$env:ProgramData\LeyraConnect\agent-state.txt"
-          function Ask($json) { $out = dotnet $tool --pipe $json; Write-Host "  -> $($out | Select-Object -First 1)"; return $LASTEXITCODE }
+          # Requests are sent like the customer's desktop app: same service verification, and from a basic-user
+          # token without administrator rights (runas /trustlevel), which is how the app normally runs.
+          New-Item -ItemType Directory -Force C:\LeyraCi | Out-Null
+          icacls C:\LeyraCi /grant "*S-1-1-0:(OI)(CI)M" | Out-Null
+          $dotnetExe = (Get-Command dotnet).Source
+          Set-Content C:\LeyraCi\run.cmd "@set LEYRA_EXPECT_AGENT=$agent`r`n@`"$dotnetExe`" `"$tool`" --pipe-file C:\LeyraCi\req_%1.json C:\LeyraCi\out_%1.json" -Encoding ascii
+          $script:n = 0; $script:adminSeen = $false
+          function Ask($json) {
+            $script:n++; $i = $script:n
+            Set-Content "C:\LeyraCi\req_$i.json" $json -Encoding utf8NoBOM
+            runas /trustlevel:0x20000 "C:\LeyraCi\run.cmd $i" | Out-Null
+            $end = (Get-Date).AddSeconds(150)
+            while (-not (Test-Path "C:\LeyraCi\out_$i.json") -and (Get-Date) -lt $end) { Start-Sleep 1 }
+            if (-not (Test-Path "C:\LeyraCi\out_$i.json")) { Write-Host '  -> no answer (limited request did not finish)'; return 9 }
+            $o = Get-Content "C:\LeyraCi\out_$i.json" -Raw | ConvertFrom-Json
+            if ($o.admin) { $script:adminSeen = $true }
+            $text = if ($o.error) { $o.error } else { ($o.reply | ConvertTo-Json -Depth 6 -Compress) }
+            Write-Host "  -> [admin=$($o.admin)] $($text.Substring(0, [Math]::Min(300, $text.Length)))"
+            return [int]$o.exit
+          }
           function WaitFor($pattern, $seconds) {
             $end = (Get-Date).AddSeconds($seconds)
             while ((Get-Date) -lt $end) { $s = if (Test-Path $stateFile) { Get-Content $stateFile -Raw } else { '' }; if ($s -match $pattern) { return $s }; Start-Sleep 2 }
@@ -216,7 +235,7 @@ jobs:
           if ($s -notmatch 'protected') { $failures += "not protected after activation: $s" }
           Write-Host '   account and a full security check while protected'
           Ask '{"type":"account"}' | Out-Null
-          dotnet $tool --pipe '{"type":"doctor"}' | Out-File doctor.json
+          Ask '{"type":"doctor"}' | Out-Null; Copy-Item "C:\LeyraCi\out_$script:n.json" doctor.json -ErrorAction SilentlyContinue
           Write-Host '4. network recovery tool, then service start and resume (the 恢复防护 path)'
           & $agent --recover; Write-Host "   recover exit $LASTEXITCODE"
           Start-Service LeyraConnect; Start-Sleep 3
@@ -226,7 +245,8 @@ jobs:
           & $agent --recover | Out-Null
           schtasks /Delete /TN LeyraCiRecover /F | Out-Null
           if (Test-Path "$env:ProgramData\LeyraConnect\agent-error.log") { Write-Host '--- agent-error.log ---'; Get-Content "$env:ProgramData\LeyraConnect\agent-error.log" }
-          if (Test-Path doctor.json) { Write-Host '--- security check verdicts ---'; (Get-Content doctor.json -Raw | ConvertFrom-Json).value.items | ForEach-Object { Write-Host "$($_.id) $($_.verdict)" } }
+          if ($script:adminSeen) { $failures += 'requests ran with administrator rights; the limited-user path was not tested' }
+          if (Test-Path doctor.json) { Write-Host '--- security check verdicts ---'; (Get-Content doctor.json -Raw | ConvertFrom-Json).reply.value.items | ForEach-Object { Write-Host "$($_.id) $($_.verdict)" } }
           if ($failures.Count) { $failures | ForEach-Object { Write-Host "FAIL: $_" }; throw 'Customer flow failed' }
           Write-Host 'LEYRA_CUSTOMER_FLOW=PASS'
       - name: Silent uninstall and verify cleanup

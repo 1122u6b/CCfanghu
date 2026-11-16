@@ -89,8 +89,22 @@ sealed class MainWindow:Form
   }
   catch(Exception error)
   {
+   LogError(error);
    if(!quitting && browser.CoreWebView2 is not null)browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{id,ok=false,error=error.Message}));
   }
+ }
+ static string? lastLogged;
+ // %LOCALAPPDATA%\Leyra\desktop-error.log: why a request failed (type and message only, never request contents).
+ static void LogError(Exception error)
+ {
+  try
+  {
+   var line=error.GetType().Name+": "+error.Message;if(line==lastLogged)return;lastLogged=line;
+   var dir=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Leyra");Directory.CreateDirectory(dir);
+   var file=Path.Combine(dir,"desktop-error.log");if(File.Exists(file)&&new FileInfo(file).Length>262144)File.Delete(file);
+   File.AppendAllText(file,DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")+" "+ProductInfo.Version+" "+line+Environment.NewLine);
+  }
+  catch{}
  }
  async Task<JsonElement> Service(object request,bool internalAuthentication=false)
  {
@@ -106,7 +120,9 @@ sealed class MainWindow:Form
    using var pipe=new NamedPipeClientStream(".",PipeProtocol.Name,PipeDirection.InOut,PipeOptions.Asynchronous);
    try{await pipe.ConnectAsync(2500,deadline.Token);}
    catch(TimeoutException){throw new InvalidOperationException("无法连接本机防护服务，请检查程序安装状态");}
-   NativePeer.Verify(pipe);
+   var expected=Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,"Leyra.Agent.exe"));
+   if(!File.Exists(expected))throw new InvalidOperationException("已安装的防护服务文件缺失，请重新安装");
+   ServicePeer.Verify(pipe,expected);
    await PipeProtocol.WriteAsync(pipe,new{version=1,request=payload},deadline.Token);
    var result=await PipeProtocol.ReadAsync(pipe,deadline.Token);
    if(!result.TryGetProperty("ok",out var ok)||!ok.GetBoolean())throw new InvalidOperationException(result.TryGetProperty("error",out var error)?error.GetString():"防护服务未返回成功结果");

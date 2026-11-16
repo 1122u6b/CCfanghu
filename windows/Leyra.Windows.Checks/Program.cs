@@ -6,12 +6,35 @@ using System.Text.Json;
 // Controlled child modes exercise the same ordinary argv launch used by the kernel.
 if(args.Length>0 && args[0]=="--fixture-job-exit")Environment.Exit(args.Length==2 && args[1]=="有 空格"?7:9);
 if(args.Length==1 && args[0]=="--fixture-job-wait"){await Task.Delay(TimeSpan.FromSeconds(30));Environment.Exit(0);}
+// Same as --pipe, but reads the request from a file and writes {admin,exit,reply|error} to a file.
+// Used to send requests from a limited (non-administrator) token, like a customer's desktop app.
+if(args.Length==3 && args[0]=="--pipe-file")
+{
+ var admin=OperatingSystem.IsWindows()&&new System.Security.Principal.WindowsPrincipal(System.Security.Principal.WindowsIdentity.GetCurrent()).IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+ int code;object body;
+ try
+ {
+  using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(120));
+  using var pipe=new System.IO.Pipes.NamedPipeClientStream(".",PipeProtocol.Name,System.IO.Pipes.PipeDirection.InOut,System.IO.Pipes.PipeOptions.Asynchronous);
+  await pipe.ConnectAsync(5000,timeout.Token);
+  ServicePeer.Verify(pipe,Environment.GetEnvironmentVariable("LEYRA_EXPECT_AGENT")??throw new InvalidOperationException("LEYRA_EXPECT_AGENT missing"));
+  using var request=JsonDocument.Parse(File.ReadAllText(args[1]));
+  await PipeProtocol.WriteAsync(pipe,new{version=1,request=request.RootElement},timeout.Token);
+  var reply=await PipeProtocol.ReadAsync(pipe,timeout.Token);
+  code=reply.TryGetProperty("ok",out var ok)&&ok.ValueKind==JsonValueKind.True?0:3;body=new{admin,exit=code,reply};
+ }
+ catch(Exception e){code=4;body=new{admin,exit=code,error=e.GetType().Name+": "+e.Message};}
+ File.WriteAllText(args[2]+".tmp",JsonSerializer.Serialize(body));File.Move(args[2]+".tmp",args[2]);
+ Environment.Exit(code);
+}
 // End-to-end acceptance: send one request to the installed service exactly as the desktop app does.
 if(args.Length==2 && args[0]=="--pipe")
 {
  using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(120));
  using var pipe=new System.IO.Pipes.NamedPipeClientStream(".",PipeProtocol.Name,System.IO.Pipes.PipeDirection.InOut,System.IO.Pipes.PipeOptions.Asynchronous);
  await pipe.ConnectAsync(5000,timeout.Token);
+ // Same check as the desktop app; the expected program comes from LEYRA_EXPECT_AGENT.
+ if(Environment.GetEnvironmentVariable("LEYRA_EXPECT_AGENT") is {Length:>0} expectAgent)ServicePeer.Verify(pipe,expectAgent);
  using var request=JsonDocument.Parse(args[1]);
  await PipeProtocol.WriteAsync(pipe,new{version=1,request=request.RootElement},timeout.Token);
  var reply=await PipeProtocol.ReadAsync(pipe,timeout.Token);
