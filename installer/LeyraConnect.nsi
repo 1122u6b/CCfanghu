@@ -56,7 +56,7 @@ Section "安装" SEC_MAIN
  SetShellVarContext all
  SetOutPath "$PLUGINSDIR"
  File "VerifyRuntime.ps1"
- File "${PREREQUISITES}/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+ File "${PREREQUISITES}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
  DetailPrint "正在安装 Microsoft WebView2 运行环境……"
  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\VerifyRuntime.ps1" -Installer "$PLUGINSDIR\MicrosoftEdgeWebView2RuntimeInstallerX64.exe" -ExpectedSha256 "${WEBVIEW_SHA256}"'
  Pop $Result
@@ -65,7 +65,7 @@ Section "安装" SEC_MAIN
   Abort
  ${EndIf}
  SetOutPath "$INSTDIR\versions\${VERSION}"
- File /r "${PAYLOAD}/*"
+ File /r "${PAYLOAD}\*"
  DetailPrint "正在注册后台服务……"
  nsExec::ExecToLog '"$INSTDIR\versions\${VERSION}\Leyra.Agent.exe" --install'
  Pop $Result
