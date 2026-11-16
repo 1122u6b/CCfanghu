@@ -1,5 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$Target)
 $ErrorActionPreference='Stop'
+$env:PSModulePath=[Environment]::GetEnvironmentVariable('PSModulePath','Machine')
 try {
  $ancestor=[IO.DirectoryInfo]::new($Target)
  while ($null -ne $ancestor) {

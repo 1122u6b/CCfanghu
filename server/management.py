@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
             meta_path.write_text(json.dumps({'version':version,'size':size,'sha256':digest,'notes':notes}));return {'offset':0}
         if kind=='admin_update_chunk':
             if not meta_path.exists():raise ManagementError('no update upload in progress')
-            meta=json.loads(meta_path.read_text());raw=base64.b64decode(text(req.get('data'),90000,True),validate=True)
+            meta=json.loads(meta_path.read_text());raw=base64.b64decode(text(req.get('data'),1500000,True),validate=True)
             current=staging.stat().st_size
             if req.get('offset')!=current:raise ManagementError('upload offset mismatch')
             if not raw or current+len(raw)>meta['size']:raise ManagementError('chunk exceeds declared size')
@@ -145,6 +145,12 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
             count=db.execute('SELECT COUNT(*) FROM dns_observations WHERE nonce=?',(nonce,)).fetchone()[0]
             if count<16:db.execute('INSERT OR IGNORE INTO dns_observations VALUES (?,?,?)',(nonce,source,now))
             return True
+    def admin_session_valid(self,token):
+        import hashlib,hmac
+        if not isinstance(token,str) or not re.fullmatch(r'adm_[A-Za-z0-9_-]{40,80}',token):return False
+        digest=hashlib.sha256(token.encode()).hexdigest();now=int(time.time())
+        with self.db() as db:sessions=self.get(db,'admin_sessions',[])
+        return any(s['expires']>now and hmac.compare_digest(s['hash'],digest) for s in sessions)
     def dns_settings(self):
         with self.db() as db:return self.get(db,'dns',{})
     def configure_dns(self,value):
@@ -181,6 +187,15 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
                     except (OSError,subprocess.SubprocessError):ok=False
                     self._time_status=(now,ok)
                 return {'unix':time.time(),'synchronized':self._time_status[1],'source':'server operating-system NTP synchronization state'}
+            if kind=='admin_session_create':
+                import hashlib
+                hours=req.get('hours',168)
+                if not isinstance(hours,int) or not 1<=hours<=720:raise ManagementError('hours must be 1 to 720')
+                token='adm_'+secrets.token_urlsafe(40)
+                sessions=[s for s in self.get(db,'admin_sessions',[]) if s['expires']>now][-19:]
+                sessions.append({'hash':hashlib.sha256(token.encode()).hexdigest(),'expires':now+hours*3600})
+                self.put(db,'admin_sessions',sessions);return {'token':token,'expires':now+hours*3600}
+            if kind=='admin_session_revoke_all':self.put(db,'admin_sessions',[]);return {'saved':True}
             if kind=='account':return self.get(db,'account')
             if kind=='set_contact':
                 account=self.get(db,'account');account['contact']=text(req.get('contact'),200);self.put(db,'account',account);return account

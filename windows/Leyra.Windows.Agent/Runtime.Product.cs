@@ -276,5 +276,67 @@ sealed partial class Runtime
   {using var key=Registry.LocalMachine.OpenSubKey(path);if(key?.GetValue("WebRtcIPHandling") as string!="disable_non_proxied_udp")return false;}
   return true;
  }
+ // ---------- L8：绕过独享线路的连接（读取系统 TCP 连接表及所属进程） ----------
+ [System.Runtime.InteropServices.DllImport("iphlpapi.dll")]static extern uint GetExtendedTcpTable(IntPtr table,ref int size,bool order,int family,int tableClass,uint reserved);
+ static IEnumerable<(IPAddress Local,IPAddress Remote,int RemotePort,int Pid)> EstablishedTcp()
+ {
+  foreach(var (family,rowSize) in new[]{(2,24),(23,56)})
+  {
+   var size=0;GetExtendedTcpTable(IntPtr.Zero,ref size,false,family,5,0);if(size<=0)continue;
+   var buffer=System.Runtime.InteropServices.Marshal.AllocHGlobal(size);
+   try
+   {
+    if(GetExtendedTcpTable(buffer,ref size,false,family,5,0)!=0)continue;
+    var bytes=new byte[size];System.Runtime.InteropServices.Marshal.Copy(buffer,bytes,0,size);
+    var count=BitConverter.ToInt32(bytes,0);
+    for(var i=0;i<count&&4+(i+1)*rowSize<=size;i++)
+    {
+     var o=4+i*rowSize;
+     if(family==2)
+     {
+      if(BitConverter.ToUInt32(bytes,o)!=5)continue; // MIB_TCP_STATE_ESTAB
+      yield return (new IPAddress(BitConverter.ToUInt32(bytes,o+4)),new IPAddress(BitConverter.ToUInt32(bytes,o+12)),(bytes[o+16]<<8)|bytes[o+17],BitConverter.ToInt32(bytes,o+20));
+     }
+     else
+     {
+      if(BitConverter.ToUInt32(bytes,o+48)!=5)continue;
+      yield return (new IPAddress(bytes.AsSpan(o,16)),new IPAddress(bytes.AsSpan(o+24,16)),(bytes[o+44]<<8)|bytes[o+45],BitConverter.ToInt32(bytes,o+52));
+     }
+    }
+   }
+   finally{System.Runtime.InteropServices.Marshal.FreeHGlobal(buffer);}
+  }
+ }
+ object? bypassCheck;DateTimeOffset lastBypassScan=DateTimeOffset.MinValue;
+ object ScanBypass()
+ {
+  var physical=new HashSet<IPAddress>(Physical().SelectMany(n=>n.GetIPProperties().UnicastAddresses).Select(a=>a.Address));
+  var gateway=profile is null?null:IPAddress.Parse(profile.Host);
+  var direct=store.Settings.DirectRules.Select(r=>System.Net.IPNetwork.Parse(r.Cidr)).ToArray();
+  var found=new Dictionary<string,int>();
+  foreach(var c in EstablishedTcp())
+  {
+   var remote=c.Remote.IsIPv4MappedToIPv6?c.Remote.MapToIPv4():c.Remote;
+   if(!physical.Contains(c.Local)||!AddressPolicy.IsPublic(remote.ToString()))continue;
+   if(gateway is not null&&remote.Equals(gateway))continue; // own server: gateway, private DNS
+   if(direct.Any(n=>n.Contains(remote)))continue;
+   string name;try{using var p=Process.GetProcessById(c.Pid);name=p.ProcessName+".exe";}catch(ArgumentException){name="已退出的程序";}catch(InvalidOperationException){name="已退出的程序";}
+   found[name]=found.GetValueOrDefault(name)+1;
+  }
+  if(found.Count==0)return new{id="L8",verdict="pass",detail="没有发现绕开独享线路直接连到公网的程序"};
+  return new{id="L8",verdict="fail",detail="发现绕开独享线路的软件："+string.Join("、",found.Select(x=>x.Key+"（"+x.Value+" 条）"))};
+ }
+ void RefreshBypass()
+ {
+  if(state!="protected"||DateTimeOffset.UtcNow-lastBypassScan<TimeSpan.FromSeconds(30))return;
+  lastBypassScan=DateTimeOffset.UtcNow;
+  try
+  {
+   var result=ScanBypass();var before=bypassCheck is null?"":JsonSerializer.Serialize(bypassCheck);bypassCheck=result;
+   var element=JsonSerializer.SerializeToElement(result);
+   if(Text(element,"verdict")=="fail"&&JsonSerializer.Serialize(result)!=before)Record("bypass",Text(element,"detail").Split('：').Last());
+  }
+  catch(Exception e)when(e is System.ComponentModel.Win32Exception or NetworkInformationException or InvalidOperationException){}
+ }
  static bool ServiceAutoStart()=>Registry.GetValue(@"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\"+Installation.ServiceName,"Start",null) is int start&&start==2;
 }

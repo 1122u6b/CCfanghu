@@ -81,7 +81,8 @@ sealed partial class Runtime
    Add("L7",v6?"fail":"pass",v6?"IPv6 可以绕开独享线路直连公网":"电脑有公网 IPv6，直接连接已被拒绝");
   }
   else Add("L7",guarded?"pass":"skipped",guarded?"电脑没有公网 IPv6 地址":"防护规则未安装，未做 IPv6 实测");
-  Add("L8","skipped","需要 Windows 过滤平台审计日志，此项暂不检测");
+  if(live){lastBypassScan=DateTimeOffset.MinValue;RefreshBypass();var l8=JsonSerializer.SerializeToElement(bypassCheck??ScanBypass());Add("L8",Text(l8,"verdict"),Text(l8,"detail"));}
+  else Add("L8","skipped","防护建立后才检查绕开独享线路的程序");
   Add("C1",store.Settings.ExitTimezone.Length==0?"info":SystemClock.CurrentIana()==store.Settings.ExitTimezone?"pass":"warn",store.Settings.ExitTimezone.Length==0?"还没有取得出口所在时区":"电脑时区与出口所在时区（"+store.Settings.ExitTimezone+"）对比");
   Add("S1",profile?.Role=="device"?"pass":"fail","独立设备身份；当前不使用商业激活码");
   Add("S2",configAt>DateTimeOffset.UtcNow.AddHours(-24)?"pass":"warn",configAt==DateTimeOffset.MinValue?"本次启动后还没有取得服务器配置":"线路配置取得于 "+configAt.ToLocalTime().ToString("MM-dd HH:mm"));
@@ -112,14 +113,14 @@ sealed partial class Runtime
  async Task<object> AddExit(JsonElement request,CancellationToken stop)
  {
   if(request.TryGetProperty("node",out var direct))return await Remote(new{type="store_exit",name=Text(request,"name","我的出口"),node=direct},stop);
-  var (parsed,skipped)=ExitLinks.Parse(Text(request,"links"));
-  if(parsed.Count==0)throw new InvalidDataException(skipped.Count>0?"没有可用的出口："+skipped[0]:"请粘贴出口链接");
-  var wire=parsed.Select(x=>x.Wire()).ToArray();int id;
-  if(request.TryGetProperty("exit_id",out var existing)&&existing.TryGetInt32(out var target))
-  {await Remote(new{type="update_exit",id=target,nodes=wire},stop);id=target;}
-  else id=(await Remote(new{type="store_exit",name=Text(request,"name","我的出口"),nodes=wire},stop)).GetProperty("id").GetInt32();
-  await Remote(new{type="select_exit",id},stop);configured=false;Record("exit",Text(request,"name","我的出口"));
-  return new{id,lines=parsed.Count,skipped};
+  var links=Text(request,"links");if(links.Trim().Length==0)throw new InvalidDataException("请粘贴出口链接或订阅地址");
+  if(links.Length>200000)throw new InvalidDataException("粘贴的内容太长");
+  // The server parses every format (SOCKS5/HTTP, ss, vmess, vless, trojan, hysteria2, tuic and
+  // https subscriptions) because it is the side that dials them.
+  int? target=request.TryGetProperty("exit_id",out var existing)&&existing.TryGetInt32(out var t)?t:null;
+  var result=await Remote(new{type="import_exit_links",links,name=Text(request,"name","我的出口"),exit_id=target},stop);
+  configured=false;Record("exit",Text(request,"name","我的出口"));
+  return new{id=result.GetProperty("id").GetInt32(),lines=result.GetProperty("lines").GetInt32(),skipped=result.GetProperty("skipped").EnumerateArray().Select(x=>x.GetString()??"").ToArray()};
  }
  async Task<object> MeasureSpeed(CancellationToken stop)
  {

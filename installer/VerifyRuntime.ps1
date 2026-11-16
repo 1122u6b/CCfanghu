@@ -1,7 +1,12 @@
 param([Parameter(Mandatory=$true)][string]$Installer,[Parameter(Mandatory=$true)][string]$ExpectedSha256)
 $ErrorActionPreference='Stop'
+# A parent PowerShell 7 can leak its module path into Windows PowerShell; use the system one.
+$env:PSModulePath=[Environment]::GetEnvironmentVariable('PSModulePath','Machine')
 try {
- if ((Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash -ne $ExpectedSha256) {throw 'Runtime checksum mismatch'}
+ Import-Module Microsoft.PowerShell.Security
+ $stream=[IO.File]::OpenRead($Installer)
+ try {$hash=-join ([Security.Cryptography.SHA256]::Create().ComputeHash($stream) | ForEach-Object {$_.ToString('x2')})} finally {$stream.Dispose()}
+ if ($hash -ne $ExpectedSha256.ToLowerInvariant()) {throw 'Runtime checksum mismatch'}
  $signature=Get-AuthenticodeSignature -LiteralPath $Installer
  if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(^|,\s*)O=Microsoft Corporation(,|$)') {throw 'Runtime must have a valid Microsoft signature'}
  $process=Start-Process -FilePath $Installer -ArgumentList '/silent','/install' -Wait -PassThru

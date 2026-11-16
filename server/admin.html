@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LEYRA 管理中心</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--text:#1d2130;--muted:#6b7286;--line:#e3e6ef;--accent:#4945df;--danger:#c7372f;--ok:#13804b;--warn:#b46a00}
+@media (prefers-color-scheme:dark){:root{--bg:#14161d;--card:#1d2029;--text:#e8eaf2;--muted:#9aa1b5;--line:#2c3040;--accent:#8a87ff;--danger:#ff6b61;--ok:#4fd18b;--warn:#f0b04a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 system-ui,-apple-system,"Microsoft YaHei",sans-serif}
+header{display:flex;align-items:center;gap:16px;padding:14px 20px;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap}
+header b{font-size:16px}nav{display:flex;gap:4px;flex-wrap:wrap}nav button{border:0;background:none;color:var(--muted);padding:6px 12px;border-radius:8px;cursor:pointer;font:inherit}
+nav button.on{background:var(--accent);color:#fff}main{max-width:1100px;margin:0 auto;padding:20px 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:16px}
+h2{font-size:15px;margin:0 0 12px}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:500}
+input,textarea,select{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px;width:100%}textarea{min-height:90px;resize:vertical}
+button.b{border:1px solid var(--line);background:var(--card);color:var(--text);padding:6px 12px;border-radius:8px;cursor:pointer;font:inherit;white-space:nowrap}
+button.p{background:var(--accent);border-color:var(--accent);color:#fff}button.d{color:var(--danger)}button:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}.row>*{flex:1}.row>button{flex:0}
+.muted{color:var(--muted)}.tag{display:inline-block;padding:0 8px;border-radius:99px;font-size:12px;border:1px solid var(--line)}.tag.w{color:var(--warn);border-color:var(--warn)}.tag.ok{color:var(--ok);border-color:var(--ok)}.tag.x{color:var(--danger);border-color:var(--danger)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.stat b{display:block;font-size:24px}
+.msg{border-left:3px solid var(--line);padding:6px 12px;margin:10px 0;white-space:pre-wrap}.msg.admin{border-color:var(--accent)}.msg img{max-width:240px;border-radius:6px;margin:6px 6px 0 0;cursor:zoom-in}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 16px;border-radius:8px;display:none;max-width:90vw}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent);width:0}
+#login{max-width:460px;margin:12vh auto}code{background:var(--bg);padding:1px 6px;border-radius:4px}
+</style>
+</head>
+<body>
+<div id="login" class="card" hidden>
+ <h2>LEYRA 管理中心</h2>
+ <p class="muted">请用管理登录链接打开本页，或粘贴登录密钥。登录链接由 GitHub 上的「Owner server connection」任务生成。</p>
+ <div class="row"><input id="key" type="password" placeholder="登录密钥（adm_ 开头）" autocomplete="off"><button class="b p" onclick="login()">登录</button></div>
+</div>
+<div id="app" hidden>
+<header><b>LEYRA 管理中心</b><nav id="nav"></nav><span style="flex:1"></span><button class="b" onclick="logout()">退出</button></header>
+<main id="main"></main>
+</div>
+<div id="toast"></div>
+<script>
+'use strict';
+var TOKEN = null, VIEW = 'home', CACHE = {};
+try { TOKEN = sessionStorage.getItem('leyra.admin'); } catch (e) {}
+if (location.hash.length > 5) { TOKEN = decodeURIComponent(location.hash.slice(1)); try { sessionStorage.setItem('leyra.admin', TOKEN); } catch (e) {} history.replaceState(null, '', location.pathname); }
+var $ = function (id) { return document.getElementById(id); };
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
+function when(t) { if (!t) return '-'; var d = new Date(t * 1000); return d.toLocaleDateString() + ' ' + d.toTimeString().slice(0, 5); }
+function toast(t) { var e = $('toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(function () { e.style.display = 'none'; }, 3500); }
+function call(method, path, body) {
+  return fetch(path, { method: method, headers: Object.assign({ Authorization: 'Bearer ' + TOKEN }, body ? { 'Content-Type': 'application/json' } : {}), body: body ? JSON.stringify(body) : undefined })
+    .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
+      if (r.status === 401) { logout(); throw new Error('登录已失效，请重新获取登录链接'); }
+      if (!r.ok) throw new Error(j.detail || j.error || ('HTTP ' + r.status)); return j; }); });
+}
+function rpc(req) { return call('POST', '/api/v1/rpc', req); }
+function dev(id, req) { return rpc({ type: 'device_rpc', id: id, request: req }); }
+function fail(e) { toast(e.message || String(e)); }
+function login() { TOKEN = $('key').value.trim(); try { sessionStorage.setItem('leyra.admin', TOKEN); } catch (e) {} start(); }
+function logout() { TOKEN = null; try { sessionStorage.removeItem('leyra.admin'); } catch (e) {} $('app').hidden = true; $('login').hidden = false; }
+function download(name, obj) { var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' })); a.download = name; a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000); }
+
+var VIEWS = [['home', '概览'], ['devices', '设备'], ['tickets', '工单'], ['messages', '消息'], ['help', '帮助页'], ['updates', '客户端更新'], ['security', '安全']];
+function nav() { $('nav').innerHTML = VIEWS.map(function (v) { return '<button class="' + (v[0] === VIEW ? 'on' : '') + '" onclick="go(\'' + v[0] + '\')">' + v[1] + '</button>'; }).join(''); }
+function go(v) { VIEW = v; nav(); $('main').innerHTML = '<p class="muted">正在加载…</p>'; (R[v] || R.home)().catch(function (e) { $('main').innerHTML = '<div class="card">' + esc(e.message) + '</div>'; }); }
+function start() {
+  if (!TOKEN) { $('login').hidden = false; return; }
+  call('GET', '/api/v1/status').then(function (s) {
+    if (s.scope !== 'server') throw new Error('这是设备凭据，不是管理登录密钥');
+    $('login').hidden = true; $('app').hidden = false; go(VIEW);
+  }).catch(function (e) { logout(); toast(e.message); });
+}
+function devices() { return rpc({ type: 'list_devices' }).then(function (r) { CACHE.devices = r.items; return r.items; }); }
+function devName(id) { var d = (CACHE.devices || []).filter(function (x) { return x.id === id; })[0]; return d ? d.name : id.slice(0, 8); }
+
+var R = {};
+R.home = function () {
+  return Promise.all([call('GET', '/api/v1/status'), devices(), rpc({ type: 'all_tickets' }), rpc({ type: 'update_manifest' })]).then(function (x) {
+    var s = x[0], ds = x[1], waiting = x[2].items.filter(function (t) { return t.waiting_for_admin; }).length;
+    $('main').innerHTML = '<div class="card"><div class="stats">' +
+      '<div class="stat"><span class="muted">设备（启用 / 全部）</span><b>' + ds.filter(function (d) { return d.enabled; }).length + ' / ' + ds.length + '</b></div>' +
+      '<div class="stat"><span class="muted">待回复工单</span><b>' + waiting + '</b></div>' +
+      '<div class="stat"><span class="muted">当前连接</span><b>' + s.active_connections + '</b></div>' +
+      '<div class="stat"><span class="muted">服务已运行</span><b>' + Math.floor(s.uptime_seconds / 3600) + ' 小时</b></div>' +
+      '<div class="stat"><span class="muted">已发布客户端</span><b>' + esc(x[3].version || '无') + '</b></div></div></div>' +
+      '<div class="card"><h2>怎么给客户开通</h2><ol><li>在「设备」里输入客户名称，点「创建并下载连接文件」。</li><li>把安装包和这个 .json 连接文件发给客户（一台电脑一个文件，不要共用）。</li><li>客户安装后打开软件，点「导入设备连接文件」选这个文件即可。</li><li>客户自己的住宅出口可以在设备里帮他导入，也可以让客户在软件里自己粘贴。</li></ol></div>';
+  });
+};
+R.devices = function () {
+  return devices().then(function (ds) {
+    $('main').innerHTML = '<div class="card"><h2>新客户 / 新电脑</h2><div class="row"><input id="dn" maxlength="100" placeholder="客户名称，例如：张三 · 办公室电脑"><button class="b p" onclick="newDevice()">创建并下载连接文件</button></div></div>' +
+      '<div class="card"><h2>全部设备（' + ds.length + '）</h2><table><tr><th>名称</th><th>状态</th><th>创建时间</th><th></th></tr>' + ds.map(function (d) {
+        return '<tr><td>' + esc(d.name) + '<br><span class="muted">' + d.id + '</span></td><td>' + (d.enabled ? '<span class="tag ok">启用</span>' : '<span class="tag x">已停用</span>') + '</td><td>' + when(d.created_at) + '</td><td>' +
+          '<button class="b" onclick="openDevice(\'' + d.id + '\')">出口与账户</button> ' +
+          '<button class="b" onclick="toggleDevice(\'' + d.id + '\',' + !d.enabled + ')">' + (d.enabled ? '停用' : '启用') + '</button> ' +
+          '<button class="b d" onclick="rotateDevice(\'' + d.id + '\')">更换凭据</button></td></tr>';
+      }).join('') + '</table></div><div id="devdetail"></div>';
+  });
+};
+function newDevice() {
+  var name = $('dn').value.trim(); if (!name) { toast('请填客户名称'); return; }
+  rpc({ type: 'create_device_profile', name: name }).then(function (r) { download('LEYRA-' + name.replace(/[\\/:*?"<>|\s]+/g, '_') + '.json', r.profile); toast('已创建，连接文件已下载'); go('devices'); }).catch(fail);
+}
+function toggleDevice(id, on) { if (!on && !confirm('停用后这台电脑会立即断开，确定吗？')) return; rpc({ type: 'set_device_enabled', id: id, enabled: on }).then(function () { go('devices'); }).catch(fail); }
+function rotateDevice(id) {
+  if (!confirm('更换凭据后，旧连接文件立即失效，需要把新文件发给客户重新导入。确定吗？')) return;
+  rpc({ type: 'rotate_device_profile', id: id }).then(function (r) { download('LEYRA-' + devName(id) + '-新.json', r.profile); toast('新连接文件已下载'); }).catch(fail);
+}
+function openDevice(id) {
+  Promise.all([dev(id, { type: 'exits' }), dev(id, { type: 'ai_accounts' }), dev(id, { type: 'account' })]).then(function (x) {
+    var ex = x[0], ai = x[1].items;
+    $('devdetail').innerHTML = '<div class="card"><h2>' + esc(devName(id)) + ' · 出口</h2>' + (ex.items.length ? '<table>' + ex.items.map(function (e) {
+      return '<tr><td>' + (e.id === ex.selected ? '<span class="tag ok">使用中</span> ' : '') + esc(e.name) + '</td><td>' + (e.lines || 1) + ' 条线路 · ' + esc((e.types || []).join(', ')) + '</td><td>' +
+        (e.id === ex.selected ? '' : '<button class="b" onclick="selExit(\'' + id + '\',' + e.id + ')">设为使用</button> <button class="b d" onclick="delExit(\'' + id + '\',' + e.id + ')">删除</button>') + '</td></tr>';
+    }).join('') + '</table>' : '<p class="muted">还没有出口，客户的流量会走服务器默认出口。</p>') +
+      '<p class="muted">支持 socks5://、http://、主机:端口:用户:密码、ss://、vmess://、vless://、trojan://、hysteria2://、tuic:// 以及 https 订阅地址，一行一条；多条会自动按可用性切换。</p>' +
+      '<div class="row"><input id="exn" placeholder="出口名称（可选）"></div><textarea id="exl" placeholder="粘贴出口链接或订阅地址"></textarea><div class="row"><span></span><button class="b p" onclick="importExit(\'' + id + '\')">导入并使用</button></div></div>' +
+      '<div class="card"><h2>' + esc(devName(id)) + ' · AI 账户</h2>' + (ai.length ? '<table>' + ai.map(function (a) { return '<tr><td>#' + a.id + '</td><td>' + esc(a.label || a.email || a.plat || '') + '</td><td>' + esc(a.state || a.status || 'active') + '</td></tr>'; }).join('') + '</table>' : '<p class="muted">没有账户</p>') +
+      '<div class="row"><input id="aiplat" placeholder="平台，如 Claude"><input id="aitier" placeholder="档位，如 Pro"><input id="aiemail" placeholder="登录邮箱"></div><div class="row"><input id="aipw" type="password" placeholder="登录密码（只有客户在受保护状态下可查看）"><button class="b p" onclick="addAi(\'' + id + '\')">添加</button></div>' +
+      '<p class="muted">联系方式：' + esc(x[2].contact || '未填写') + '</p></div>';
+  }).catch(fail);
+}
+function importExit(id) { rpc({ type: 'device_rpc', id: id, request: { type: 'import_exit_links', links: $('exl').value, name: $('exn').value.trim() || '我的出口' } }).then(function (r) { toast('已导入 ' + r.lines + ' 条线路' + (r.skipped.length ? '，跳过 ' + r.skipped.length + ' 条：' + r.skipped[0] : '')); openDevice(id); }).catch(fail); }
+function selExit(id, e) { dev(id, { type: 'select_exit', id: e }).then(function () { openDevice(id); }).catch(fail); }
+function delExit(id, e) { if (confirm('删除这个出口？')) dev(id, { type: 'delete_exit', id: e }).then(function () { openDevice(id); }).catch(fail); }
+function addAi(id) {
+  var acc = { plat: $('aiplat').value.trim(), tier: $('aitier').value.trim(), email: $('aiemail').value.trim(), label: $('aiemail').value.trim(), state: 'active', since: Math.floor(Date.now() / 1000) };
+  if (!acc.email) { toast('请填邮箱'); return; }
+  dev(id, { type: 'admin_ai_account', account: acc, secret: { email: acc.email, password: $('aipw').value } }).then(function () { toast('已添加'); openDevice(id); }).catch(fail);
+}
+R.tickets = function () {
+  return Promise.all([devices(), rpc({ type: 'all_tickets' })]).then(function (x) {
+    var items = x[1].items;
+    $('main').innerHTML = '<div class="card"><h2>工单</h2>' + (items.length ? '<table><tr><th>客户</th><th>标题</th><th>状态</th><th>更新</th><th></th></tr>' + items.map(function (t) {
+      return '<tr><td>' + esc(t.device_name) + '</td><td>#' + t.id + ' ' + esc(t.title) + '</td><td>' + (t.waiting_for_admin ? '<span class="tag w">待回复</span>' : '<span class="tag">' + esc(t.state) + '</span>') + '</td><td>' + when(t.updated_at) + '</td><td><button class="b" onclick="openTicket(\'' + t.device + '\',' + t.id + ')">查看</button></td></tr>';
+    }).join('') + '</table>' : '<p class="muted">还没有工单</p>') + '</div><div id="tdetail"></div>';
+  });
+};
+function openTicket(d, id) {
+  dev(d, { type: 'tickets' }).then(function (r) {
+    var t = r.items.filter(function (x) { return x.id === id; })[0]; if (!t) return;
+    $('tdetail').innerHTML = '<div class="card"><h2>' + esc(devName(d)) + ' · #' + t.id + ' ' + esc(t.title) + '</h2>' + t.messages.map(function (m) {
+      return '<div class="msg ' + (m.from_admin ? 'admin' : '') + '"><span class="muted">' + (m.from_admin ? '客服' : '客户') + ' · ' + when(m.at) + '</span>\n' + esc(m.body) + '<div>' + m.images.map(function (i) { return '<img data-d="' + d + '" data-t="' + t.id + '" data-i="' + esc(i) + '" alt="图片">'; }).join('') + '</div></div>';
+    }).join('') + '<textarea id="reply" placeholder="回复客户"></textarea><div class="row"><span></span><button class="b p" onclick="reply(\'' + d + '\',' + t.id + ')">发送回复</button></div></div>';
+    Array.prototype.forEach.call(document.querySelectorAll('#tdetail img'), loadImage);
+    $('tdetail').scrollIntoView({ behavior: 'smooth' });
+  }).catch(fail);
+}
+function loadImage(img) {
+  var parts = [], mime = 'image/png';
+  (function next(offset) {
+    dev(img.dataset.d, { type: 'ticket_image', ticket: +img.dataset.t, id: img.dataset.i, offset: offset }).then(function (r) {
+      parts.push(Uint8Array.from(atob(r.data), function (c) { return c.charCodeAt(0); })); mime = r.mime;
+      var got = offset + parts[parts.length - 1].length;
+      if (got < r.total) next(got); else { img.src = URL.createObjectURL(new Blob(parts, { type: mime })); img.onclick = function () { window.open(img.src); }; }
+    }).catch(function () { img.alt = '图片加载失败'; });
+  })(0);
+}
+function reply(d, id) { var body = $('reply').value.trim(); if (!body) return; dev(d, { type: 'admin_ticket_reply', id: id, body: body, attachments: [] }).then(function () { toast('已回复'); openTicket(d, id); }).catch(fail); }
+R.messages = function () {
+  return devices().then(function (ds) {
+    $('main').innerHTML = '<div class="card"><h2>发消息</h2><div class="row"><select id="mto"><option value="">所有启用的设备</option>' + ds.map(function (d) { return '<option value="' + d.id + '">' + esc(d.name) + '</option>'; }).join('') + '</select></div>' +
+      '<div class="row"><input id="mt" maxlength="120" placeholder="标题"></div><textarea id="mb" placeholder="内容"></textarea><div class="row"><label style="flex:1"><input id="mi" type="checkbox" style="width:auto"> 重要（客户端弹窗提醒）</label><button class="b p" onclick="sendMsg()">发送</button></div></div>';
+  });
+};
+function sendMsg() {
+  var to = $('mto').value, req = { title: $('mt').value.trim(), body: $('mb').value.trim(), important: $('mi').checked };
+  if (!req.title || !req.body) { toast('标题和内容都要填'); return; }
+  (to ? dev(to, Object.assign({ type: 'admin_message' }, req)) : rpc(Object.assign({ type: 'broadcast_message' }, req))).then(function (r) { toast(to ? '已发送' : '已发送给 ' + r.sent + ' 台设备'); $('mt').value = $('mb').value = ''; }).catch(fail);
+}
+R.help = function () {
+  return rpc({ type: 'help' }).then(function (h) {
+    CACHE.help = { faq: h.faq || [], guides: h.guides || [], web_center: h.web_center || '' };
+    renderHelp();
+  });
+};
+function renderHelp() {
+  var h = CACHE.help;
+  $('main').innerHTML = '<div class="card"><h2>常见问题（客户端「帮助」页）</h2>' + h.faq.map(function (f, i) {
+    return '<div class="row"><input value="' + esc(f.q) + '" oninput="CACHE.help.faq[' + i + '].q=this.value" placeholder="问题"><button class="b d" onclick="CACHE.help.faq.splice(' + i + ',1);renderHelp()">删除</button></div><textarea oninput="CACHE.help.faq[' + i + '].a=this.value" placeholder="回答">' + esc(f.a) + '</textarea>';
+  }).join('') + '<button class="b" onclick="CACHE.help.faq.push({q:\'\',a:\'\'});renderHelp()">+ 添加问题</button></div>' +
+    '<div class="card"><h2>使用指南（在浏览器打开的 https 链接）</h2>' + h.guides.map(function (g, i) {
+      return '<div class="row"><input value="' + esc(g.title) + '" oninput="CACHE.help.guides[' + i + '].title=this.value" placeholder="标题"><input value="' + esc(g.url) + '" oninput="CACHE.help.guides[' + i + '].url=this.value" placeholder="https://…"><button class="b d" onclick="CACHE.help.guides.splice(' + i + ',1);renderHelp()">删除</button></div><input value="' + esc(g.text) + '" oninput="CACHE.help.guides[' + i + '].text=this.value" placeholder="一句话说明">';
+    }).join('') + '<button class="b" onclick="CACHE.help.guides.push({title:\'\',text:\'\',url:\'\'});renderHelp()">+ 添加指南</button></div>' +
+    '<div class="card"><h2>客户端「网页个人中心」按钮打开的地址（可留空）</h2><input value="' + esc(h.web_center) + '" oninput="CACHE.help.web_center=this.value" placeholder="https://…"><div class="row"><span></span><button class="b p" onclick="saveHelp()">保存帮助页</button></div></div>';
+}
+function saveHelp() {
+  var h = CACHE.help, bad = h.guides.concat(h.web_center ? [{ url: h.web_center }] : []).filter(function (g) { return g.url && !/^https:\/\//.test(g.url); });
+  if (bad.length) { toast('链接必须以 https:// 开头'); return; }
+  var content = { faq: h.faq.filter(function (f) { return f.q.trim(); }), guides: h.guides.filter(function (g) { return g.title.trim(); }) };
+  if (h.web_center) content.web_center = h.web_center;
+  rpc({ type: 'admin_help', content: content }).then(function () { toast('已保存，所有客户端下次打开帮助页时生效'); }).catch(fail);
+}
+R.updates = function () {
+  return rpc({ type: 'update_manifest' }).then(function (m) {
+    $('main').innerHTML = '<div class="card"><h2>当前发布</h2>' + (m.version ? '<p>版本 <b>' + esc(m.version) + '</b> · ' + (m.size / 1048576).toFixed(1) + ' MB · 发布于 ' + when(m.published_at) + '</p><p class="muted">SHA-256：<code>' + esc(m.sha256) + '</code></p><p>' + esc(m.notes) + '</p><button class="b d" onclick="withdraw()">撤回</button>' : '<p class="muted">尚未发布。客户端会每 6 小时检查一次。</p>') + '</div>' +
+      '<div class="card"><h2>发布新版本</h2><p class="muted">选 LEYRAConnect-x.y.z-setup.exe，版本号必须比客户端当前版本高。客户端下载后会核对 SHA-256，核对通过才提示安装。</p>' +
+      '<div class="row"><input id="uv" placeholder="版本号，例如 0.3.1"><input id="uf" type="file" accept=".exe"></div><textarea id="un" placeholder="更新说明（可选）"></textarea>' +
+      '<div class="bar"><i id="up"></i></div><div class="row"><span id="us" class="muted"></span><button id="ub" class="b p" onclick="publish()">上传并发布</button></div></div>';
+  });
+};
+function readSlice(blob) { return new Promise(function (ok, no) { var r = new FileReader(); r.onload = function () { ok(r.result.split(',')[1] || ''); }; r.onerror = no; r.readAsDataURL(blob); }); }
+function publish() {
+  var file = $('uf').files[0], version = $('uv').value.trim();
+  if (!file || !/^\d+\.\d+\.\d+(-[A-Za-z0-9.]+)?$/.test(version)) { toast('请选择安装包并填写正确的版本号'); return; }
+  $('ub').disabled = true; $('us').textContent = '正在计算校验值…';
+  file.arrayBuffer().then(function (buf) { return crypto.subtle.digest('SHA-256', buf); }).then(function (h) {
+    var hex = Array.prototype.map.call(new Uint8Array(h), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    return rpc({ type: 'admin_update_begin', version: version, size: file.size, sha256: hex, notes: $('un').value.trim() });
+  }).then(function () {
+    var size = 1048576;
+    return (function next(offset) {
+      if (offset >= file.size) return rpc({ type: 'admin_update_commit' });
+      return readSlice(file.slice(offset, offset + size)).then(function (data) { return rpc({ type: 'admin_update_chunk', offset: offset, data: data }); }).then(function (r) {
+        $('up').style.width = (r.offset * 100 / file.size).toFixed(1) + '%'; $('us').textContent = '已上传 ' + (r.offset / 1048576).toFixed(0) + ' / ' + (file.size / 1048576).toFixed(0) + ' MB'; return next(r.offset);
+      });
+    })(0);
+  }).then(function () { toast('已发布'); go('updates'); }).catch(function (e) { $('ub').disabled = false; $('us').textContent = ''; fail(e); });
+}
+function withdraw() { if (confirm('撤回后客户端不会再提示这个版本，确定吗？')) rpc({ type: 'admin_update_withdraw' }).then(function () { go('updates'); }).catch(fail); }
+R.security = function () {
+  $('main').innerHTML = '<div class="card"><h2>管理登录链接</h2><p>每个登录链接有效 7 天。怀疑链接泄露时，点下面按钮让所有登录链接立即失效（包括你当前这个），之后在 GitHub 重新生成。</p><button class="b d" onclick="revoke()">让所有登录链接失效</button></div>';
+  return Promise.resolve();
+};
+function revoke() { if (confirm('确定？当前页面也会退出。')) rpc({ type: 'admin_session_revoke_all' }).then(logout).catch(fail); }
+start();
+</script>
+</body>
+</html>

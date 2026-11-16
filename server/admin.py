@@ -120,6 +120,7 @@ def main(argv=None):
     p = sub.add_parser('publish-update', help='发布客户端安装包，客户端自动下载并校验 SHA-256'); p.add_argument('version'); p.add_argument('file'); p.add_argument('--notes', default='')
     sub.add_parser('update-status', help='当前发布的客户端版本')
     sub.add_parser('withdraw-update', help='撤回已发布的客户端版本')
+    p = sub.add_parser('login-link', help='生成网页管理中心登录链接'); p.add_argument('--hours', type=int, default=168); p.add_argument('--base', default='https://api.leyra.xin')
     a = parser.parse_args(argv)
     c = Client(a.profile, a.connect)
 
@@ -214,6 +215,9 @@ def main(argv=None):
         print('已发布 %s，SHA-256 %s。客户端会自动下载、校验后提示安装。' % (r['version'], r['sha256']))
     elif a.command == 'update-status':
         print(json.dumps(c.rpc({'type': 'update_manifest'}), ensure_ascii=False, indent=2))
+    elif a.command == 'login-link':
+        r = c.rpc({'type': 'admin_session_create', 'hours': a.hours})
+        print(a.base.rstrip('/') + '/api/admin#' + r['token'])
     elif a.command == 'withdraw-update':
         c.rpc({'type': 'admin_update_withdraw'}); print('已撤回')
     return 0

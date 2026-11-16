@@ -94,11 +94,24 @@ def validate_existing_data(data,owner,infrastructure):
  previous=json.loads(row[0])
  if any(previous.get(k)!=infrastructure.get(k) for k in ('zone','answer_ip','resolver_url')):raise ValueError('existing_store_infrastructure_mismatch')
 
+def install_kernel(release):
+ # Official Mihomo for ss/vmess/vless/trojan/hysteria2/tuic exits. Without it the gateway
+ # still serves SOCKS5/HTTP exits and reports kernel exits as unavailable.
+ try:
+  sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
+  from prepare_kernel import prepare
+  target=release/'kernel';prepare('linux',target,Path('/var/cache/leyra-connect'))
+  os.chmod(target,0o755)
+  for item in target.iterdir():os.chmod(item,0o755 if item.name=='mihomo' else 0o644)
+  return True
+ except Exception as error:
+  print('Server kernel not installed: '+type(error).__name__,file=sys.stderr);return False
+
 def install(address):
  if os.geteuid()!=0:raise PermissionError('Run this installer as root on the existing server')
  if not ipaddress.ip_address(address).is_global:raise ValueError('A public literal server IP is required')
  source=Path(__file__).resolve().parents[1]/'server'
- files=['gateway.py','management.py','devices.py','dns_probe.py','ai_login.py','verify_live.py','admin.py']
+ files=['gateway.py','management.py','devices.py','dns_probe.py','ai_login.py','verify_live.py','admin.py','links.py','upstream_kernel.py','admin.html']
  for name in files:compile((source/name).read_bytes(),name,'exec')
  records={service:read_service(service,entry) for service,entry in SERVICES.items()}
  identities={}
@@ -121,6 +134,7 @@ def install(address):
  release.mkdir(parents=True,mode=0o755);data.mkdir(mode=0o700,exist_ok=True)
  for candidate in [Path('/opt/leyra-connect'),Path('/opt/leyra-connect/releases'),release]:os.chmod(candidate,0o755)
  for name in files:shutil.copy2(source/name,release/name);os.chmod(release/name,0o644)
+ install_kernel(release)
  upgrading=Path(gateway.get('data_dir','/nonexistent')).resolve()==data
  gateway.update(data_dir=str(data),public_host=address,fingerprint=fingerprint)
  if not upgrading:gateway.update(api_token=secrets.token_urlsafe(48),client_user='owner',client_password=secrets.token_urlsafe(48))

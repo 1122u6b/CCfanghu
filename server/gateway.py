@@ -174,9 +174,10 @@ class Gateway:
         rows=header.decode('iso-8859-1').split('\r\n');method,path,_=rows[0].split(' ',2)
         h={k.lower().strip():v.strip() for line in rows[1:] if ':' in line for k,v in [line.split(':',1)]}
         if path.startswith('/private-dns/'):return await self.doh(r,w,method,path,h)
+        if method=='GET' and path.split('?')[0] in ('/api/admin','/api/admin/'):return await self.admin_page(w)
         authorization=h.get('authorization','')
-        is_admin=hmac.compare_digest(authorization.encode(),('Bearer '+self.config['api_token']).encode())
         token=authorization[7:] if authorization.startswith('Bearer ') else ''
+        is_admin=hmac.compare_digest(authorization.encode(),('Bearer '+self.config['api_token']).encode()) or (token.startswith('adm_') and self.management.admin_session_valid(token))
         device=None if is_admin else self.devices.authenticate(token)
         if not is_admin and device is None:return await self.response(w,401,{'error':'unauthorized'})
         if method=='GET' and path=='/api/v1/status':return await self.response(w,200,{'version':'0.6.0','active_connections':max(0,self.active-1) if is_admin else self.device_active.get(device.id,0),'uptime_seconds':int(time.time()-self.started),'scope':'server' if is_admin else 'device','license_required':False})
@@ -190,10 +191,12 @@ class Gateway:
         if method=='GET' and path=='/api/v1/config':return await self.response(w,200,{'proxies':[self.node(device)],'license_required':False,'identity':{'role':'owner' if is_admin else 'device','id':None if is_admin else device.id}})
         if method=='POST' and path=='/api/v1/rpc':
             n=int(h.get('content-length','0'))
-            if not 0<n<=131072:return await self.response(w,413,{'error':'invalid content length'})
+            if not 0<n<=(2*1024*1024 if is_admin else 131072):return await self.response(w,413,{'error':'invalid content length'})
             from management import ManagementError
             try:
-                request=json.loads(await exact(r,n))
+                request=json.loads(await asyncio.wait_for(r.readexactly(n),60))
+                if is_admin and isinstance(request,dict) and request.get('type') in ('create_device_profile','rotate_device_profile'):
+                    return await self.response(w,200,self.device_profile(request))
                 call=(lambda:self.devices.rpc(self.management,request)) if is_admin else (lambda:self.devices.device_rpc(self.management,device,request))
                 # Subscription imports fetch from the internet; keep the event loop free meanwhile.
                 result=await asyncio.to_thread(call) if isinstance(request,dict) and request.get('type')=='import_exit_links' else call()
@@ -214,6 +217,17 @@ class Gateway:
             with os.fdopen(fd,'w') as f:json.dump(up,f)
             os.replace(temp,dest);self.management.clear_selection();return await self.response(w,200,{'saved':True})
         return await self.response(w,404,{'error':'not found'})
+    def device_profile(self,request):
+        # Builds the customer's connection file: device credentials only, never the owner token.
+        issued=self.devices.issue(request.get('name')) if request['type']=='create_device_profile' else self.devices.rotate(request.get('id'))
+        return {'id':issued['id'],'profile':{'leyra_server':{'host':self.config['public_host'],'port':int(self.config['port']),'token':issued['token'],
+                'certificate':Path(self.config['cert']).read_text(),'fingerprint':self.config['fingerprint'],'role':'device','device_id':issued['id']}}}
+    async def admin_page(self,w):
+        page=Path(__file__).with_name('admin.html')
+        data=page.read_bytes() if page.is_file() else b'admin page missing'
+        head=('HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %d\r\nCache-Control: no-store\r\nX-Frame-Options: DENY\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n'
+              "Content-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; form-action 'none'; frame-ancestors 'none'\r\nConnection: close\r\n\r\n")%len(data)
+        w.write(head.encode()+data);await w.drain()
     async def pipe(self,r,w):
         while True:
             data=await asyncio.wait_for(r.read(65536),300)

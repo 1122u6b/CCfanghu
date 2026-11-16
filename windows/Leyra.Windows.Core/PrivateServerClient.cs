@@ -32,7 +32,20 @@ public sealed class PrivateServerClient : IDisposable
             request.Content=new ByteArrayContent(encoded);request.Content.Headers.ContentType=new MediaTypeHeaderValue("application/json");
         }
         using var response=await http.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,bounded);
-        if (!response.IsSuccessStatusCode) throw new HttpRequestException("自建服务器请求失败，HTTP "+(int)response.StatusCode,null,response.StatusCode);
+        if (!response.IsSuccessStatusCode)
+        {
+            var detail="";
+            if (response.StatusCode==HttpStatusCode.BadRequest)
+            {
+                try
+                {
+                    var raw=await response.Content.ReadAsByteArrayAsync(bounded);
+                    if (raw.Length<=8192) {using var error=JsonDocument.Parse(raw);if (error.RootElement.TryGetProperty("detail",out var d)&&d.ValueKind==JsonValueKind.String) detail=d.GetString()??"";}
+                }
+                catch (JsonException) {}
+            }
+            throw new HttpRequestException(detail.Length>0&&detail.Length<=300&&!detail.Any(char.IsControl)?detail:"自建服务器请求失败，HTTP "+(int)response.StatusCode,null,response.StatusCode);
+        }
         if (response.Content.Headers.ContentLength>2*1024*1024) throw new InvalidDataException("响应超过上限");
         await using var input=await response.Content.ReadAsStreamAsync(bounded);using var memory=new MemoryStream();var buffer=new byte[16384];int read;
         while ((read=await input.ReadAsync(buffer,bounded))>0)
