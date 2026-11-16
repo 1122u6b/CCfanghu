@@ -67,6 +67,8 @@ class Gateway:
         self.center=WebCenter(self.management,self.devices,config['api_token'])
         from browser_probe import BrowserProbe
         self.browser_probe=BrowserProbe(self.management,self.devices)
+        from updates import Updates
+        self.updates=Updates(self.management.root)
         self.device_active={}
     def upstream(self,management=None):
         selected=(management or self.management).selected_upstream()
@@ -131,7 +133,16 @@ class Gateway:
             observed=ipaddress.ip_address(peer[0])
             if getattr(observed,'ipv4_mapped',None):observed=observed.ipv4_mapped
             return await self.response(w,200,{'observed_source':str(observed),'scope':'this authenticated TLS connection only'})
-        if method=='GET' and path=='/api/v1/config':return await self.response(w,200,{'proxies':[self.node(device)],'license_required':False,'identity':{'role':'owner' if is_admin else 'device','id':None if is_admin else device.id}})
+        if method=='GET' and path=='/api/v1/config':return await self.response(w,200,{'proxies':[self.node(device)],'update_key':self.updates.public,'license_required':False,'identity':{'role':'owner' if is_admin else 'device','id':None if is_admin else device.id}})
+        if method=='GET' and path=='/api/v1/update/package':
+            try:package=self.updates.package()
+            except ManagementError:return await self.response(w,404,{'error':'update unavailable'})
+            w.write(('HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: '+str(package.stat().st_size)+'\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n').encode());await w.drain()
+            with package.open('rb') as source:
+                while chunk:=source.read(65536):
+                    if device and not self.devices.current(device):break
+                    w.write(chunk);await asyncio.wait_for(w.drain(),30)
+            return
         if method=='POST' and path=='/api/v1/rpc':
             n=int(h.get('content-length','0'))
             if not 0<n<=131072:return await self.response(w,413,{'error':'invalid content length'})
@@ -144,6 +155,7 @@ class Gateway:
                 elif request.get('type')=='geo':
                     from geolocation import lookup
                     result=await asyncio.to_thread(lookup,self.management,request.get('ip'))
+                elif request.get('type')=='update_manifest':result=self.updates.manifest()
                 else:result=self.devices.rpc(self.management,request) if is_admin else self.devices.device_rpc(self.management,device,request)
             except (ManagementError,ValueError,TypeError,KeyError):return await self.response(w,400,{'error':'invalid management request'})
             return await self.response(w,200,result)

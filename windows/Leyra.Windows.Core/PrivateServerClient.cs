@@ -68,8 +68,21 @@ public sealed class PrivateServerClient : IDisposable
         {
             if (node.GetProperty("server").GetString()!=effective.Host || node.GetProperty("port").GetInt32()!=effective.Port || !node.GetProperty("tls").GetBoolean() || node.GetProperty("fingerprint").GetString()!=effective.Fingerprint) throw new InvalidDataException("节点与已固定的服务器身份不符");
         }
+        if(result.TryGetProperty("update_key",out var key))effective=ServerProfile.Parse((effective with{UpdateKey=key.GetString()}).Encode());
         return (effective,nodes.Clone());
+    }
+    public async Task DownloadUpdateAsync(string destination,long size,CancellationToken cancellation)
+    {
+        if(size is <1024 or >536870912)throw new InvalidDataException("更新包大小无效");
+        using var deadline=CancellationTokenSource.CreateLinkedTokenSource(cancellation);deadline.CancelAfter(TimeSpan.FromMinutes(8));var stop=deadline.Token;
+        using var request=new HttpRequestMessage(HttpMethod.Get,profile.Address("/api/v1/update/package"));
+        using var response=await http.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,stop);response.EnsureSuccessStatusCode();
+        if(response.Content.Headers.ContentLength!=size)throw new InvalidDataException("更新包长度不符");
+        using var input=await response.Content.ReadAsStreamAsync(stop);using var output=new FileStream(destination,FileMode.CreateNew,FileAccess.Write,FileShare.None,65536,true);var buffer=new byte[65536];long count=0;int n;
+        while((n=await input.ReadAsync(buffer,stop))>0){count+=n;if(count>size)throw new InvalidDataException("更新包超出预期长度");await output.WriteAsync(buffer.AsMemory(0,n),stop);}
+        if(count!=size)throw new InvalidDataException("更新包不完整");await output.FlushAsync(stop);
     }
     public void Dispose()=>http.Dispose();
 }
+
 

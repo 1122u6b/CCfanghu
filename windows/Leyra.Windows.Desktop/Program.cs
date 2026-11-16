@@ -133,7 +133,7 @@ sealed class MainWindow:Form
   switch(command)
   {
    case "shell_info":return Result(new{glass=false,platform="windows"});
-   case "app_version":return Result("0.2.0-dev");
+   case "app_version":return Result("0.3.0-rc1");
    case "verify_owner":ownerProof=await AuthenticateOwner(TextField(args,"reason",200));return Result(new{});
    case "run_rescue":return await ElevatedHelper("--recover");
    case "open_login_items":Process.Start(new ProcessStartInfo("ms-settings:startupapps"){UseShellExecute=true});return Result(new{});

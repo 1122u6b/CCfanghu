@@ -7,7 +7,7 @@ namespace Leyra.Windows.Agent;
 
 static class Program
 {
- public const string Version="0.2.0-dev";
+ public const string Version="0.3.0-rc1";
  static int Main(string[] args)
  {
   if(!OperatingSystem.IsWindows())return 10;
@@ -45,3 +45,4 @@ sealed class AgentService:ServiceBase
  }
  protected override void OnShutdown()=>OnStop();
 }
+

@@ -18,6 +18,7 @@ sealed partial class Runtime:IDisposable
  long? measuredSpeed;DateTimeOffset speedAt;string speedLine="";
  readonly Dictionary<string,(int? Delay,int? Success)> lineHealth=new();DateTimeOffset lastSample=DateTimeOffset.MinValue;
  object[] knownConflicts=[];DateTimeOffset lastConflictScan=DateTimeOffset.MinValue;string exitLocation="",locatedIp="";
+ readonly UpdateManager updates=new();CancellationToken shutdown;
  sealed record Snapshot(JsonElement Data,DateTimeOffset Heartbeat,bool Protected);
  volatile Snapshot snapshot=new(JsonSerializer.SerializeToElement(new{version=Program.Version,protection=new{state="starting"}}),DateTimeOffset.MinValue,false);
  DateTimeOffset retryAt=DateTimeOffset.MinValue;int failures;
@@ -39,6 +40,7 @@ sealed partial class Runtime:IDisposable
  }
  public async Task Run(CancellationToken stop)
  {
+  shutdown=stop;
   while(!stop.IsCancellationRequested)
   {
    await gate.WaitAsync(stop);
@@ -77,6 +79,7 @@ sealed partial class Runtime:IDisposable
   using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(45));var ct=deadline.Token;
   var config=await cloud.SendAsync("/api/v1/config",cancellation:ct);nodes=config.GetProperty("proxies").Clone();
   if(!config.TryGetProperty("identity",out var identity)||Text(identity,"role")!="device"||Text(identity,"id")!=profile.DeviceId)throw new InvalidDataException("服务器没有返回当前设备的独立身份");
+  if(profile.UpdateKey is null&&config.TryGetProperty("update_key",out var updateKey)){profile=ServerProfile.Parse((profile with{UpdateKey=updateKey.GetString()}).Encode());store.SetProfile(profile);}
   MihomoConfiguration.ValidateNodes(nodes);
   var remoteRules=await Remote(new{type="direct_rules"},ct);ReadRules(remoteRules);
   var dns=PrivateDns.Parse(await cloud.RpcAsync(new{type="dns_config"},ct),profile);
@@ -145,7 +148,7 @@ sealed partial class Runtime:IDisposable
   var lines=nodes.ValueKind==JsonValueKind.Array?nodes.EnumerateArray().Select((node,i)=>{var name=Text(node,"name","自有线路");var health=lineHealth.GetValueOrDefault(name);return new{id=(i+1).ToString(),label=(i+1)+" · "+name,region=exitLocation,exit_ip=exitIp,latency_ms=health.Delay,success_pct=health.Success,signal=health.Delay.HasValue?(health.Delay<150?4:health.Delay<400?3:2):0,speed=measuredSpeed.HasValue&&speedLine==name?new{down_bps=measuredSpeed.Value,measured=true,ago_secs=(int)Math.Max(0,(DateTimeOffset.UtcNow-speedAt).TotalSeconds)}:null};}).ToArray():[];
   var index=nodes.ValueKind==JsonValueKind.Array?nodes.EnumerateArray().Select((x,i)=>(Name:Text(x,"name"),Index:i+1)).FirstOrDefault(x=>x.Name==selected).Index:0;
   var remaining=Math.Max(0,store.Settings.PausedUntil-DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-  return new{version=Program.Version,consent_version=store.Settings.ConsentVersion,protection=new{state=visible,reason,remaining_secs=remaining,auto_resume_on_node=false,quit=store.Settings.QuitPause,blocked=visible=="blocked",since_secs=0},lines,current_line=index==0?"1":index.ToString(),line_mode=new{mode},rate=visible=="protected"?new{up_bps=up,down_bps=down}:null,guard=visible=="protected"?new{since=guardSince.ToUnixTimeSeconds(),blocked=(int?)null}:null,checks=Array.Empty<object>(),conflicts=proxy.Conflicts().Concat(knownConflicts).ToArray(),proxy_undo=proxy.UndoAvailable,last_error=lastError};
+  return new{version=Program.Version,update=updates.Ready,update_error=updates.Error,consent_version=store.Settings.ConsentVersion,protection=new{state=visible,reason,remaining_secs=remaining,auto_resume_on_node=false,quit=store.Settings.QuitPause,blocked=visible=="blocked",since_secs=0},lines,current_line=index==0?"1":index.ToString(),line_mode=new{mode},rate=visible=="protected"?new{up_bps=up,down_bps=down}:null,guard=visible=="protected"?new{since=guardSince.ToUnixTimeSeconds(),blocked=(int?)null}:null,checks=Array.Empty<object>(),conflicts=proxy.Conflicts().Concat(knownConflicts).ToArray(),proxy_undo=proxy.UndoAvailable,last_error=lastError};
  }
  void Publish(){snapshot=new Snapshot(Json(BuildStatus()),heartbeat,state=="protected");}
  object Status()
@@ -238,8 +241,8 @@ sealed partial class Runtime:IDisposable
     case "new_ticket":case "ticket_reply":case "ticket_rate":case "upload_chunk":case "ticket_image":case "messages":case "mark_read":case "set_contact":case "help":case "ai_accounts":case "ai_report":return await Remote(request,stop);
     case "select_exit":case "delete_exit":var result=await Remote(request,stop);configured=false;return result;
     case "report_bad_line":return await Remote(new{type="new_ticket",kind=1,title="线路问题",body="客户反馈当前线路不可用，请检查服务端出口。"},stop);
-    case "check_update":throw new InvalidOperationException("管理员尚未配置可信的更新发布源");
-    case "install_update":throw new InvalidOperationException("没有已验证的更新安装包");
+    case "check_update":if(profile is null)throw new InvalidOperationException("请先导入服务器连接文件");updates.Check(profile,shutdown);return new{checking=true};
+    case "install_update":return updates.Install();
     case "geo":return await Remote(request,stop);
     case "own_exit":case "store_exit":return await AddExit(request,stop);
     case "block_before_ready":

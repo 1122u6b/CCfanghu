@@ -2,7 +2,7 @@ Unicode true
 !include "MUI2.nsh"
 !include "x64.nsh"
 !ifndef VERSION
- !define VERSION "0.2.0-dev"
+ !define VERSION "0.3.0-rc1"
 !endif
 !ifndef PAYLOAD
  !error "PAYLOAD must name the verified self-contained Windows payload"
@@ -102,3 +102,4 @@ Section "Uninstall"
  RMDir "$INSTDIR\versions"
  RMDir "$INSTDIR"
 SectionEnd
+

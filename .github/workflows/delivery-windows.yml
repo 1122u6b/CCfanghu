@@ -1,0 +1,93 @@
+name: Authorized Windows delivery validation
+on:
+  push:
+    branches: [leyra-delivery-windows-20261116]
+permissions:
+  contents: read
+jobs:
+  delivery:
+    if: ${{ github.ref == 'refs/heads/leyra-delivery-windows-20261116' && github.actor == '1122u6b' }}
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Compile Windows service, desktop and native checks
+        shell: pwsh
+        run: |
+          dotnet build windows/Leyra.Windows.Checks -c Release -m:1 --nologo
+          if ($LASTEXITCODE) { throw 'Checks build failed' }
+          dotnet build windows/Leyra.Windows.Agent -c Release -m:1 --nologo
+          if ($LASTEXITCODE) { throw 'Service build failed' }
+          dotnet build windows/Leyra.Windows.Desktop -c Release -m:1 --nologo
+          if ($LASTEXITCODE) { throw 'Desktop build failed' }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run server, protocol, deployment and UI regression checks
+        shell: pwsh
+        run: |
+          python -m pip install -r requirements-dev.txt
+          $env:PYTHONPATH = "$pwd/server"
+          $env:LEYRA_CHECKS_DLL = "$pwd/windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll"
+          python -m unittest discover -s server/tests -v
+          if ($LASTEXITCODE) { throw 'Server tests failed' }
+          python -m unittest discover -s deploy/tests -v
+          if ($LASTEXITCODE) { throw 'Deployment tests failed' }
+          npm ci --ignore-scripts
+          npm run test:ui
+          if ($LASTEXITCODE) { throw 'UI tests failed' }
+          dotnet $env:LEYRA_CHECKS_DLL
+          if ($LASTEXITCODE) { throw 'Core checks failed' }
+      - name: Exercise actual Windows credentials, Job, TUN and WFP
+        shell: pwsh
+        run: |
+          python scripts/prepare_kernel.py windows artifacts/native-kernel
+          if ($LASTEXITCODE) { throw 'Kernel verification failed' }
+          $env:LEYRA_NATIVE_KERNEL = "$pwd/artifacts/native-kernel/mihomo.exe"
+          $checks = "$pwd/windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll"
+          foreach ($fixture in @('--native-credential-fixture','--native-job-fixture','--native-tun-fixture','--native-wfp-fixture')) {
+            dotnet $checks $fixture
+            if ($LASTEXITCODE) { throw "Native validation failed: $fixture" }
+          }
+      - name: Prepare official offline runtime and NSIS
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress --limit-output
+          if ($LASTEXITCODE -notin @(0,3010)) { throw 'NSIS installation failed' }
+          New-Item -ItemType Directory -Force artifacts/prerequisites | Out-Null
+          $runtime = "$pwd/artifacts/prerequisites/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+          $source = 'https://go.microsoft.com/fwlink/?linkid=2124701'
+          Invoke-WebRequest -Uri $source -OutFile $runtime
+          $signature = Get-AuthenticodeSignature -LiteralPath $runtime
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { throw 'Microsoft runtime signature rejected' }
+          @{source=$source;sha256=(Get-FileHash $runtime -Algorithm SHA256).Hash.ToLowerInvariant()} | ConvertTo-Json | Set-Content artifacts/prerequisites/runtime-origin.json -Encoding utf8
+      - name: Build self-contained offline installer
+        shell: pwsh
+        run: |
+          python scripts/build_windows_package.py --makensis "${env:ProgramFiles(x86)}/NSIS/makensis.exe"
+          if ($LASTEXITCODE) { throw 'Installer build failed' }
+      - name: Verify installation, service startup, window startup and uninstall
+        shell: pwsh
+        run: ./scripts/verify_windows_install.ps1
+      - name: Upload installer and validation receipts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LEYRAConnect-0.3.0-rc1
+          path: |
+            artifacts/LEYRAConnect-0.3.0-rc1-setup.exe
+            artifacts/LEYRAConnect-0.3.0-rc1-setup.sha256
+            artifacts/windows-install-receipt.json
+          retention-days: 7
+          if-no-files-found: error
+      - name: Remove fixture-owned WFP state
+        if: always()
+        shell: pwsh
+        run: |
+          $checks = 'windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll'
+          if (Test-Path $checks) { dotnet $checks --cleanup-wfp-fixture }

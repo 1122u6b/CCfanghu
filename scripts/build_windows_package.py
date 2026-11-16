@@ -17,8 +17,9 @@ def main():
  digest=hashlib.sha256(runtime.read_bytes()).hexdigest()
  manifest=json.loads((prerequisites/'runtime-origin.json').read_text())
  if manifest['sha256']!=digest:raise SystemExit('Offline runtime checksum mismatch')
- output=ROOT/'artifacts/LEYRAConnect-0.2.0-dev-internal-setup.exe'
+ output=ROOT/'artifacts/LEYRAConnect-0.3.0-rc1-setup.exe'
  subprocess.run([a.makensis,'-V2',f'-DPAYLOAD={payload}',f'-DPREREQUISITES={prerequisites}',f'-DWEBVIEW_SHA256={digest}',f'-DOUTPUT={output}','LeyraConnect.nsi'],cwd=ROOT/'installer',check=True)
  (output.with_suffix('.sha256')).write_text(hashlib.sha256(output.read_bytes()).hexdigest()+'  '+output.name+'\n')
  print('Internal candidate built; Windows native acceptance and live server provisioning still required:',output)
 if __name__=='__main__':main()
+

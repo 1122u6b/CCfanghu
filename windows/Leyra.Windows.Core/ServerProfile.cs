@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 namespace Leyra.Windows.Core;
 
-public sealed record ServerProfile(string Host, int Port, string Token, string Certificate, string Fingerprint, string Role, string? DeviceId)
+public sealed record ServerProfile(string Host, int Port, string Token, string Certificate, string Fingerprint, string Role, string? DeviceId,string? UpdateKey=null)
 {
     public Uri Address(string path) => new UriBuilder("https",Host,Port,path).Uri;
     public static ServerProfile Parse(ReadOnlySpan<byte> data)
@@ -28,9 +28,11 @@ public sealed record ServerProfile(string Host, int Port, string Token, string C
         var id=value.TryGetProperty("device_id",out var d) ? d.GetString() : null;
         if (role!="owner" && role!="device") throw new InvalidDataException("服务器身份无效");
         if (role=="device" && !Guid.TryParse(id,out _)) throw new InvalidDataException("设备编号无效");
-        return new(host,port,token,certificate,fingerprint,role,id);
+        var updateKey=value.TryGetProperty("update_key",out var update)?update.GetString():null;
+        if(updateKey is not null){if(updateKey.Length>2048)throw new InvalidDataException("更新公钥无效");using var signing=ECDsa.Create();signing.ImportFromPem(updateKey);if(signing.KeySize!=256)throw new InvalidDataException("更新公钥无效");}
+        return new(host,port,token,certificate,fingerprint,role,id,updateKey);
     }
-    public byte[] Encode() => JsonSerializer.SerializeToUtf8Bytes(new {leyra_server=new {host=Host,port=Port,token=Token,certificate=Certificate,fingerprint=Fingerprint,role=Role,device_id=DeviceId}});
+    public byte[] Encode() => JsonSerializer.SerializeToUtf8Bytes(new {leyra_server=new {host=Host,port=Port,token=Token,certificate=Certificate,fingerprint=Fingerprint,role=Role,device_id=DeviceId,update_key=UpdateKey}});
     public bool AcceptCertificate(X509Certificate2? cert,DateTimeOffset now) => cert is not null && now>=cert.NotBefore.ToUniversalTime() && now<=cert.NotAfter.ToUniversalTime() && CryptographicOperations.FixedTimeEquals(SHA256.HashData(cert.RawData),Convert.FromHexString(Fingerprint));
 }
 
@@ -52,4 +54,5 @@ public static class AddressPolicy
         return b[0]!=0 && b[0]!=10 && b[0]!=127 && b[0]<224 && !(b[0]==172 && b[1]>=16 && b[1]<=31) && !(b[0]==192 && b[1]==168) && !(b[0]==169 && b[1]==254) && !(b[0]==100 && b[1]>=64 && b[1]<=127);
     }
 }
+
 
