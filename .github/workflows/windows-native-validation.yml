@@ -188,6 +188,13 @@ jobs:
             while ((Get-Date) -lt $end) { $s = if (Test-Path $stateFile) { Get-Content $stateFile -Raw } else { '' }; if ($s -match $pattern) { return $s }; Start-Sleep 2 }
             return (Get-Content $stateFile -Raw -ErrorAction SilentlyContinue)
           }
+          # The service only answers the desktop user recorded at install time. On this hosted machine that
+          # is not the account running these steps, so register this account as the owner (test setup only).
+          Stop-Service LeyraConnect
+          $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          [IO.File]::WriteAllText("$env:ProgramData\LeyraConnect\owner.sid", $sid)
+          Start-Service LeyraConnect; Start-Sleep 5
+          Write-Host "   owner set to $sid"
           # Safety net: whatever happens below, give this machine its network back within 4 minutes.
           $at = (Get-Date).AddMinutes(4).ToString('HH:mm')
           schtasks /Create /TN LeyraCiRecover /SC ONCE /ST $at /RU SYSTEM /TR "`"$agent`" --recover" /F | Out-Null
