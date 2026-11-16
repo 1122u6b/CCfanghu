@@ -1,5 +1,7 @@
 name: Owner server connection (manual only)
 on:
+  push:
+    branches: [server-connection-20261116]
   workflow_dispatch:
     inputs:
       allow_hosted_compute:
@@ -14,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   inspect:
-    if: ${{ inputs.allow_hosted_compute == true }}
+    if: ${{ inputs.allow_hosted_compute == true || (github.event_name == 'push' && github.ref == 'refs/heads/server-connection-20261116') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     steps:

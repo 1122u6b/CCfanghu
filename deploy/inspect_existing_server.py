@@ -46,7 +46,11 @@ def collect_readiness():
 def main():
  report=collect_readiness();services=report['services'];gateway=next((x for x in services if x['name']=='leyra-server.service'),{});dns=gateway.get('dns',{})
  checks={
-  'SERVICE_COMMANDS':all(x.get('active')=='active' and x.get('recognized_command') and x.get('user')=='root' for x in services),
+  'SERVICE_COMMANDS':all(x.get('active')=='active' and x.get('recognized_command') for x in services),
+  'GATEWAY_COMMAND':bool(gateway.get('recognized_command')),
+  'DNS_COMMAND':bool(next((x for x in services if x['name']=='leyra-dns.service'),{}).get('recognized_command')),
+  'SERVICE_USERS_MATCH':len({x.get('user') for x in services})==1,
+  'SERVICE_USERS_STATIC':all(unit(x['name'],'DynamicUser')!='yes' for x in services),
   'CERTIFICATE':bool(gateway.get('certificate_valid_for_next_day')),
   'DNS_INFRASTRUCTURE':bool(dns.get('zone') and dns.get('answer_ip') and dns.get('expected_sources') and dns.get('has_doh_key') and dns.get('private_dns_path')),
   'DNS_CLIENT_ENDPOINT':dns.get('zone')=='probe.leyra.xin' and dns.get('resolver_host')=='api.leyra.xin' and dns.get('resolver_scheme')=='https' and dns.get('resolver_port')==443,
