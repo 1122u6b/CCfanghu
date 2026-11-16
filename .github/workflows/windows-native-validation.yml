@@ -7,6 +7,11 @@ on:
         type: boolean
         required: true
         default: false
+      publish_tested_run:
+        description: 'Only publish: run number of an earlier run that already passed every test (skips building and testing)'
+        type: string
+        required: false
+        default: ''
       publish_to_website:
         description: 'After the install test passes, publish this installer to the server (website download + automatic client update)'
         type: boolean
@@ -19,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   native:
-    if: ${{ inputs.allow_hosted_compute == true }}
+    if: ${{ inputs.allow_hosted_compute == true && inputs.publish_tested_run == '' }}
     runs-on: windows-2022
     timeout-minutes: 20
     steps:
@@ -84,7 +89,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'WFP cleanup failed; runner must be discarded' }
           }
   test-code:
-    if: ${{ inputs.allow_hosted_compute == true }}
+    if: ${{ inputs.allow_hosted_compute == true && inputs.publish_tested_run == '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     outputs:
@@ -105,7 +110,7 @@ jobs:
           [[ "$code" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]
           echo "code=$code" >> "$GITHUB_OUTPUT"
   installer:
-    if: ${{ inputs.allow_hosted_compute == true }}
+    if: ${{ inputs.allow_hosted_compute == true && inputs.publish_tested_run == '' }}
     needs: test-code
     runs-on: windows-2022
     timeout-minutes: 30
@@ -257,6 +262,26 @@ jobs:
         with:
           name: Leyra-windows-installer
           path: release
+      - name: Upload the tested installer to the server and publish it
+        env:
+          LEYRA_SSH_KEY: ${{ secrets.LEYRA_SSH_KEY }}
+        shell: bash
+        run: bash deploy/publish_release.sh release
+  publish-tested:
+    if: ${{ inputs.publish_tested_run != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Leyra-windows-installer
+          path: release
+          run-id: ${{ inputs.publish_tested_run }}
+          github-token: ${{ github.token }}
       - name: Upload the tested installer to the server and publish it
         env:
           LEYRA_SSH_KEY: ${{ secrets.LEYRA_SSH_KEY }}
