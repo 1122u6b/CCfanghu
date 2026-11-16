@@ -36,7 +36,7 @@ public static class NativeCredentials
  }
  public static bool Verify(byte[] packed,SecurityIdentifier expected)
  {
-  if(packed.Length is <1 or >65536)return false;
+  if(packed.Length is <1 or >65536){CryptographicOperations.ZeroMemory(packed);return false;}
   var input=Marshal.AllocHGlobal(packed.Length);IntPtr user=IntPtr.Zero,domain=IntPtr.Zero,password=IntPtr.Zero,splitUser=IntPtr.Zero,splitDomain=IntPtr.Zero;
   uint u=0,d=0,p=0;int ua=0,da=0,pa=0;
   try
