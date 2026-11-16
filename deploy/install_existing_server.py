@@ -112,7 +112,8 @@ def install(address):
  if not ipaddress.ip_address(address).is_global:raise ValueError('A public literal server IP is required')
  source=Path(__file__).resolve().parents[1]/'server'
  files=['gateway.py','management.py','devices.py','dns_probe.py','ai_login.py','verify_live.py','admin.py','links.py','upstream_kernel.py','admin.html']
- for name in files:compile((source/name).read_bytes(),name,'exec')
+ for name in files:
+  if name.endswith('.py'):compile((source/name).read_bytes(),name,'exec')
  records={service:read_service(service,entry) for service,entry in SERVICES.items()}
  identities={}
  for service in SERVICES:
