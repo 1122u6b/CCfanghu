@@ -56,8 +56,16 @@ jobs:
           $env:LEYRA_NATIVE_KERNEL = "$pwd/artifacts/native-kernel/mihomo.exe"
           dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll --native-job-fixture
           if ($LASTEXITCODE -ne 0) { throw 'Native process fixture failed' }
-      - name: Exercise actual WFP only on this disposable hosted runner
+      - name: Exercise actual TUN driver lifecycle
+        id: native_tun
         if: ${{ success() || (failure() && steps.native_processes.outcome == 'failure') }}
+        shell: pwsh
+        run: |
+          $env:LEYRA_NATIVE_KERNEL = "$pwd/artifacts/native-kernel/mihomo.exe"
+          dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll --native-tun-fixture
+          if ($LASTEXITCODE -ne 0) { throw 'Native TUN fixture failed' }
+      - name: Exercise actual WFP only on this disposable hosted runner
+        if: ${{ success() || (failure() && (steps.native_processes.outcome == 'failure' || steps.native_tun.outcome == 'failure')) }}
         run: dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll --native-wfp-fixture
       - name: Remove fixture-owned filters even after a failed check
         if: always()

@@ -71,17 +71,7 @@ sealed class KernelSession:IDisposable
   while(bytes.Count<4096){var next=new byte[1];if(await stream.ReadAsync(next,stop)==0)break;if(next[0]==10)break;bytes.Add(next[0]);}
   using var doc=JsonDocument.Parse(bytes.ToArray());return (doc.RootElement.GetProperty("up").GetInt64(),doc.RootElement.GetProperty("down").GetInt64());
  }
- [DllImport("iphlpapi.dll")]static extern uint ConvertInterfaceIndexToLuid(uint index,out ulong luid);
- public static ulong Tunnel()
- {
-  foreach(var nic in NetworkInterface.GetAllNetworkInterfaces())
-  {
-   if(nic.Name!="LeyraConnect" || nic.OperationalStatus!=OperationalStatus.Up)continue;
-   var index=nic.GetIPProperties().GetIPv4Properties()?.Index;
-   if(index is int value && ConvertInterfaceIndexToLuid((uint)value,out var luid)==0)return luid;
-  }
-  return 0;
- }
+ public static ulong Tunnel()=>Leyra.Windows.Platform.WindowsTunnel.Current();
  public void Stop()
  {
   if(process is null)return;
