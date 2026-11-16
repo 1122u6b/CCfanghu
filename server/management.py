@@ -53,6 +53,13 @@ CREATE TABLE IF NOT EXISTS direct_rules(cidr TEXT PRIMARY KEY,note TEXT NOT NULL
 CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL,secret TEXT NOT NULL);''')
             self.set_default(db,'account',{'id':secrets.randbelow(900000)+100000,'contact':'','created_at':int(time.time())})
             self.set_default(db,'help',{'faq':[],'guides':[]})
+            # One-time wording fix for FAQ answers copied from older clients; answers the owner edited are left alone.
+            row=db.execute("SELECT value FROM settings WHERE key='help'").fetchone()
+            if row:
+                stale={'暂停是临时的，选 10、30 或 60 分钟，到点自动恢复。彻底退出会撤掉防护、关掉软件，直到你再打开软件或重启电脑。两种期间网站都能看到你的真实 IP，都要先确认是你本人。':'暂停是临时的，选 10、30 或 60 分钟，到点自动恢复。彻底退出会撤掉防护、关掉软件，直到你再打开软件或重启电脑。两种期间网站都能看到你的真实 IP。','一个账户绑定一台电脑；更换电脑请联系客服。':'一个授权码只能用于一台电脑；换电脑请进售后 QQ 群联系客服。'}
+                text=row[0]
+                for k,v in stale.items():text=text.replace(json.dumps(k)[1:-1],json.dumps(v)[1:-1]).replace(k,v)
+                if text!=row[0]:db.execute("UPDATE settings SET value=? WHERE key='help'",(text,))
         os.chmod(self.path,0o600)
     @contextlib.contextmanager
     def db(self):
