@@ -524,7 +524,8 @@
     if (S.speedTesting || S.busy.speed) return;
     S.busy.speed = true;
     call({ type: 'speed_test' }).then(function () {
-      S.busy.speed = false; S.speedTesting = true; P.render();
+      S.busy.speed = false; S.speedTesting = false;
+      call({ type: 'status' }).then(apply).catch(function () {}); P.render();
     }).catch(function (e) { S.busy.speed = false; P.render(); P.toast(msg(e), 'info'); });
   };
   A.refreshAny = function () { A.go(S.status === 'pm' ? 'overview' : 'routes'); A.routeRefresh(); };
@@ -1987,3 +1988,4 @@
   setInterval(function () { if (account && account.activated) { loadZone(); loadRules(); } }, 30000);
   setInterval(function () { if (account && account.activated) loadTickets(); }, 60000);
 })();
+

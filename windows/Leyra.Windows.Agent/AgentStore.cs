@@ -14,6 +14,7 @@ sealed class AgentSettings
  public int ConsentVersion{get;set;}
  public string? OriginalTimezone{get;set;}
  public string ExitTimezone{get;set;}="Asia/Hong_Kong";
+ public string? DismissedTimezone{get;set;}
  public List<DirectRule> DirectRules{get;set;}=[];
 }
 sealed class AgentStore
@@ -84,3 +85,4 @@ sealed class AgentStore
   if(!File.Exists(ownerPath))Atomic(ownerPath,System.Text.Encoding.UTF8.GetBytes(owner.Value));
  }
 }
+

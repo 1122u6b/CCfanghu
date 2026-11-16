@@ -8,6 +8,12 @@ static class BrowserPolicies
  static readonly string[] Paths={@"SOFTWARE\Policies\Google\Chrome",@"SOFTWARE\Policies\Microsoft\Edge"};
  record Prior(string Path,string Name,bool Present,RegistryValueKind Kind,object? Value);
  static string FileName=>Path.Combine(AgentStore.Root,"browser-policies.json");
+ public static bool Installed()
+ {
+  foreach(var path in Paths)using(var key=Registry.LocalMachine.OpenSubKey(path))
+   if(key?.GetValue("WebRtcIPHandling") as string!="disable_non_proxied_udp"||key.GetValue("QuicAllowed") is not int quic||quic!=0)return false;
+  return true;
+ }
  public static object Install()
  {
   if(!File.Exists(FileName))
@@ -39,3 +45,4 @@ static class BrowserPolicies
   System.IO.File.Delete(FileName);
  }
 }
+

@@ -64,6 +64,15 @@ class Datagram(asyncio.DatagramProtocol):
     def __init__(self,authority):self.authority=authority
     def connection_made(self,transport):self.transport=transport
     def datagram_received(self,data,addr):
+        if len(data)==20 and data[:2]==b'\x00\x01' and data[2:4]==b'\x00\x00' and data[4:8]==b'\x21\x12\xa4\x42':
+            # Minimal RFC 5389 IPv4 binding response on our existing UDP listener.
+            # Fixed small response; no forwarding or target chosen by the requester.
+            import ipaddress
+            ip=ipaddress.ip_address(addr[0])
+            if ip.version==4:
+                value=struct.pack('!BBHI',0,1,addr[1]^0x2112,int(ip)^0x2112a442)
+                self.transport.sendto(b'\x01\x01\x00\x0c'+data[4:20]+b'\x00\x20\x00\x08'+value,addr)
+            return
         result=self.authority.answer(data,addr[0])
         if result:self.transport.sendto(result,addr)
 async def serve(config):
@@ -83,3 +92,4 @@ async def serve(config):
     finally:transport.close()
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--config',required=True);args=p.parse_args();asyncio.run(serve(json.loads(Path(args.config).read_text())))
+

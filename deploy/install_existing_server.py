@@ -98,7 +98,7 @@ def install(address):
  if os.geteuid()!=0:raise PermissionError('Run this installer as root on the existing server')
  if not ipaddress.ip_address(address).is_global:raise ValueError('A public literal server IP is required')
  source=Path(__file__).resolve().parents[1]/'server'
- files=['gateway.py','management.py','devices.py','dns_probe.py','ai_login.py','verify_live.py']
+ files=['gateway.py','management.py','devices.py','dns_probe.py','ai_login.py','verify_live.py','web_center.py','browser_probe.py','geolocation.py']
  for name in files:compile((source/name).read_bytes(),name,'exec')
  records={service:read_service(service,entry) for service,entry in SERVICES.items()}
  identities={}
@@ -121,6 +121,9 @@ def install(address):
  release.mkdir(parents=True,mode=0o755);data.mkdir(mode=0o700,exist_ok=True)
  for candidate in [Path('/opt/leyra-connect'),Path('/opt/leyra-connect/releases'),release]:os.chmod(candidate,0o755)
  for name in files:shutil.copy2(source/name,release/name);os.chmod(release/name,0o644)
+ shutil.copytree(source/'web',release/'web')
+ os.chmod(release/'web',0o755)
+ for asset in (release/'web').iterdir():os.chmod(asset,0o644)
  upgrading=Path(gateway.get('data_dir','/nonexistent')).resolve()==data
  gateway.update(data_dir=str(data),public_host=address,fingerprint=fingerprint)
  if not upgrading:gateway.update(api_token=secrets.token_urlsafe(48),client_user='owner',client_password=secrets.token_urlsafe(48))

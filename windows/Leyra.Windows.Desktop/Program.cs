@@ -96,7 +96,7 @@ sealed class MainWindow:Form
  {
   var payload=JsonSerializer.SerializeToNode(request)!.AsObject();var type=payload["type"]?.GetValue<string>();
   if(type=="owner_auth"&&!internalAuthentication)throw new InvalidOperationException("账户验证只能由系统对话框发起");
-  var sensitive=type is "pair" or "pause" || (type=="block_before_ready"&&payload["on"]?.GetValue<bool>()==false) || (type=="add_direct_rule"&&payload["confirm_public"]?.GetValue<bool>()==true);
+  var sensitive=type is "pair" or "pause" || (type=="block_before_ready"&&payload["on"]?.GetValue<bool>()==false) || (type=="add_direct_rule"&&payload["confirm_public"]?.GetValue<bool>()==true) || (type=="shell_action"&&payload["command"]?.GetValue<string>()=="force_quit_conflict");
   if(sensitive)payload["owner_proof"]=Interlocked.Exchange(ref ownerProof,null)??await AuthenticateOwner("确认修改本机网络设置。" );
   var deep=type=="doctor"&&payload["deep"]?.GetValue<bool>()==true;
   using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(deep?95:35));
@@ -162,7 +162,16 @@ sealed class MainWindow:Form
    case "open_guide":case "open_web_center":case "quit_conflict":
    case "force_quit_conflict":case "ai_login":case "ai_login_poll":case "ai_login_cancel":case "relaunch_new_version":
     var action=await Service(new{type="shell_action",command,args});
-    if(action.TryGetProperty("url",out var link))OpenBrowser(link.GetString(),false);
+    if(action.TryGetProperty("url",out var link))
+    {
+     if(command=="test_browser")
+     {
+      var name=TextField(args,"browser",80);var installed=BrowserCatalog.Find();if(!installed.TryGetValue(name,out var executable))throw new InvalidOperationException("浏览器已移除，请重新检查");
+      var target=link.GetString();if(!Uri.TryCreate(target,UriKind.Absolute,out var url)||url.Scheme!="https"||url.UserInfo.Length!=0||url.AbsolutePath!="/private-dns/browser/")throw new InvalidDataException("浏览器检测地址无效");
+      var launch=new ProcessStartInfo(executable){UseShellExecute=false};launch.ArgumentList.Add(url.AbsoluteUri);Process.Start(launch);
+     }
+     else OpenBrowser(link.GetString(),false);
+    }
     if(action.TryGetProperty("open_url",out var open))OpenBrowser(open.GetString(),command.StartsWith("ai_login",StringComparison.Ordinal));
     if(command.StartsWith("ai_login",StringComparison.Ordinal))return Result(new{state=action.TryGetProperty("state",out var phase)?phase.GetString():"unavailable",left_secs=action.TryGetProperty("left_secs",out var left)?left.GetInt32():0});
     return action;
@@ -210,3 +219,4 @@ sealed class MainWindow:Form
   var text=v.GetString()??"";return text.Length>maximum?text[..maximum]:text;
  }
 }
+

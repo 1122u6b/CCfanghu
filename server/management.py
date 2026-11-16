@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS uploads(id TEXT PRIMARY KEY,data BLOB NOT NULL,at INT
 CREATE TABLE IF NOT EXISTS attachments(id TEXT PRIMARY KEY,ticket INTEGER NOT NULL,data BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS direct_rules(cidr TEXT PRIMARY KEY,note TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL,secret TEXT NOT NULL);''')
+            db.execute('CREATE TABLE IF NOT EXISTS line_health(id TEXT NOT NULL,at INTEGER NOT NULL,delay INTEGER,UNIQUE(id,at))')
             self.set_default(db,'account',{'id':secrets.randbelow(900000)+100000,'contact':'','created_at':int(time.time())})
             self.set_default(db,'help',{'faq':[],'guides':[]})
         os.chmod(self.path,0o600)
@@ -93,6 +94,20 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
         with self.db() as db:
             # Expire incomplete/consumed uploads and bound per-owner disk use.
             db.execute('DELETE FROM uploads WHERE at<? OR used=1',(now-86400,))
+            if kind=='report_line_health':
+                items=req.get('items')
+                if not isinstance(items,list) or len(items)>256:raise ManagementError('invalid health samples')
+                for item in items:
+                    identity=text(item.get('id'),80,True);delay=item.get('ms')
+                    if delay is not None and (not isinstance(delay,int) or isinstance(delay,bool) or not 0<delay<=120000):raise ManagementError('invalid latency')
+                    db.execute('INSERT OR REPLACE INTO line_health VALUES(?,?,?)',(identity,now,delay))
+                db.execute('DELETE FROM line_health WHERE at<?',(now-86400,))
+                db.execute('DELETE FROM line_health WHERE rowid NOT IN (SELECT rowid FROM line_health ORDER BY at DESC LIMIT 20000)')
+                return {'saved':True}
+            if kind=='line_history':
+                rows=db.execute('SELECT id,at,delay FROM line_health WHERE at>=? ORDER BY at',(now-3600,)).fetchall();lines={}
+                for row in rows:lines.setdefault(row['id'],[]).append({'ago_secs':max(0,now-row['at']),'ms':row['delay']})
+                return {'lines':[{'id':identity,'points':points[-180:]} for identity,points in lines.items()]}
             if kind=='dns_config':
                 conf=self.get(db,'dns',{})
                 return {k:conf[k] for k in ('zone','resolver_url','resolver_ip','expected_sources') if k in conf}
@@ -222,3 +237,4 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
                 if not r:raise ManagementError('account not found')
                 cur=db.execute('INSERT INTO tickets(kind,title,state,created_at,updated_at) VALUES (?,?,?,?,?)',(4,'账户问题 #'+str(identity),'open',now,now));self.add_reply(db,cur.lastrowid,text(req.get('body','请检查此账户'),20000,True),[]);return {'ticket':cur.lastrowid}
             raise ManagementError('unsupported management command: '+str(kind))
+

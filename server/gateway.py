@@ -63,6 +63,10 @@ class Gateway:
         from management import Management
         self.management=Management(config.get('data_dir') or str(Path(config.get('upstream_file',config['cert'])).parent))
         self.devices=Devices(self.management.root)
+        from web_center import WebCenter
+        self.center=WebCenter(self.management,self.devices,config['api_token'])
+        from browser_probe import BrowserProbe
+        self.browser_probe=BrowserProbe(self.management,self.devices)
         self.device_active={}
     def upstream(self,management=None):
         selected=(management or self.management).selected_upstream()
@@ -111,6 +115,8 @@ class Gateway:
         if len(header)>8192:raise ValueError('header too large')
         rows=header.decode('iso-8859-1').split('\r\n');method,path,_=rows[0].split(' ',2)
         h={k.lower().strip():v.strip() for line in rows[1:] if ':' in line for k,v in [line.split(':',1)]}
+        if path.startswith('/private-dns/browser/'):return await self.browser_probe.handle(self,r,w,method,path,h)
+        if path.startswith('/private-dns/center/'):return await self.center.handle(self,r,w,method,path,h)
         if path.startswith('/private-dns/'):return await self.doh(r,w,method,path,h)
         authorization=h.get('authorization','')
         is_admin=hmac.compare_digest(authorization.encode(),('Bearer '+self.config['api_token']).encode())
@@ -132,7 +138,13 @@ class Gateway:
             from management import ManagementError
             try:
                 request=json.loads(await exact(r,n))
-                result=self.devices.rpc(self.management,request) if is_admin else self.devices.device_rpc(self.management,device,request)
+                if request.get('type')=='web_center_begin':result=self.center.begin(device)
+                elif request.get('type')=='browser_probe_begin' and device:result=self.browser_probe.begin(device,request)
+                elif request.get('type')=='browser_results' and device:result=self.browser_probe.results(device)
+                elif request.get('type')=='geo':
+                    from geolocation import lookup
+                    result=await asyncio.to_thread(lookup,self.management,request.get('ip'))
+                else:result=self.devices.rpc(self.management,request) if is_admin else self.devices.device_rpc(self.management,device,request)
             except (ManagementError,ValueError,TypeError,KeyError):return await self.response(w,400,{'error':'invalid management request'})
             return await self.response(w,200,result)
         if method=='POST' and path=='/api/v1/own-exit':
@@ -214,3 +226,4 @@ async def main(path):
     async with server:await server.serve_forever()
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--config',required=True);a=p.parse_args();asyncio.run(main(a.config))
+

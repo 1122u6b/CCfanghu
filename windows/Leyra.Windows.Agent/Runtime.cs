@@ -15,6 +15,9 @@ sealed partial class Runtime:IDisposable
  string state="starting",reason="route",lastError="",exitIp="",selected="",mode="auto";
  DateTimeOffset heartbeat=DateTimeOffset.MinValue,lastHealth=DateTimeOffset.MinValue,guardSince=DateTimeOffset.MinValue;
  bool configured,dnsVerified,exitVerified;long up,down;ulong tunnel;
+ long? measuredSpeed;DateTimeOffset speedAt;string speedLine="";
+ readonly Dictionary<string,(int? Delay,int? Success)> lineHealth=new();DateTimeOffset lastSample=DateTimeOffset.MinValue;
+ object[] knownConflicts=[];DateTimeOffset lastConflictScan=DateTimeOffset.MinValue;string exitLocation="",locatedIp="";
  sealed record Snapshot(JsonElement Data,DateTimeOffset Heartbeat,bool Protected);
  volatile Snapshot snapshot=new(JsonSerializer.SerializeToElement(new{version=Program.Version,protection=new{state="starting"}}),DateTimeOffset.MinValue,false);
  DateTimeOffset retryAt=DateTimeOffset.MinValue;int failures;
@@ -41,6 +44,7 @@ sealed partial class Runtime:IDisposable
    await gate.WaitAsync(stop);
    try
    {
+    if(DateTimeOffset.UtcNow-lastConflictScan>TimeSpan.FromSeconds(30)){knownConflicts=ConflictPrograms.Scan();lastConflictScan=DateTimeOffset.UtcNow;}
     if(profile is null){state="not_activated";}
     else if(!store.Settings.Enabled || store.Settings.PausedUntil>DateTimeOffset.UtcNow.ToUnixTimeSeconds()){kernel.Stop();if(filters.DefaultGuardsInstalled())filters.RemoveOwned();configured=false;state="paused";}
     else if(!kernel.Alive || !configured){if(DateTimeOffset.UtcNow>=retryAt)await StartProtected(stop);}
@@ -114,6 +118,21 @@ sealed partial class Runtime:IDisposable
   exitVerified=false;exitIp=await ObserveExit(ct);exitVerified=true;
   var traffic=await kernel.Rates(ct);up=traffic.Up;down=traffic.Down;
   var proxies=await kernel.Get("proxies/"+Uri.EscapeDataString("出口"),ct);selected=Text(proxies,"now");
+  if(DateTimeOffset.UtcNow-lastSample>TimeSpan.FromSeconds(20))
+  {
+   var all=await kernel.Get("proxies",ct);var map=all.GetProperty("proxies");var samples=new List<object>();
+   for(var i=0;i<nodes.GetArrayLength();i++)
+   {
+    var name=Text(nodes[i],"name");int? delay=null;int? success=null;
+    if(map.TryGetProperty(name,out var node)&&node.TryGetProperty("history",out var history)&&history.ValueKind==JsonValueKind.Array&&history.GetArrayLength()>0)
+    {
+     var values=history.EnumerateArray().Select(x=>x.GetProperty("delay").GetInt32()).ToArray();delay=values[^1]>0?values[^1]:null;success=(int)Math.Round(100.0*values.Count(x=>x>0)/values.Length);
+    }
+    lineHealth[name]=(delay,success);samples.Add(new{id=(i+1).ToString(),ms=delay});
+   }
+   using var reportDeadline=CancellationTokenSource.CreateLinkedTokenSource(ct);reportDeadline.CancelAfter(TimeSpan.FromSeconds(2));
+   try{await Remote(new{type="report_line_health",items=samples},reportDeadline.Token);}catch(HttpRequestException){}catch(OperationCanceledException)when(!stop.IsCancellationRequested){}lastSample=DateTimeOffset.UtcNow;
+  }
   heartbeat=DateTimeOffset.UtcNow;lastHealth=heartbeat;
   var evidence=new ProtectionEvidence(kernel.Alive,tunnel!=0,filters.DefaultGuardsInstalled(),dnsVerified,exitVerified,heartbeat);
   if(evidence.Assess(heartbeat)!=ProtectionPhase.Protected)throw new InvalidOperationException("本机防护证据不完整");
@@ -123,10 +142,10 @@ sealed partial class Runtime:IDisposable
  {
   var visible=state;
   if(visible=="protected"&&(DateTimeOffset.UtcNow-heartbeat>TimeSpan.FromSeconds(12)||!kernel.Alive))visible="starting";
-  var lines=nodes.ValueKind==JsonValueKind.Array?nodes.EnumerateArray().Select((node,i)=>new{id=(i+1).ToString(),label=(i+1)+" · "+Text(node,"name","自有线路"),region="",exit_ip=exitIp,latency_ms=(int?)null,success_pct=(int?)null,signal=0}).ToArray():[];
+  var lines=nodes.ValueKind==JsonValueKind.Array?nodes.EnumerateArray().Select((node,i)=>{var name=Text(node,"name","自有线路");var health=lineHealth.GetValueOrDefault(name);return new{id=(i+1).ToString(),label=(i+1)+" · "+name,region=exitLocation,exit_ip=exitIp,latency_ms=health.Delay,success_pct=health.Success,signal=health.Delay.HasValue?(health.Delay<150?4:health.Delay<400?3:2):0,speed=measuredSpeed.HasValue&&speedLine==name?new{down_bps=measuredSpeed.Value,measured=true,ago_secs=(int)Math.Max(0,(DateTimeOffset.UtcNow-speedAt).TotalSeconds)}:null};}).ToArray():[];
   var index=nodes.ValueKind==JsonValueKind.Array?nodes.EnumerateArray().Select((x,i)=>(Name:Text(x,"name"),Index:i+1)).FirstOrDefault(x=>x.Name==selected).Index:0;
   var remaining=Math.Max(0,store.Settings.PausedUntil-DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-  return new{version=Program.Version,consent_version=store.Settings.ConsentVersion,protection=new{state=visible,reason,remaining_secs=remaining,auto_resume_on_node=false,quit=store.Settings.QuitPause,blocked=visible=="blocked",since_secs=0},lines,current_line=index==0?"1":index.ToString(),line_mode=new{mode},rate=visible=="protected"?new{up_bps=up,down_bps=down}:null,guard=visible=="protected"?new{since=guardSince.ToUnixTimeSeconds(),blocked=(int?)null}:null,checks=Array.Empty<object>(),conflicts=proxy.Conflicts(),proxy_undo=proxy.UndoAvailable,last_error=lastError};
+  return new{version=Program.Version,consent_version=store.Settings.ConsentVersion,protection=new{state=visible,reason,remaining_secs=remaining,auto_resume_on_node=false,quit=store.Settings.QuitPause,blocked=visible=="blocked",since_secs=0},lines,current_line=index==0?"1":index.ToString(),line_mode=new{mode},rate=visible=="protected"?new{up_bps=up,down_bps=down}:null,guard=visible=="protected"?new{since=guardSince.ToUnixTimeSeconds(),blocked=(int?)null}:null,checks=Array.Empty<object>(),conflicts=proxy.Conflicts().Concat(knownConflicts).ToArray(),proxy_undo=proxy.UndoAvailable,last_error=lastError};
  }
  void Publish(){snapshot=new Snapshot(Json(BuildStatus()),heartbeat,state=="protected");}
  object Status()
@@ -147,12 +166,25 @@ sealed partial class Runtime:IDisposable
    if(!NativeCredentials.Verify(packed,store.Owner))throw new UnauthorizedAccessException("无法验证当前 Windows 账户密码");
    return new{proof=ownerProof.Grant()};
   }
-  if(type=="history"){lock(events)return new{lines=Array.Empty<object>(),events=events.ToArray()};}
+  if(type=="history"){var history=await Remote(new{type="line_history"},stop);lock(events)return new{lines=history.GetProperty("lines").Clone(),events=events.ToArray()};}
   if(type=="check_history"){lock(checkHistory)return new{items=checkHistory.ToArray()};}
-  if(type=="timezone")return Zone();
+  if(type=="timezone")
+  {
+   if(exitVerified&&locatedIp!=exitIp&&cloud is not null)
+   {
+    try{var geo=await Remote(new{type="geo",ip=exitIp},stop);exitLocation=Text(geo,"label");var zone=Text(geo,"timezone");if(zone.Length>0){TimeZoneInfo.FindSystemTimeZoneById(zone);store.Settings.ExitTimezone=zone;store.Save();}locatedIp=exitIp;}
+    catch(HttpRequestException){}catch(TimeZoneNotFoundException){}
+   }
+   return Zone();
+  }
   if(type=="doctor")return await Doctor(Bool(request,"deep"),stop);
-  if(type=="browser_results")return new{items=Array.Empty<object>()};
-  if(type=="check_conflicts")return new{items=proxy.Conflicts(),complete=false};
+  if(type=="browser_results")
+  {
+   var installed=BrowserCatalog.Find(store.Owner.Value).Keys.ToArray();
+   if(cloud is null)return new{items=JsonSerializer.SerializeToElement(Array.Empty<object>()),installed};
+   var results=await Remote(new{type="browser_results"},stop);return new{items=results.GetProperty("items").Clone(),installed};
+  }
+  if(type=="check_conflicts")return new{items=proxy.Conflicts().Concat(ConflictPrograms.Scan()).ToArray(),complete=true,scope="known network applications and current system proxy"};
   await gate.WaitAsync(stop);
   try
   {
@@ -196,7 +228,7 @@ sealed partial class Runtime:IDisposable
      store.Settings.OriginalTimezone??=TimeZoneInfo.Local.Id;store.Save();await SystemClock.SetTimezone(store.Settings.ExitTimezone,stop);return Zone();
     case "restore_timezone":
      if(store.Settings.OriginalTimezone is string original){await SystemClock.SetTimezone(original,stop);store.Settings.OriginalTimezone=null;store.Save();}return Zone();
-    case "dismiss_timezone":return new{saved=true};
+    case "dismiss_timezone":store.Settings.DismissedTimezone=store.Settings.ExitTimezone;store.Save();return new{saved=true};
     case "sync_time":
      var clock=await Remote(new{type="server_time"},stop);if(!Bool(clock,"synchronized"))throw new InvalidOperationException("服务器时间尚未完成同步");
      SystemClock.SetUtc(clock.GetProperty("unix").GetDouble());return new{saved=true};
@@ -208,7 +240,7 @@ sealed partial class Runtime:IDisposable
     case "report_bad_line":return await Remote(new{type="new_ticket",kind=1,title="线路问题",body="客户反馈当前线路不可用，请检查服务端出口。"},stop);
     case "check_update":throw new InvalidOperationException("管理员尚未配置可信的更新发布源");
     case "install_update":throw new InvalidOperationException("没有已验证的更新安装包");
-    case "geo":throw new InvalidOperationException("服务端尚未配置 IP 归属地数据");
+    case "geo":return await Remote(request,stop);
     case "own_exit":case "store_exit":return await AddExit(request,stop);
     case "block_before_ready":
      if(!Bool(request,"on"))NeedOwner(request);
@@ -230,3 +262,4 @@ sealed partial class Runtime:IDisposable
  }
  public void Dispose(){kernel.Dispose();cloud?.Dispose();filters.Dispose();gate.Dispose();}
 }
+

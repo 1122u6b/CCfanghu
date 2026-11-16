@@ -11,7 +11,7 @@ sealed partial class Runtime
 {
  object Zone()
  {
-  var system=SystemClock.CurrentIana();return new{system,exit=store.Settings.ExitTimezone,matches=system==store.Settings.ExitTimezone,can_change=true,dismissed=false,location="",system_offset=TimeZoneInfo.Local.GetUtcOffset(DateTime.UtcNow).ToString()};
+  var system=SystemClock.CurrentIana();return new{system,exit=locatedIp==exitIp?store.Settings.ExitTimezone:"",matches=system==store.Settings.ExitTimezone,can_change=locatedIp==exitIp&&exitIp.Length>0,dismissed=store.Settings.DismissedTimezone==store.Settings.ExitTimezone,location=exitLocation,system_offset=TimeZoneInfo.Local.GetUtcOffset(DateTime.UtcNow).ToString()};
  }
  async Task<object> Account(CancellationToken stop)
  {
@@ -38,7 +38,25 @@ sealed partial class Runtime
   Add("L1",exitVerified?"info":"fail",exitVerified?"经本机代理取得的出口 IP："+exitIp:"没有取得该请求的公网出口");
   Add("C1",SystemClock.CurrentIana()==store.Settings.ExitTimezone?"pass":"warn","电脑时区与配置的出口时区对比");
   Add("S1",profile?.Role=="device"?"pass":"fail","独立设备身份；当前不使用商业激活码");
-  foreach(var id in new[]{"E3","E4","E6","E7","E10","P2","P5","P7","L2","L3","L4","L5","L6","L7","L8","S2","S3","S4","S5","S6"})Add(id,"skipped","此项尚无独立实测证据，未计入通过");
+  Add("P7",BrowserPolicies.Installed()?"pass":"warn","读取 Chrome/Edge 的非代理 UDP 和 QUIC 策略；浏览器需重启后生效");
+  var conflicts=ConflictPrograms.Scan();Add("E4",conflicts.Length>0||proxy.Conflicts().Length>0?"warn":"info","已检查已知网络软件进程和当前系统代理；不覆盖未知软件");
+  using(var service=Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\LeyraConnect"))Add("E10",service?.GetValue("Start") is int start&&start==2?"pass":"warn","读取 Windows 服务自动启动设置");
+  Add("S3",lineHealth.Count>0?"info":"skipped",lineHealth.Count>0?"已取得内核实际延迟历史；线路质量随网络变化":"尚未取得延迟历史");
+  Add("S4",measuredSpeed.HasValue?"info":"skipped",measuredSpeed.HasValue?"最近一次主动测速 "+measuredSpeed+" 字节/秒":"尚未执行主动测速");
+  Add("S5",profile is not null&&nodes.GetArrayLength()>0?"info":"skipped","通道配置使用自有 TLS 网关和固定证书；实际出口检查另列");
+  Add("S6",lastHealth>DateTimeOffset.MinValue?"info":"skipped",lastHealth>DateTimeOffset.MinValue?"最近一次鉴权及出口检查："+lastHealth.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"):"尚未同步");
+  if(cloud is not null)
+  {
+   try{var clock=await Remote(new{type="server_time"},stop);var difference=Math.Abs(clock.GetProperty("unix").GetDouble()-DateTimeOffset.UtcNow.ToUnixTimeSeconds());Add("E3",Bool(clock,"synchronized")&&difference<60?"pass":"warn","服务端 NTP 状态及当前时钟差："+(int)difference+" 秒");}
+   catch(HttpRequestException){Add("E3","skipped","无法获取服务端同步时钟");}
+   try
+   {
+    var browsers=await Remote(new{type="browser_results"},stop);var results=browsers.GetProperty("items");var exposed=results.EnumerateArray().Any(x=>Text(x,"exposure")=="real");Add("L10",exposed?"fail":results.GetArrayLength()>0?"info":"skipped",results.GetArrayLength()>0?"读取最近一次真实浏览器 HTTPS/WebRTC 测试；只代表当次观察":"请在浏览器实测中选择已安装浏览器开始检查");
+   }
+   catch(HttpRequestException){Add("L10","skipped","浏览器测试结果暂不可用");}
+  }
+  else{Add("E3","skipped","尚未连接服务器");Add("L10","skipped","尚未连接服务器");}
+  foreach(var id in new[]{"E6","E7","P2","P5","L2","L3","L4","L5","L6","L7","L8","S2"})Add(id,"skipped","此项尚无独立实测证据，未计入通过");
   if(deep)
   {
    var started=DateTimeOffset.UtcNow;var failed=false;
@@ -72,15 +90,24 @@ sealed partial class Runtime
   using var input=await response.Content.ReadAsStreamAsync(deadline.Token);var bytes=new byte[32768];long count=0;int n;
   while((n=await input.ReadAsync(bytes,deadline.Token))>0){count+=n;if(count>1048576)throw new InvalidDataException("测速响应超过上限");}
   if(count==0)throw new InvalidDataException("测速没有收到数据");
-  return new{down_bps=(long)(count/Math.Max(.001,started.Elapsed.TotalSeconds)),measured=true,ago_secs=0};
+  measuredSpeed=(long)(count/Math.Max(.001,started.Elapsed.TotalSeconds));speedAt=DateTimeOffset.UtcNow;speedLine=selected;
+  return new{down_bps=measuredSpeed,measured=true,ago_secs=0};
  }
  string? aiSession;int? aiIdentity;
  async Task<object> ShellAction(JsonElement request,CancellationToken stop)
  {
   var command=Text(request,"command");
   if(command=="install_webrtc_profile")return BrowserPolicies.Install();
+  if(command=="quit_conflict")return ConflictPrograms.Quit(Text(request.GetProperty("args"),"id"),false);
+  if(command=="force_quit_conflict"){NeedOwner(request);return ConflictPrograms.Quit(Text(request.GetProperty("args"),"id"),true);}
   var args=request.GetProperty("args");
-  if(command=="open_web_center")return new{url="https://leyra.xin"};
+  if(command=="test_browser")
+  {
+   if(state!="protected"||!exitVerified)throw new InvalidOperationException("请先建立已验证的防护线路");
+   var name=Text(args,"browser");if(!Leyra.Windows.Platform.BrowserCatalog.Find(store.Owner.Value).ContainsKey(name))throw new InvalidOperationException("没有找到这个浏览器");
+   var test=await Remote(new{type="browser_probe_begin",browser=name,expected=exitIp},stop);return new{browser=name,url=Text(test,"url")};
+  }
+  if(command=="open_web_center")return await Remote(new{type="web_center_begin"},stop);
   if(command=="open_guide")
   {
    var help=await Remote(new{type="help"},stop);var guides=help.GetProperty("guides");var index=args.GetProperty("index").GetInt32();
@@ -111,3 +138,4 @@ sealed partial class Runtime
   throw new InvalidOperationException("此系统操作尚未接入："+command);
  }
 }
+
