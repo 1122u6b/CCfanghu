@@ -29,7 +29,7 @@ def service(service,expected):
     result['dns']={'zone':dns.get('zone'),'answer_ip':dns.get('answer_ip'),'resolver_ip':dns.get('resolver_ip'),'resolver_host':url.hostname,'resolver_port':url.port or 443,'resolver_scheme':url.scheme,'private_dns_path':url.path.startswith('/private-dns/'),'expected_sources':dns.get('expected_sources'),'recursive_port':dns.get('recursive_port',5353),'has_doh_key':bool(dns.get('doh_key'))}
  return result
 
-def main():
+def collect_readiness():
  disk=shutil.disk_usage('/');out={'read_only':True,'uid':os.geteuid(),'cpu_count':os.cpu_count(),'memory_mib':os.sysconf('SC_PHYS_PAGES')*os.sysconf('SC_PAGE_SIZE')//1048576,'disk_free_gib':round(disk.free/1073741824,2),'services':[]}
  for name,entry in [('leyra-server.service','gateway.py'),('leyra-dns.service','dns_probe.py')]:
   try:out['services'].append(service(name,entry))
@@ -42,5 +42,18 @@ def main():
   try:
    with socket.create_connection(('127.0.0.1',port),timeout=2):out['loopback_ports'][str(port)]=True
   except OSError:out['loopback_ports'][str(port)]=False
- print(json.dumps(out,ensure_ascii=False,indent=2))
+ return out
+def main():
+ report=collect_readiness();services=report['services'];gateway=next((x for x in services if x['name']=='leyra-server.service'),{});dns=gateway.get('dns',{})
+ checks={
+  'SERVICE_COMMANDS':all(x.get('active')=='active' and x.get('recognized_command') and x.get('user')=='root' for x in services),
+  'CERTIFICATE':bool(gateway.get('certificate_valid_for_next_day')),
+  'DNS_INFRASTRUCTURE':bool(dns.get('zone') and dns.get('answer_ip') and dns.get('expected_sources') and dns.get('has_doh_key') and dns.get('private_dns_path')),
+  'DNS_CLIENT_ENDPOINT':dns.get('zone')=='probe.leyra.xin' and dns.get('resolver_host')=='api.leyra.xin' and dns.get('resolver_scheme')=='https' and dns.get('resolver_port')==443,
+  'NEW_STORE_AVAILABLE':not report['fresh_data_directory_exists'],
+  'GATEWAY_AND_RESOLVER_PORTS':all(report['loopback_ports'].get(str(p)) for p in [443,24443,5353]),
+  'CADDY_AND_RESOLVER':report['caddy_active']=='active' and report['unbound_resolver_active']=='active',
+ }
+ for name,ok in checks.items():print('LEYRA_READY_'+name+'='+('YES' if ok else 'NO'))
+ # No actual configuration values, paths, credentials, customer data or inventory are exported.
 if __name__=='__main__':main()
