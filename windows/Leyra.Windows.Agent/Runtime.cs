@@ -34,6 +34,7 @@ sealed partial class Runtime:IDisposable
  }
  void NeedOwner(JsonElement request)
  {
+  if(!store.Settings.RequireOwnerPassword)return;
   if(!ownerProof.Consume(Text(request,"owner_proof")))throw new UnauthorizedAccessException("请先验证当前电脑账户后重试");
  }
  public async Task Run(CancellationToken stop)

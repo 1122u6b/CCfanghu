@@ -83,8 +83,30 @@ jobs:
             dotnet $fixture --cleanup-wfp-fixture
             if ($LASTEXITCODE -ne 0) { throw 'WFP cleanup failed; runner must be discarded' }
           }
+  test-code:
+    if: ${{ inputs.allow_hosted_compute == true }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    outputs:
+      code: ${{ steps.issue.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Issue a one-day authorization code for the end-to-end test
+        id: issue
+        env:
+          LEYRA_SSH_KEY: ${{ secrets.LEYRA_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          key_file="$RUNNER_TEMP/leyra-key"; trap 'rm -f "$key_file"' EXIT; umask 077
+          printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
+          code=$(ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
+            'release=$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 "${release}admin.py" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-new --days 1 --note "automated Windows test"')
+          [[ "$code" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]
+          echo "code=$code" >> "$GITHUB_OUTPUT"
   installer:
     if: ${{ inputs.allow_hosted_compute == true }}
+    needs: test-code
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
@@ -109,6 +131,8 @@ jobs:
           @{ sha256 = $hash; source = 'https://go.microsoft.com/fwlink/?linkid=2124701' } | ConvertTo-Json | Set-Content "$dir/runtime-origin.json"
       - name: Build installer
         run: python scripts/build_windows_package.py --makensis "C:\Program Files (x86)\NSIS\makensis.exe"
+      - name: Build the request tool used for the end-to-end test
+        run: dotnet build windows/Leyra.Windows.Checks -c Release -m:1 --nologo
       - name: Silent install on this disposable Windows machine
         shell: pwsh
         run: |
@@ -150,6 +174,47 @@ jobs:
           if ($pid1 -ne $pid2 -or $pid2 -eq 0) { throw 'Background service restarted (crash loop)' }
           if ($state -notmatch 'not_activated') { throw "Fresh install did not reach the activation state: $state" }
           Write-Host 'LEYRA_INSTALL_CHECK=PASS'
+      - name: Customer flow end to end (activate, protected, recover, resume)
+        shell: pwsh
+        env:
+          TEST_CODE: ${{ needs.test-code.outputs.code }}
+        run: |
+          $tool = (Resolve-Path 'windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll').Path
+          $agent = (Get-ChildItem 'C:\Apps\Leyra\versions\*\Leyra.Agent.exe' | Select-Object -First 1).FullName
+          $stateFile = "$env:ProgramData\LeyraConnect\agent-state.txt"
+          function Ask($json) { $out = dotnet $tool --pipe $json; Write-Host "  -> $($out | Select-Object -First 1)"; return $LASTEXITCODE }
+          function WaitFor($pattern, $seconds) {
+            $end = (Get-Date).AddSeconds($seconds)
+            while ((Get-Date) -lt $end) { $s = if (Test-Path $stateFile) { Get-Content $stateFile -Raw } else { '' }; if ($s -match $pattern) { return $s }; Start-Sleep 2 }
+            return (Get-Content $stateFile -Raw -ErrorAction SilentlyContinue)
+          }
+          # Safety net: whatever happens below, give this machine its network back within 4 minutes.
+          $at = (Get-Date).AddMinutes(4).ToString('HH:mm')
+          schtasks /Create /TN LeyraCiRecover /SC ONCE /ST $at /RU SYSTEM /TR "`"$agent`" --recover" /F | Out-Null
+          $failures = @()
+          Write-Host '1. status on a fresh install'
+          if ((Ask '{"type":"status"}') -ne 0) { $failures += 'status request failed' }
+          Write-Host '2. a wrong code is refused with a message, not a hang'
+          if ((Ask '{"type":"activate","code":"ZZZZ-ZZZZ-ZZZZ-ZZZZ","contact":"ci"}') -eq 0) { $failures += 'wrong code was accepted' }
+          Write-Host '3. a real code activates this computer'
+          if ((Ask ('{"type":"activate","code":"' + $env:TEST_CODE + '","contact":"automated test"}')) -ne 0) { $failures += 'activation failed' }
+          $s = WaitFor 'protected' 120; Write-Host "   state: $s"
+          if ($s -notmatch 'protected') { $failures += "not protected after activation: $s" }
+          Write-Host '   account and a full security check while protected'
+          Ask '{"type":"account"}' | Out-Null
+          dotnet $tool --pipe '{"type":"doctor"}' | Out-File doctor.json
+          Write-Host '4. network recovery tool, then service start and resume (the 恢复防护 path)'
+          & $agent --recover; Write-Host "   recover exit $LASTEXITCODE"
+          Start-Service LeyraConnect; Start-Sleep 3
+          if ((Ask '{"type":"resume"}') -ne 0) { $failures += 'resume request failed' }
+          $s = WaitFor 'protected' 120; Write-Host "   state after resume: $s"
+          if ($s -notmatch 'protected') { $failures += "not protected after resume: $s" }
+          & $agent --recover | Out-Null
+          schtasks /Delete /TN LeyraCiRecover /F | Out-Null
+          if (Test-Path "$env:ProgramData\LeyraConnect\agent-error.log") { Write-Host '--- agent-error.log ---'; Get-Content "$env:ProgramData\LeyraConnect\agent-error.log" }
+          if (Test-Path doctor.json) { Write-Host '--- security check verdicts ---'; (Get-Content doctor.json -Raw | ConvertFrom-Json).value.items | ForEach-Object { Write-Host "$($_.id) $($_.verdict)" } }
+          if ($failures.Count) { $failures | ForEach-Object { Write-Host "FAIL: $_" }; throw 'Customer flow failed' }
+          Write-Host 'LEYRA_CUSTOMER_FLOW=PASS'
       - name: Silent uninstall and verify cleanup
         if: always()
         shell: pwsh
@@ -206,3 +271,22 @@ jobs:
           done
           ssh "${ssh_options[@]}" ubuntu@43.129.187.240 "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 publish-update $version $stage/setup.exe --notes 'Leyra $version' | tail -n1"
           echo "LEYRA_RELEASE_PUBLISHED=$version"
+  revoke-test-code:
+    if: ${{ always() && needs.test-code.outputs.code != '' }}
+    needs: [test-code, installer]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Revoke the end-to-end test code
+        env:
+          LEYRA_SSH_KEY: ${{ secrets.LEYRA_SSH_KEY }}
+          TEST_CODE: ${{ needs.test-code.outputs.code }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TEST_CODE" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]
+          key_file="$RUNNER_TEMP/leyra-key"; trap 'rm -f "$key_file"' EXIT; umask 077
+          printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
+          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
+            "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $TEST_CODE"

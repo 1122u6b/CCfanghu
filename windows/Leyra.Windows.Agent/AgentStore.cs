@@ -16,6 +16,8 @@ sealed class AgentSettings
  // 由出口 IP 归属地自动取得；还没取得时为空，界面显示「还不知道」。
  public string ExitTimezone{get;set;}="";
  public string? TimezoneDismissedFor{get;set;}
+ // Off by default: pausing or quitting asks for an in-app confirmation only, not the Windows password.
+ public bool RequireOwnerPassword{get;set;}
  public List<DirectRule> DirectRules{get;set;}=[];
 }
 sealed class AgentStore

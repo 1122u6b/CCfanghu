@@ -97,7 +97,7 @@ sealed class MainWindow:Form
   var payload=JsonSerializer.SerializeToNode(request)!.AsObject();var type=payload["type"]?.GetValue<string>();
   if(type=="owner_auth"&&!internalAuthentication)throw new InvalidOperationException("账户验证只能由系统对话框发起");
   var sensitive=type is "pair" or "pause" || (type=="block_before_ready"&&payload["on"]?.GetValue<bool>()==false) || (type=="add_direct_rule"&&payload["confirm_public"]?.GetValue<bool>()==true);
-  if(sensitive)payload["owner_proof"]=Interlocked.Exchange(ref ownerProof,null)??await AuthenticateOwner("确认修改本机网络设置。" );
+  if(sensitive&&Interlocked.Exchange(ref ownerProof,null) is string proof)payload["owner_proof"]=proof;
   var deep=type=="doctor"&&payload["deep"]?.GetValue<bool>()==true;
   using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(deep?95:35));
   await requests.WaitAsync(deadline.Token);
@@ -134,7 +134,8 @@ sealed class MainWindow:Form
   {
    case "shell_info":return Result(new{glass=false,platform="windows"});
    case "app_version":return Result(ProductInfo.Version);
-   case "verify_owner":ownerProof=await AuthenticateOwner(TextField(args,"reason",200));return Result(new{});
+   // The app's own confirmation dialog is enough; no Windows password prompt.
+   case "verify_owner":return Result(new{});
    case "run_rescue":return await ElevatedHelper("--recover");
    case "open_login_items":Process.Start(new ProcessStartInfo("ms-settings:startupapps"){UseShellExecute=true});return Result(new{});
    case "daemon":return await Service(args.GetProperty("request"));

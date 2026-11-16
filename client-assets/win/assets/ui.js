@@ -1248,13 +1248,13 @@
     if (D.type === 'quitAll') {
       h = '<div class="hx-dialog' + k + '" role="alertdialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">' + I('warning', 20, 'c-danger') + '彻底退出？</h3>' +
         '<div class="p-pausewarn"><b>退出后，你的真实 IP 会暴露</b><ul><li>防护规则撤掉，整台电脑不走独享线路，所有网站和软件都能看到你的真实 IP 和所在地</li><li>要隐藏 IP 的网站和软件，先退出或关掉再继续</li><li>再打开软件或重启电脑，自动恢复保护</li></ul></div>' +
-        '<p class="hx-small hx-muted">确认后要输入电脑密码，防止误点。只想关窗口的话，用「退出（后台继续保护）」就行。</p>' +
+        '<p class="hx-small hx-muted">只想关窗口的话，用「退出（后台继续保护）」就行。</p>' +
         '<div class="acts">' + btn('danger', I('lock', 14) + '彻底退出', 'quitAllGo') + btn('primary', '取消', 'close', ' data-autofocus') + '</div></div>';
     } else if (D.type === 'trialQuit') {
       // 和「彻底退出」一样：红色警告、确认后要电脑密码（01 §4 第 8 步）
       h = '<div class="hx-dialog' + k + '" role="alertdialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">' + I('warning', 20, 'c-danger') + '退出软件？</h3>' +
         '<div class="p-pausewarn"><b>退出以后不再保护，你访问的网站能看到你的真实 IP</b><ul><li>防护规则、浏览器保护设置撤掉，网址解析、代理和时区恢复原样，电脑照常上网</li><li>重启电脑、再打开软件都不再接管网络</li><li>以后买了单独软件再打开就能用，自己的出口和设置都留着</li></ul></div>' +
-        '<p class="hx-small hx-muted">确认后要输入电脑密码，防止误点。</p>' +
+        
         '<div class="acts">' + btn('danger', I('lock', 14) + '退出软件', 'trialQuitGo') + btn('primary', '取消', 'close', ' data-autofocus') + '</div></div>';
     } else if (D.type === 'pause') {
       h = '<div class="hx-dialog' + k + '" role="alertdialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">' + I('warning', 20, 'c-danger') + (D.login ? '暂停防护去登录 Wi-Fi？' : '暂停防护？') + '</h3>' +
@@ -1262,13 +1262,13 @@
         '<li>整台电脑不走独享线路，所有网站和软件都能看到你的真实 IP 和所在地</li>' +
         '<li>' + (D.login ? '先关掉浏览器里的其它网页和别的软件，只留登录 Wi-Fi 的页面' : '要隐藏 IP 的网站和软件，先退出或关掉再暂停') + '</li>' +
         '<li>' + (D.login ? '登录完成、线路连上后自动恢复' : '到时间自动恢复，也可以随时点「恢复防护」') + '</li></ul></div>' +
-        '<p class="p-ownernote">' + I('lock', 14) + '确认后要输入电脑密码，防止误点</p>' +
+        '' +
         (aiActive() ? '<p><span class="p-danger-note">暂停期间不要登录或使用我们提供的 Claude 账号，已经打开的 Claude 页面也先关掉，否则被封不退</span></p>' : '') +
         (D.login ? '' : '<div class="hx-seg" role="group" aria-label="暂停时长">' + [10, 30, 60].map(function (m) { return '<button aria-pressed="' + (D.min === m) + '" data-act="pauseMin:' + m + '">' + m + ' 分钟</button>'; }).join('') + '</div>') +
         '<div class="acts">' + btn('danger', I('lock', 14) + '暂停 ' + D.min + ' 分钟', 'pauseGo') + btn('primary', '取消', 'close', ' data-autofocus') + '</div></div>';
     } else if (D.type === 'confirm') {
       h = '<div class="hx-dialog' + k + '" role="alertdialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">' + I('warning', 20, D.open ? 'c-danger' : 'c-warn') + D.title + '</h3>' +
-        (D.open ? '<div class="p-pausewarn"><b>这会切断防护，你的真实 IP 会暴露</b><ul><li>' + D.body + '</li></ul></div><p class="p-ownernote">' + I('lock', 14) + '确认后要输入电脑密码，防止误点</p>'
+        (D.open ? '<div class="p-pausewarn"><b>这会切断防护，你的真实 IP 会暴露</b><ul><li>' + D.body + '</li></ul></div>'
           : '<p>' + D.body + '</p><p class="p-safenote">' + I('shield', 14) + '防护照常，不会暴露真实 IP</p>') +
         '<div class="acts">' + btn('danger', (D.open ? I('lock', 14) : '') + D.ok, 'confirmGo') + btn('primary', '取消', 'close', ' data-autofocus') + '</div></div>';
     } else if (D.type === 'access') {

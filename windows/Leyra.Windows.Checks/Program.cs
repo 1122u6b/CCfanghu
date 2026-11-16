@@ -6,6 +6,18 @@ using System.Text.Json;
 // Controlled child modes exercise the same ordinary argv launch used by the kernel.
 if(args.Length>0 && args[0]=="--fixture-job-exit")Environment.Exit(args.Length==2 && args[1]=="有 空格"?7:9);
 if(args.Length==1 && args[0]=="--fixture-job-wait"){await Task.Delay(TimeSpan.FromSeconds(30));Environment.Exit(0);}
+// End-to-end acceptance: send one request to the installed service exactly as the desktop app does.
+if(args.Length==2 && args[0]=="--pipe")
+{
+ using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(120));
+ using var pipe=new System.IO.Pipes.NamedPipeClientStream(".",PipeProtocol.Name,System.IO.Pipes.PipeDirection.InOut,System.IO.Pipes.PipeOptions.Asynchronous);
+ await pipe.ConnectAsync(5000,timeout.Token);
+ using var request=JsonDocument.Parse(args[1]);
+ await PipeProtocol.WriteAsync(pipe,new{version=1,request=request.RootElement},timeout.Token);
+ var reply=await PipeProtocol.ReadAsync(pipe,timeout.Token);
+ Console.WriteLine(reply.GetRawText());
+ Environment.Exit(reply.TryGetProperty("ok",out var ok)&&ok.ValueKind==JsonValueKind.True?0:3);
+}
 var passed=0;
 void Check(string name,Action test){test();passed++;Console.WriteLine("PASS "+name);}
 void Require(bool value){if(!value)throw new Exception("Check failed");}
