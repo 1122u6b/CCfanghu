@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
-      - name: Verify only SSH authentication and noninteractive deployment permission
+      - name: Verify application readiness using fixed verdicts only
         env:
           LEYRA_SSH_KEY: ${{ secrets.LEYRA_SSH_KEY }}
         shell: bash
@@ -34,4 +34,4 @@ jobs:
           umask 077
           printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
           ssh-keygen -y -f "$key_file" > /dev/null
-          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 'sudo -n true && printf "LEYRA_CONNECTION_OK\n"'
+          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 'sudo -n python3 -' < deploy/inspect_existing_server.py
