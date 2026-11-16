@@ -36,6 +36,56 @@ public static class NativeFixture
         }
         Console.WriteLine("PASS official Windows Mihomo executable launched inside the owned job");
     }
+    public static async Task TunnelLifecycle()
+    {
+        if(!OperatingSystem.IsWindows())throw new PlatformNotSupportedException("Native TUN fixture requires Windows");
+        if(System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces().Any(x=>x.Name==WindowsTunnel.Name))throw new InvalidOperationException("Existing LEYRA interface detected; refusing to replace it");
+        var kernel=Environment.GetEnvironmentVariable("LEYRA_NATIVE_KERNEL");
+        if(string.IsNullOrEmpty(kernel))throw new InvalidOperationException("Verified Windows kernel missing");
+        using var nodes=System.Text.Json.JsonDocument.Parse("[{\"name\":\"controlled SOCKS\",\"type\":\"socks5\",\"server\":\"127.0.0.1\",\"port\":9}]");
+        var secret=Guid.NewGuid().ToString();
+        var config=System.Text.Json.Nodes.JsonNode.Parse(Leyra.Windows.Core.MihomoConfiguration.Build(nodes.RootElement,secret,false,null,[]))!;
+        config["tun"]!["enable"]=true;
+        // Driver lifecycle only: do not redirect the hosted runner's management traffic.
+        config["tun"]!["auto-route"]=false;
+        config["tun"]!["dns-hijack"]=new System.Text.Json.Nodes.JsonArray();
+        config["proxy-groups"]![0]!["proxies"]=new System.Text.Json.Nodes.JsonArray("controlled SOCKS");
+        config["proxy-groups"]!.AsArray().RemoveAt(1);
+        var directory=Path.Combine(Path.GetTempPath(),"leyra-tun-fixture-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(directory);
+        var path=Path.Combine(directory,"runtime.json");await File.WriteAllTextAsync(path,config.ToJsonString());
+        using var job=new NativeJob();NativeChild? child=null;
+        try
+        {
+            child=job.Launch(kernel,new[]{"-d",directory,"-f",path},directory);
+            using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(25));
+            using var handler=new System.Net.Http.HttpClientHandler{UseProxy=false,AllowAutoRedirect=false};
+            using var http=new System.Net.Http.HttpClient(handler){Timeout=TimeSpan.FromSeconds(1)};
+            http.DefaultRequestHeaders.Authorization=new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer",secret);
+            bool ready=false;
+            while(!deadline.IsCancellationRequested)
+            {
+                if(child.HasExited)throw new Exception($"Kernel exited before TUN readiness: {child.ExitCode}");
+                if(WindowsTunnel.Current()!=0)
+                {
+                    try{using var response=await http.GetAsync("http://127.0.0.1:19090/version",deadline.Token);ready=response.IsSuccessStatusCode;}catch(System.Net.Http.HttpRequestException){}catch(TaskCanceledException)when(!deadline.IsCancellationRequested){}
+                    if(ready)break;
+                }
+                await Task.Delay(200,deadline.Token);
+            }
+            if(!ready)throw new Exception("Windows TUN or authenticated kernel controller did not become ready");
+            Console.WriteLine("PASS official kernel creates a real Windows TUN with no separately installed DLL; production LUID lookup resolves it");
+            job.Stop();if(!child.WaitForExit(5000))throw new Exception("TUN kernel did not exit");
+            for(var n=0;n<50&&WindowsTunnel.Current()!=0;n++)await Task.Delay(200);
+            if(WindowsTunnel.Current()!=0)throw new Exception("Active TUN remained after the job-owned kernel stopped");
+            Console.WriteLine("PASS job-owned kernel termination removes the active TUN interface");
+            Console.WriteLine("Driver lifecycle fixture does not validate automatic routes, private DNS or leak protection.");
+        }
+        finally
+        {
+            job.Stop();child?.WaitForExit(5000);child?.Dispose();
+            try{Directory.Delete(directory,true);}catch(IOException){}
+        }
+    }
     public static async Task Run()
     {
         if(!OperatingSystem.IsWindows())throw new PlatformNotSupportedException("Native fixture requires a disposable Windows machine");
