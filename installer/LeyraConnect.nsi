@@ -35,7 +35,7 @@ ShowUninstDetails show
 Var Result
 Function .onInit
  ${IfNot} ${RunningX64}
-  MessageBox MB_ICONSTOP /SD IDOK "此程序需要 64 位 Windows 10 或 Windows 11。"
+  MessageBox MB_ICONSTOP "此程序需要 64 位 Windows 10 或 Windows 11。" /SD IDOK
   Abort
  ${EndIf}
  SetRegView 64
@@ -45,11 +45,11 @@ Function .onInit
  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ValidateInstallPath.ps1" -Target "$INSTDIR"'
  Pop $Result
  ${If} $Result != 0
-  MessageBox MB_ICONSTOP /SD IDOK "安装目录检查未通过，不能写入包含链接的目录。"
+  MessageBox MB_ICONSTOP "安装目录检查未通过，不能写入包含链接的目录。" /SD IDOK
   Abort
  ${EndIf}
  IfFileExists "$INSTDIR\versions\${VERSION}\Leyra.Agent.exe" 0 +3
-  MessageBox MB_ICONSTOP /SD IDOK "此版本已经安装。请先关闭程序并卸载此版本，再重新安装。"
+  MessageBox MB_ICONSTOP "此版本已经安装。请先关闭程序并卸载此版本，再重新安装。" /SD IDOK
   Abort
 FunctionEnd
 Section "安装" SEC_MAIN
@@ -61,7 +61,7 @@ Section "安装" SEC_MAIN
  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\VerifyRuntime.ps1" -Installer "$PLUGINSDIR\MicrosoftEdgeWebView2RuntimeInstallerX64.exe" -ExpectedSha256 "${WEBVIEW_SHA256}"'
  Pop $Result
  ${If} $Result != 0
-  MessageBox MB_ICONSTOP /SD IDOK "Microsoft 运行环境未通过校验或安装失败，安装已停止。"
+  MessageBox MB_ICONSTOP "Microsoft 运行环境未通过校验或安装失败，安装已停止。" /SD IDOK
   Abort
  ${EndIf}
  SetOutPath "$INSTDIR\versions\${VERSION}"
@@ -70,7 +70,7 @@ Section "安装" SEC_MAIN
  nsExec::ExecToLog '"$INSTDIR\versions\${VERSION}\Leyra.Agent.exe" --install'
  Pop $Result
  ${If} $Result != 0
-  MessageBox MB_ICONSTOP /SD IDOK "后台服务安装未完成，请保留安装详情。此安装不会创建可用状态的快捷方式。"
+  MessageBox MB_ICONSTOP "后台服务安装未完成，请保留安装详情。此安装不会创建可用状态的快捷方式。" /SD IDOK
   Abort
  ${EndIf}
  CreateDirectory "$SMPROGRAMS\LEYRA 连接助手"
@@ -91,7 +91,7 @@ Section "Uninstall"
  nsExec::ExecToLog '"$INSTDIR\versions\${VERSION}\Leyra.Agent.exe" --remove-service'
  Pop $Result
  ${If} $Result != 0
-  MessageBox MB_ICONSTOP /SD IDOK "网络恢复或后台卸载未完成。程序文件已保留，请先使用网络恢复工具。"
+  MessageBox MB_ICONSTOP "网络恢复或后台卸载未完成。程序文件已保留，请先使用网络恢复工具。" /SD IDOK
   Abort
  ${EndIf}
  Delete "$DESKTOP\LEYRA 连接助手.lnk"
