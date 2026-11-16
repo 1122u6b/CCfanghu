@@ -40,14 +40,13 @@ test('all nine original page views render with service data unavailable',async()
   }
  }finally{await cleanup(w);}
 });
-test('unpaired setup activates with an authorization code and still offers a connection file',async()=>{
+test('unpaired setup activates with an authorization code',async()=>{
  const w=await setup();try{
   Object.assign(w.__proto.S,{screen:'activate',consentVer:w.__proto.DISCLAIMER_VER});w.__proto.render();
   assert.match(w.document.body.textContent,/授权码/);
   assert.ok(w.document.querySelector('[data-keep="act-code"]'));
   assert.ok(w.document.querySelector('[data-keep="act-agree"]'));
   assert.ok(w.document.querySelector('[data-act="activate"]'));
-  assert.ok(w.document.querySelector('[data-act="connectServer"]'));
  }finally{await cleanup(w);}
 });
 test('renewal dialog and support QQ group are available',async()=>{

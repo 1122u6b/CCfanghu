@@ -45,11 +45,9 @@ static class Installation
  }
  static void SecureInstallation()
  {
-  var programFiles=Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-  var root=Path.Combine(programFiles,"LEYRAConnect");
+  // The user may choose the install folder; the layout below it is fixed: <root>\versions\<version>\Leyra.Agent.exe.
+  var root=InstallRoot();
   var version=Path.Combine(root,"versions",Program.Version);
-  var binary=Path.GetFullPath(Environment.ProcessPath??throw new InvalidOperationException("安装程序路径无效"));
-  if(!string.Equals(binary,Path.Combine(version,"Leyra.Agent.exe"),StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("请使用标准安装程序安装到 Program Files，不能从下载目录注册系统服务");
   // Reject redirected ancestors before granting SYSTEM a persistent executable path.
   for(var current=new DirectoryInfo(version);current is not null;current=current.Parent)
    if((current.Attributes&FileAttributes.ReparsePoint)!=0)throw new InvalidOperationException("安装路径不能包含目录链接");
@@ -110,13 +108,22 @@ static class Installation
   using(var engine=new WfpEngine())engine.RemoveOwned();
 
  }
+ static string InstallRoot()
+ {
+  var binary=Path.GetFullPath(Environment.ProcessPath??throw new InvalidOperationException("安装程序路径无效"));
+  var version=Path.GetDirectoryName(binary)!;var versions=Path.GetDirectoryName(version);
+  if(!string.Equals(Path.GetFileName(binary),"Leyra.Agent.exe",StringComparison.OrdinalIgnoreCase)||!string.Equals(Path.GetFileName(version),Program.Version,StringComparison.OrdinalIgnoreCase)||versions is null||!string.Equals(Path.GetFileName(versions),"versions",StringComparison.OrdinalIgnoreCase))
+   throw new InvalidOperationException("请使用标准安装程序安装，不能从下载目录直接注册系统服务");
+  var root=Path.GetDirectoryName(versions)!;
+  if(Path.GetPathRoot(root)==root)throw new InvalidOperationException("不能直接安装到磁盘根目录，请选择一个文件夹");
+  return root;
+ }
  // After an automatic update the previous side-by-side version is no longer referenced by the
  // service. Its desktop process may still be open for a moment, so failures are retried next start.
  public static void CleanupOldVersions()
  {
-  var root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"LEYRAConnect","versions");
-  var current=Path.Combine(root,Program.Version);
-  if(!string.Equals(Path.GetDirectoryName(Environment.ProcessPath),current,StringComparison.OrdinalIgnoreCase)||!Directory.Exists(root))return;
+  string root;try{root=Path.Combine(InstallRoot(),"versions");}catch(InvalidOperationException){return;}
+  if(!Directory.Exists(root))return;
   foreach(var directory in Directory.EnumerateDirectories(root))
   {
    var name=Path.GetFileName(directory);

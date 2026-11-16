@@ -482,13 +482,14 @@
   }
   function qqCard() {
     var c = qqChan(); if (!c) return '';
-    return '<div class="hx-card hx-data p-tile"><div class="lab">' + I('chat', 16) + (c[2] === 'qqgroup' ? '售后 QQ 群' : esc(c[3] || '售后')) + '</div>' + qqBlock(true) + '<div class="sub">联系时报账户编号 <b class="hx-num">' + ACCOUNT + '</b></div></div>';
+    return '<div class="hx-card hx-data lx-qqcard"><div class="lab">' + I('chat', 16) + (c[2] === 'qqgroup' ? '售后 QQ 群' : esc(c[3] || '售后')) + '</div>' +
+      '<div class="lx-qqrow"><b class="val hx-num" data-ctx="copy:' + c[1] + '">' + c[1] + '</b><button class="hx-btn hx-btn-secondary hx-btn-sm" data-hx-copy="' + c[1] + '">' + I('copy', 14) + '复制群号</button></div>' +
+      '<div class="sub">' + [c[3], c[4]].filter(Boolean).join(' · ') + '</div></div>';
   }
   function supportCard(prep) {
     // 断网 / 准备中的概览里放在信息卡旁边：售后 QQ 群、账户编号、两个入口，和旁边两行卡一样高
-    return '<div class="hx-card p-support"><div class="p-cardhead" style="margin:0"><h2>' + (prep ? '账户与售后' : '售后与账户') + '</h2><span>联系时请提供账户编号</span></div>' +
+    return '<div class="hx-card p-support"><div class="p-cardhead" style="margin:0"><h2>售后</h2></div>' +
       qqBlock() +
-      '<div class="p-acct"><span>账户编号</span><b class="hx-num" data-ctx="copy:' + ACCOUNT + '">' + ACCOUNT + '</b>' + copyBtn(ACCOUNT) + '</div>' +
       (prep ? '' : '<div class="p-linkrow">' + btn('secondary', I('chat', 16) + '提交工单', 'newTicket') + btn('text', '连不上？输入接入码', 'dialog:access') + '</div>') + '</div>';
   }
 
@@ -607,9 +608,10 @@
       '<button class="hx-card hx-data p-cardbtn" data-act="go:routes"><div class="lab">' + I('signal', 16) + '当前线路' + I('chevron', 16, 'go') + '</div><div class="val txt">' + (st === 'pm' ? '未连接' : r.n === '-' ? (st === 'down' ? '—' : '还没有线路') : '线路 ' + r.n) + '</div><div class="sub">' + (st === 'pm' ? '网络已断开' : r.n === '-' ? (st === 'down' ? '恢复防护后显示' : '开通后自动接入') : [r.tag, typeof r.ms === 'number' ? r.ms + ' ms' : ''].filter(Boolean).join(' · ')) + '</div></button>';
     var cTraffic = '<div class="hx-card hx-data"><div class="lab">' + I('download', 16) + '本月流量</div><div class="val">' + trafficVal(full) + '</div>' + tr + '<div class="sub"' + (full ? ' style="color:var(--danger)"' : '') + '>' + (full ? '已用完 · ' + INFO.reset + '重置' : '下次重置 ' + INFO.reset) + '</div></div>';
     var cAccount = '<button class="hx-card hx-data p-cardbtn" data-act="go:profile"><div class="lab">' + I('calendar', 16) + '账户' + I('chevron', 16, 'go') + '</div><div class="val txt">' + (exp ? '已到期' : S.trial ? (S.trial === 'on' ? trialLeft() : '已到期') : byo() ? '永久使用' : S.exp.date === '—' ? '—' : '还有 ' + nodeLeft() + ' 天') + '</div><div class="sub">' + (exp ? suiteWord() + ' ' + S.exp.date + '已到期' : S.trial ? '免费试用 · ' + S.trialEnd.date + (S.trial === 'on' ? '到期' : '') : byo() ? '一次买断 · 永久授权' : S.exp.date === '—' ? '到期日还没拿到' : suiteWord() + ' ' + nodeDate() + '到期') + '</div></button>';
-    if (side) return '<div class="p-sec p-pmgrid">' + supportCard(st !== 'pm') + '<div class="p-datagrid two">' + cRoute + cTraffic + cAccount + activityCard(2, true) + '</div></div>';
+    if (side) return '<div class="p-sec p-pmgrid">' + supportCard(st !== 'pm') + '<div class="p-datagrid two">' + cRoute + cAccount + activityCard(2, true) + '</div></div>';
     // 已保护、暂停、启动中：线路和出口已经在上面的数据格里，第三张放售后 QQ 群（01 §6.4）
-    return '<div class="p-sec"><div class="p-datagrid ' + (qqChan() ? 'three' : 'two') + '">' + cTraffic + cAccount + qqCard() + '</div></div><div class="p-sec">' + activityCard(3) + '</div>';
+    // 不统计流量：下面一排只放账户和售后 QQ 群两张，留足空间。
+    return '<div class="p-sec"><div class="p-datagrid two">' + cAccount + (qqCard() || cTraffic) + '</div></div><div class="p-sec">' + activityCard(3) + '</div>';
   }
   /* 最近动态（01 §5.13）：最近几条，「全部」跳线路页的最近事件；矮窗口里只显示 2 条 */
   function activityCard(n, compact) {
@@ -1113,20 +1115,22 @@
   /* ---------------- 整页：激活 / 向导 ---------------- */
   function activateScreen() {
     // 授权码激活：一个授权码绑定一台电脑；重装软件或系统后在同一台电脑上填原来的码即可恢复。
-    var E = S.actErr || {}, busyNow = S.busy.act;
-    function err(k) { return E[k] ? '<span class="hx-help is-error" style="display:flex;gap:4px">' + I('warning', 16) + esc(E[k]) + '</span>' : ''; }
-    var steps = [['填授权码激活', '在售后 QQ 群下单拿到授权码，填在左边点「激活」。一个授权码只能用于一台电脑。'], ['自动开始防护', '激活后自动连上独享线路，不用别的设置。'], ['检查时区和局域网', '按首次向导确认时区和局域网设备，再做一次安全检查。']];
-    return '<div class="p-full"><div class="p-wordmark" style="margin-bottom:20px"><span class="p-logo" aria-hidden="true"></span>Leyra</div>' +
-      '<div style="display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:32px;align-items:start;max-width:920px;width:100%">' +
-      '<div class="hx-card" style="padding:24px"><h1 class="hx-title">激活</h1><p class="p-sub">填你在售后 QQ 群买到的授权码。重装过系统的，填原来的授权码即可恢复。</p>' +
-      '<label class="hx-field"><span class="hx-label">授权码</span><input class="hx-input hx-num" data-keep="act-code" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false"' + (busyNow ? ' disabled' : '') + '>' + err('code') + '</label>' +
-      '<label class="hx-field"><span class="hx-label">联系方式（必填）</span>' + contactKind('act-contact-kind', '', !!busyNow) + '<input class="hx-input" data-keep="act-contact" placeholder="微信号或绑定的手机号"' + (busyNow ? ' disabled' : '') + ' style="margin-top:8px"><span class="hx-help">售后靠它联系你，请填真实账号</span>' + err('contact') + '</label>' +
-      '<label class="hx-field"><span class="hx-label">订单号（选填）</span><input class="hx-input" data-keep="act-order" placeholder="下单时的订单号或备注"' + (busyNow ? ' disabled' : '') + '></label>' +
-      '<label style="display:flex;gap:8px;align-items:center;margin:6px 0 4px"><input type="checkbox" data-keep="act-agree"> <span>我已阅读并同意 ' + btn('text', '用户协议', 'dialog:agreement') + '</span></label>' + err('agree') +
-      '<div style="margin-top:14px">' + (busyNow ? busy('act') : btn('primary', '激活', 'activate')) + '</div></div>' +
-      '<div style="padding-top:8px">' + steps.map(function (x, i) { return '<div style="display:flex;gap:14px;margin-bottom:22px"><span class="hx-num" style="flex:none;width:30px;height:30px;border-radius:50%;border:1px solid var(--hx-border, #ddd);display:grid;place-items:center">' + (i + 1) + '</span><div><b>' + x[0] + '</b><p class="p-sub" style="margin:4px 0 0">' + x[1] + '</p></div></div>'; }).join('') +
-      '<div class="hx-card" style="padding:14px 16px">' + qqBlock() + '</div>' +
-      '<p class="p-sub" style="margin-top:14px">管理员给了你连接文件？' + btn('text', '导入连接文件', 'connectServer') + '</p></div></div></div>';
+    var E = S.actErr || {}, off = S.busy.act ? ' disabled' : '';
+    function err(k) { return E[k] ? '<span class="hx-help is-error">' + I('warning', 16) + esc(E[k]) + '</span>' : ''; }
+    var steps = [['填授权码激活', '在售后 QQ 群下单拿到授权码，填在左边点「激活」。一个授权码只能用于一台电脑。'],
+      ['自动开始防护', '激活后自动连上独享线路，不用别的设置。'],
+      ['检查时区和局域网', '按首次向导确认时区和局域网设备，再做一次安全检查。']];
+    return '<div class="p-full lx-act"><div class="p-wordmark"><span class="p-logo" aria-hidden="true"></span>Leyra</div>' +
+      '<div class="p-act"><div class="hx-card">' +
+      '<div><h1 class="hx-title">激活</h1><p class="p-sub">填你在售后 QQ 群买到的授权码。重装过软件或系统的，填原来的授权码即可恢复。</p></div>' +
+      '<label class="hx-field"><span class="hx-label">授权码</span><input class="hx-input hx-num" data-keep="act-code" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false"' + off + '>' + err('code') + '</label>' +
+      '<div class="hx-field"><span class="hx-label">联系方式（必填）</span>' + contactKind('act-contact-kind', '', !!off) + '<input class="hx-input" data-keep="act-contact" placeholder="微信号或绑定的手机号" aria-label="联系方式"' + off + '><span class="hx-help">售后靠它联系你，请填真实账号</span>' + err('contact') + '</div>' +
+      '<label class="hx-field"><span class="hx-label">订单号（选填）</span><input class="hx-input" data-keep="act-order" placeholder="下单时的订单号或备注"' + off + '></label>' +
+      '<div class="lx-agree"><label><input type="checkbox" data-keep="act-agree"' + off + '> 我已阅读并同意</label>' + btn('text', '用户协议', 'dialog:agreement') + '</div>' + err('agree') +
+      '<div>' + (S.busy.act ? busy('act') : btn('primary', '激活', 'activate', ' style="min-width:120px"')) + '</div></div>' +
+      '<div class="lx-side"><ol class="lx-steps">' + steps.map(function (x, i) { return '<li><span class="n">' + (i + 1) + '</span><div><b>' + x[0] + '</b><p>' + x[1] + '</p></div></li>'; }).join('') + '</ol>' +
+      '<p class="p-sub">重装过系统？输入原来的授权码即可恢复。换了电脑请联系售后。</p>' +
+      (qqChan() ? '<div class="hx-card lx-qq">' + qqBlock() + '</div>' : '') + '</div></div></div>';
   }
   function stepper(n) {
     var names = ['时区', '局域网', '安全检查'], heads = ['检查电脑时区', '确认局域网设备', '安全检查'];

@@ -1,6 +1,8 @@
 Unicode true
 !include "MUI2.nsh"
 !include "x64.nsh"
+!include "FileFunc.nsh"
+!define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect"
 !ifndef VERSION
  !error "VERSION must be passed by scripts/build_windows_package.py"
 !endif
@@ -18,14 +20,17 @@ Unicode true
 !endif
 Name "Leyra"
 OutFile "${OUTPUT}"
-InstallDir "$PROGRAMFILES64\LEYRAConnect"
+InstallDir "$PROGRAMFILES64\Leyra"
 RequestExecutionLevel admin
 SetCompressor zlib
 ShowInstDetails show
 ShowUninstDetails show
 !define MUI_ABORTWARNING
-!define MUI_WELCOMEPAGE_TEXT "安装桌面程序、后台服务和所需运行环境。服务器连接信息会在首次打开时导入。$\r$\n$\r$\n安装包包含离线运行环境。"
+!define MUI_WELCOMEPAGE_TEXT "将安装 Leyra 桌面程序、后台防护服务和所需的运行环境。$\r$\n$\r$\n安装完成后打开 Leyra，填写授权码即可激活使用。"
 !insertmacro MUI_PAGE_WELCOME
+!define MUI_DIRECTORYPAGE_TEXT_TOP "请选择 Leyra 的安装位置。建议使用默认位置；也可以装到其他磁盘，例如 D:\Leyra。"
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE CheckInstallDir
+!insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_TEXT "安装完成。请从桌面打开 Leyra。$\r$\n$\r$\n如需退出后台防护，请使用程序中的暂停功能；网络异常时可使用开始菜单中的网络恢复工具。"
 !insertmacro MUI_PAGE_FINISH
@@ -51,21 +56,41 @@ Function .onInit
  ${EndIf}
  SetRegView 64
  InitPluginsDir
+ ; Updates and reinstalls go back to the folder the user chose the first time.
+ ReadRegStr $R0 HKLM "${UNINSTALL_KEY}" "InstallLocation"
+ ${If} $R0 == ""
+  ReadRegStr $R0 HKLM "${UNINSTALL_KEY}" "UninstallString"
+  ${If} $R0 != ""
+   StrCpy $R0 $R0 "" 1
+   StrCpy $R0 $R0 -1
+   ${GetParent} $R0 $R0
+  ${EndIf}
+ ${EndIf}
+ ${If} $R0 != ""
+  StrCpy $INSTDIR $R0
+ ${EndIf}
+FunctionEnd
+; Runs when leaving the folder page, and again before installing (silent updates skip pages).
+Function CheckInstallDir
  SetOutPath "$PLUGINSDIR"
  File "ValidateInstallPath.ps1"
  StrCpy $0 "validate-path"
  StrCpy $1 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ValidateInstallPath.ps1" -Target "$INSTDIR"'
  Call RunLogged
- ${If} $Result != 0
-  MessageBox MB_ICONSTOP "安装目录检查未通过，不能写入包含链接的目录。" /SD IDOK
+ ${If} $Result == 2
+  MessageBox MB_ICONEXCLAMATION "这个位置普通用户也能随意修改，不适合安装带系统权限的防护服务。$\r$\n请换一个位置，例如默认的 C:\Program Files\Leyra 或 D:\Leyra。" /SD IDOK
+  Abort
+ ${ElseIf} $Result != 0
+  MessageBox MB_ICONEXCLAMATION "这个位置不能安装（不能是快捷方式或链接目录）。请换一个位置。" /SD IDOK
   Abort
  ${EndIf}
  IfFileExists "$INSTDIR\versions\${VERSION}\Leyra.Agent.exe" 0 +3
-  MessageBox MB_ICONSTOP "此版本已经安装。请先关闭程序并卸载此版本，再重新安装。" /SD IDOK
+  MessageBox MB_ICONEXCLAMATION "这个版本已经安装在这里了。如需重装，请先在「设置 → 应用」里卸载 Leyra。" /SD IDOK
   Abort
 FunctionEnd
 Section "安装" SEC_MAIN
  SetShellVarContext all
+ Call CheckInstallDir
  SetOutPath "$PLUGINSDIR"
  File "VerifyRuntime.ps1"
  File "${PREREQUISITES}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
@@ -95,6 +120,8 @@ Section "安装" SEC_MAIN
  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect" "DisplayName" "Leyra"
  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect" "DisplayVersion" "${VERSION}"
  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
+ WriteRegStr HKLM "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
+ WriteRegStr HKLM "${UNINSTALL_KEY}" "Publisher" "Leyra"
  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect" "DisplayIcon" "$INSTDIR\versions\${VERSION}\LeyraConnect.exe"
  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect" "NoModify" 1
  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect" "NoRepair" 1

@@ -113,14 +113,16 @@ jobs:
         shell: pwsh
         run: |
           $setup = Get-ChildItem artifacts/Leyra-*-setup.exe | Select-Object -First 1
-          $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait -PassThru
+          # Custom location, as a user would pick on the folder page.
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S','/D=C:\Apps\Leyra' -Wait -PassThru
           $log = Join-Path $env:TEMP 'LEYRAConnect-setup.log'
           if (Test-Path $log) { Get-Content $log }
           if ($p.ExitCode -ne 0) { Get-Service LeyraConnect -ErrorAction SilentlyContinue | Format-List *; throw "Installer exit code $($p.ExitCode)" }
       - name: Verify installed program, files and running service
         shell: pwsh
         run: |
-          $root = "$env:ProgramFiles\LEYRAConnect"
+          $root = 'C:\Apps\Leyra'
+          if ((Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect').InstallLocation -ne $root) { throw 'Install location not recorded for updates' }
           $version = (Get-ChildItem "$root\versions" -Directory | Select-Object -First 1).FullName
           foreach ($f in 'LeyraConnect.exe','Leyra.Agent.exe','mihomo.exe','kernel-origin.json','client-assets\win\index.html') {
             if (-not (Test-Path "$version\$f")) { throw "Missing installed file: $f" }
@@ -137,7 +139,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          $root = "$env:ProgramFiles\LEYRAConnect"
+          $root = 'C:\Apps\Leyra'
           if (Test-Path "$root\Uninstall.exe") {
             $p = Start-Process -FilePath "$root\Uninstall.exe" -ArgumentList '/S',"_?=$root" -Wait -PassThru
             if ($p.ExitCode -ne 0) { throw "Uninstaller exit code $($p.ExitCode)" }
