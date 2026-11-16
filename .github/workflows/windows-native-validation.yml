@@ -1,5 +1,7 @@
 name: Windows native validation (explicit compute opt-in)
 on:
+  push:
+    branches: [windows-validation-once-20261116-allow1]
   workflow_dispatch:
     inputs:
       allow_hosted_compute:
@@ -14,9 +16,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   native:
-    if: ${{ inputs.allow_hosted_compute == true }}
+    if: ${{ inputs.allow_hosted_compute == true || (github.event_name == 'push' && github.ref == 'refs/heads/windows-validation-once-20261116-allow1') }}
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -47,8 +49,21 @@ jobs:
           python -m unittest discover -s server/tests -v
       - name: Execute existing assertions
         run: dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll
+      - name: Prepare verified official Windows kernel
+        run: python scripts/prepare_kernel.py windows artifacts/native-kernel
+      - name: Exercise actual job-owned process management
+        id: native_processes
+        shell: pwsh
+        run: |
+          $env:LEYRA_NATIVE_KERNEL = "$pwd/artifacts/native-kernel/mihomo.exe"
+          dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll --native-job-fixture
+          if ($LASTEXITCODE -ne 0) { throw 'Native process fixture failed' }
       - name: Exercise actual WFP only on this disposable hosted runner
-        run: dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll --native-wfp-fixture
+        if: ${{ success() || (failure() && steps.native_processes.outcome == 'failure') }}
+        shell: pwsh
+        run: |
+          dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll --native-wfp-fixture 2>&1 | Tee-Object -FilePath native-proof.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows fixture failed' }
       - name: Remove fixture-owned filters even after a failed check
         if: always()
         shell: pwsh
@@ -58,3 +73,11 @@ jobs:
             dotnet $fixture --cleanup-wfp-fixture
             if ($LASTEXITCODE -ne 0) { throw 'WFP cleanup failed; runner must be discarded' }
           }
+      - name: Retain bounded native verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-proof
+          path: native-proof.txt
+          if-no-files-found: ignore
+          retention-days: 1
