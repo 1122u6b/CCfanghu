@@ -1,7 +1,12 @@
+param([Parameter(Mandatory=$true)][string]$Target)
 $ErrorActionPreference='Stop'
 try {
- $target=Join-Path $env:ProgramW6432 'LEYRAConnect'
- $stack=@($target)
+ $ancestor=[IO.DirectoryInfo]::new($Target)
+ while ($null -ne $ancestor) {
+  if ($ancestor.Exists -and ($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'Linked install ancestor rejected'}
+  $ancestor=$ancestor.Parent
+ }
+ $stack=@($Target)
  while ($stack.Count) {
   $current=$stack[0];$stack=@($stack | Select-Object -Skip 1)
   if (-not (Test-Path -LiteralPath $current)) {continue}

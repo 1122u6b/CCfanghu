@@ -20,7 +20,7 @@ Name "LEYRA 连接助手"
 OutFile "${OUTPUT}"
 InstallDir "$PROGRAMFILES64\LEYRAConnect"
 RequestExecutionLevel admin
-SetCompressor /SOLID lzma
+SetCompressor zlib
 ShowInstDetails show
 ShowUninstDetails show
 !define MUI_ABORTWARNING
@@ -42,7 +42,7 @@ Function .onInit
  InitPluginsDir
  SetOutPath "$PLUGINSDIR"
  File "ValidateInstallPath.ps1"
- nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ValidateInstallPath.ps1"'
+ nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ValidateInstallPath.ps1" -Target "$INSTDIR"'
  Pop $Result
  ${If} $Result != 0
   MessageBox MB_ICONSTOP "安装目录检查未通过，不能写入包含链接的目录。"

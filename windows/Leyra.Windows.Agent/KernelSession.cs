@@ -48,7 +48,6 @@ sealed class KernelSession:IDisposable
   }
   throw new TimeoutException("网络控制接口尚未就绪");
  }
- static async Task Drain(StreamReader reader){try{while(await reader.ReadLineAsync() is not null){}}catch(IOException){}catch(ObjectDisposedException){}}
  public async Task<JsonElement> Get(string path,CancellationToken stop)
  {
   using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(4));stop=deadline.Token;
@@ -71,20 +70,6 @@ sealed class KernelSession:IDisposable
   var bytes=new List<byte>();
   while(bytes.Count<4096){var next=new byte[1];if(await stream.ReadAsync(next,stop)==0)break;if(next[0]==10)break;bytes.Add(next[0]);}
   using var doc=JsonDocument.Parse(bytes.ToArray());return (doc.RootElement.GetProperty("up").GetInt64(),doc.RootElement.GetProperty("down").GetInt64());
- }
- public static async Task<string> ExitAddress(CancellationToken stop)
- {
-  using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(8));stop=deadline.Token;
-  using var handler=new HttpClientHandler{Proxy=new WebProxy("http://127.0.0.1:17890"),UseProxy=true,AllowAutoRedirect=false};
-  using var http=new HttpClient(handler){Timeout=TimeSpan.FromSeconds(8)};
-  using var response=await http.GetAsync("https://api.ipify.org?format=json",HttpCompletionOption.ResponseHeadersRead,stop);response.EnsureSuccessStatusCode();
-  if(response.Content.Headers.ContentLength>1024)throw new InvalidDataException("出口响应无效");
-  await using var body=await response.Content.ReadAsStreamAsync(stop);using var memory=new MemoryStream();var b=new byte[1025];var read=await body.ReadAsync(b,stop);
-  if(read==1025)throw new InvalidDataException("出口响应过大");memory.Write(b,0,read);
-  // Read a potentially fragmented small response to EOF, within the same bound.
-  while((read=await body.ReadAsync(b.AsMemory(0,1025-(int)memory.Length),stop))>0){memory.Write(b,0,read);if(memory.Length>1024)throw new InvalidDataException("出口响应过大");}
-  using var doc=JsonDocument.Parse(memory.ToArray());var ip=doc.RootElement.GetProperty("ip").GetString()??"";
-  if(!AddressPolicy.IsLiteral(ip) || !AddressPolicy.IsPublic(ip))throw new InvalidDataException("未取得有效公网出口地址");return ip;
  }
  [DllImport("iphlpapi.dll")]static extern uint ConvertInterfaceIndexToLuid(uint index,out ulong luid);
  public static ulong Tunnel()
