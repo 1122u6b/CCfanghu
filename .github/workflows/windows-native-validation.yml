@@ -246,7 +246,7 @@ jobs:
           schtasks /Delete /TN LeyraCiRecover /F | Out-Null
           if (Test-Path "$env:ProgramData\LeyraConnect\agent-error.log") { Write-Host '--- agent-error.log ---'; Get-Content "$env:ProgramData\LeyraConnect\agent-error.log" }
           if ($script:adminSeen) { $failures += 'requests ran with administrator rights; the limited-user path was not tested' }
-          if (Test-Path doctor.json) { Write-Host '--- security check verdicts ---'; (Get-Content doctor.json -Raw | ConvertFrom-Json).reply.value.items | ForEach-Object { Write-Host "$($_.id) $($_.verdict)" } }
+          if (Test-Path doctor.json) { Write-Host '--- security check verdicts ---'; (Get-Content doctor.json -Raw | ConvertFrom-Json).reply.value.items | ForEach-Object { Write-Host "$($_.id) $($_.verdict) $($_.detail)"; if ($_.id -eq 'L8' -and $_.verdict -eq 'fail') { $failures += "false leak alarm: $($_.detail)" } } }
           if ($failures.Count) { $failures | ForEach-Object { Write-Host "FAIL: $_" }; throw 'Customer flow failed' }
           Write-Host 'LEYRA_CUSTOMER_FLOW=PASS'
       - name: Silent uninstall and verify cleanup

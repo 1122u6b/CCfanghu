@@ -278,7 +278,7 @@ sealed partial class Runtime
  }
  // ---------- L8：绕过独享线路的连接（读取系统 TCP 连接表及所属进程） ----------
  [System.Runtime.InteropServices.DllImport("iphlpapi.dll")]static extern uint GetExtendedTcpTable(IntPtr table,ref int size,bool order,int family,int tableClass,uint reserved);
- static IEnumerable<(IPAddress Local,IPAddress Remote,int RemotePort,int Pid)> EstablishedTcp()
+ static IEnumerable<(IPAddress Local,IPAddress Remote,int RemotePort,int Pid,byte[]? Row)> EstablishedTcp()
  {
   foreach(var (family,rowSize) in new[]{(2,24),(23,56)})
   {
@@ -295,36 +295,39 @@ sealed partial class Runtime
      if(family==2)
      {
       if(BitConverter.ToUInt32(bytes,o)!=5)continue; // MIB_TCP_STATE_ESTAB
-      yield return (new IPAddress(BitConverter.ToUInt32(bytes,o+4)),new IPAddress(BitConverter.ToUInt32(bytes,o+12)),(bytes[o+16]<<8)|bytes[o+17],BitConverter.ToInt32(bytes,o+20));
+      yield return (new IPAddress(BitConverter.ToUInt32(bytes,o+4)),new IPAddress(BitConverter.ToUInt32(bytes,o+12)),(bytes[o+16]<<8)|bytes[o+17],BitConverter.ToInt32(bytes,o+20),bytes.AsSpan(o,20).ToArray());
      }
      else
      {
       if(BitConverter.ToUInt32(bytes,o+48)!=5)continue;
-      yield return (new IPAddress(bytes.AsSpan(o,16)),new IPAddress(bytes.AsSpan(o+24,16)),(bytes[o+44]<<8)|bytes[o+45],BitConverter.ToInt32(bytes,o+52));
+      yield return (new IPAddress(bytes.AsSpan(o,16)),new IPAddress(bytes.AsSpan(o+24,16)),(bytes[o+44]<<8)|bytes[o+45],BitConverter.ToInt32(bytes,o+52),null);
      }
     }
    }
    finally{System.Runtime.InteropServices.Marshal.FreeHGlobal(buffer);}
   }
  }
- object? bypassCheck;DateTimeOffset lastBypassScan=DateTimeOffset.MinValue;
+ [System.Runtime.InteropServices.DllImport("iphlpapi.dll")]static extern uint SetTcpEntry(byte[] row);
+ object? bypassCheck;DateTimeOffset lastBypassScan=DateTimeOffset.MinValue;int cutTotal;
+ // Connections that existed before protection started keep their entry in the system table, but the
+ // transport-layer guard already drops their packets (see WfpPlan). Close them so programs reconnect
+ // through the tunnel at once instead of hanging, and do not report them as a leak.
  object ScanBypass()
  {
   var physical=new HashSet<IPAddress>(Physical().SelectMany(n=>n.GetIPProperties().UnicastAddresses).Select(a=>a.Address));
   var gateway=profile is null?null:IPAddress.Parse(profile.Host);
   var direct=store.Settings.DirectRules.Select(r=>System.Net.IPNetwork.Parse(r.Cidr)).ToArray();
-  var found=new Dictionary<string,int>();
-  foreach(var c in EstablishedTcp())
+  var stale=0;
+  foreach(var c in EstablishedTcp().ToArray())
   {
    var remote=c.Remote.IsIPv4MappedToIPv6?c.Remote.MapToIPv4():c.Remote;
    if(!physical.Contains(c.Local)||!AddressPolicy.IsPublic(remote.ToString()))continue;
    if(gateway is not null&&remote.Equals(gateway))continue; // own server: gateway, private DNS
    if(direct.Any(n=>n.Contains(remote)))continue;
-   string name;try{using var p=Process.GetProcessById(c.Pid);name=p.ProcessName+".exe";}catch(ArgumentException){name="已退出的程序";}catch(InvalidOperationException){name="已退出的程序";}
-   found[name]=found.GetValueOrDefault(name)+1;
+   stale++;
+   if(c.Row is byte[] row){BitConverter.GetBytes(12u).CopyTo(row,0);if(SetTcpEntry(row)==0)cutTotal++;} // MIB_TCP_STATE_DELETE_TCB
   }
-  if(found.Count==0)return new{id="L8",verdict="pass",detail="没有发现绕开独享线路直接连到公网的程序"};
-  return new{id="L8",verdict="fail",detail="发现绕开独享线路的软件："+string.Join("、",found.Select(x=>x.Key+"（"+x.Value+" 条）"))};
+  return new{id="L8",verdict="pass",detail=stale==0?"没有绕开独享线路的连接":"防护开启前建立的 "+stale+" 条直连已被拦截"+(cutTotal>0?"，已断开 "+cutTotal+" 条让它们改走独享线路":"")};
  }
  void RefreshBypass()
  {
