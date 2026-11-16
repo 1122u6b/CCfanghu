@@ -3,7 +3,7 @@ Run ON THE OWNER'S SERVER as root. Keeps only infrastructure DNS settings, certi
 and upstream configuration. Business data starts in a separate fresh directory.
 Never prints credentials; exports an owner connection file with mode 0600.
 """
-import argparse,hashlib,http.client,ipaddress,json,os,secrets,shlex,shutil,sqlite3,ssl,subprocess,sys,time
+import argparse,hashlib,http.client,ipaddress,json,os,secrets,shlex,shutil,signal,sqlite3,ssl,subprocess,sys,time
 from pathlib import Path
 SERVICES={'leyra-server.service':'gateway.py','leyra-dns.service':'dns_probe.py'}
 def systemctl(*args):return subprocess.run(['systemctl',*args],check=True,capture_output=True,text=True).stdout.strip()
@@ -12,7 +12,7 @@ def atomic(path,data,mode=0o600):
  with temp.open('xb') as f:os.chmod(temp,mode);f.write(data);f.flush();os.fsync(f.fileno())
  temp.replace(path)
 def read_service(service,entrypoint):
- if systemctl('show',service,'--property=User','--value') not in ('','root'):raise ValueError('Service user requires an explicit deployment plan: '+service)
+ if systemctl('show',service,'--property=DynamicUser','--value')=='yes':raise ValueError('Dynamic service user requires an explicit deployment plan')
  pid=int(systemctl('show',service,'--property=MainPID','--value'))
  if pid<=1:raise ValueError(service+' must already be running')
  argv=[x.decode() for x in Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0') if x]
@@ -53,28 +53,49 @@ def install(address):
  if os.geteuid()!=0:raise PermissionError('Run this installer as root on the existing server')
  if not ipaddress.ip_address(address).is_global:raise ValueError('A public literal server IP is required')
  source=Path(__file__).resolve().parents[1]/'server'
- files=['gateway.py','management.py','devices.py','dns_probe.py','ai_login.py']
+ files=['gateway.py','management.py','devices.py','dns_probe.py','ai_login.py','verify_live.py']
  for name in files:compile((source/name).read_bytes(),name,'exec')
  records={service:read_service(service,entry) for service,entry in SERVICES.items()}
+ identities={}
+ for service in SERVICES:
+  pid=systemctl('show',service,'--property=MainPID','--value')
+  status=Path('/proc/'+pid+'/status').read_text().splitlines()
+  fields={line.split(':',1)[0]:line.split(':',1)[1].split() for line in status if ':' in line}
+  identities[service]={'uid':int(fields['Uid'][1]),'gid':int(fields['Gid'][1])}
+ owners={value['uid'] for value in identities.values()}
+ if len(owners)!=1:raise ValueError('Shared gateway and DNS store requires the same existing service user')
+ owner=next(iter(owners));data_group=identities['leyra-server.service']['gid']
  gateway=dict(records['leyra-server.service'][1]);dns=dict(records['leyra-dns.service'][1]);infrastructure=dns_settings(gateway)
  cert=Path(gateway['cert']).read_text();fingerprint=hashlib.sha256(ssl.PEM_cert_to_DER_cert(cert)).hexdigest()
  subprocess.run(['openssl','x509','-in',gateway['cert'],'-noout','-checkend','86400'],check=True,capture_output=True)
  if dns.get('zone')!=infrastructure['zone']:raise ValueError('Existing authoritative DNS zone differs from private DNS settings')
  stamp=time.strftime('%Y%m%d-%H%M%S',time.gmtime());release=Path('/opt/leyra-connect/releases')/stamp;data=Path('/var/lib/leyra-connect')
  if data.exists():raise ValueError('Fresh data directory already exists; refusing to overwrite or reset it')
- release.mkdir(parents=True,mode=0o700);data.mkdir(mode=0o700)
- for name in files:shutil.copy2(source/name,release/name);os.chmod(release/name,0o600)
+ for candidate in [Path('/opt/leyra-connect'),Path('/opt/leyra-connect/releases'),release,data]:
+  if candidate.is_symlink():raise ValueError('Linked deployment path refused')
+ release.mkdir(parents=True,mode=0o755);data.mkdir(mode=0o700)
+ for candidate in [Path('/opt/leyra-connect'),Path('/opt/leyra-connect/releases'),release]:os.chmod(candidate,0o755)
+ for name in files:shutil.copy2(source/name,release/name);os.chmod(release/name,0o644)
  gateway.update(data_dir=str(data),public_host=address,fingerprint=fingerprint,api_token=secrets.token_urlsafe(48),client_user='owner',client_password=secrets.token_urlsafe(48))
  dns['data_dir']=str(data);infrastructure['resolver_ip']=address
  sys.path.insert(0,str(release));from management import Management
  Management(data).configure_dns(infrastructure)
+ for item in [data,*data.rglob('*')]:
+  if item.is_symlink():raise ValueError('Linked runtime path refused')
+  os.chown(item,owner,data_group)
  overrides={};changed=[]
+ for service in SERVICES:
+  override=Path('/etc/systemd/system')/(service+'.d')/'90-leyra-connect.conf'
+  overrides[service]=(override,override.read_bytes() if override.exists() else None)
+ # Durable rollback information exists before the first service command is modified.
+ atomic(release/'previous-service-overrides.json',json.dumps({s:{'path':str(p),'content':v.decode() if v is not None else None} for s,(p,v) in overrides.items()},indent=2).encode())
+ def interrupted(signum,frame):raise RuntimeError('deployment_interrupted')
+ prior_signals={sig:signal.signal(sig,interrupted) for sig in (signal.SIGTERM,signal.SIGHUP)}
  try:
   for service,entry in SERVICES.items():
    config=gateway if entry=='gateway.py' else dns
-   path=release/(service+'.json');atomic(path,(json.dumps(config,indent=2)+'\n').encode())
+   path=release/(service+'.json');atomic(path,(json.dumps(config,indent=2)+'\n').encode(),0o640);os.chown(path,0,identities[service]['gid'])
    override=Path('/etc/systemd/system')/(service+'.d')/'90-leyra-connect.conf'
-   overrides[service]=(override,override.read_bytes() if override.exists() else None)
    text='[Service]\nExecStart=\nExecStart=/usr/bin/python3 '+str(release/entry)+' --config '+str(path)+'\nWorkingDirectory='+str(release)+'\nReadWritePaths='+str(data)+'\n'
    atomic(override,text.encode(),0o644);changed.append(service)
   systemctl('daemon-reload');systemctl('restart','leyra-dns.service');systemctl('restart','leyra-server.service')
@@ -84,7 +105,6 @@ def install(address):
   profile={'leyra_server':{'host':address,'port':int(gateway['port']),'token':gateway['api_token'],'certificate':cert,'fingerprint':fingerprint,'role':'owner'}}
   exported=Path('/root/leyra-server-connection.json');atomic(exported,(json.dumps(profile,indent=2)+'\n').encode())
   # Credentials are backed up on this same server only, never uploaded to the repository.
-  atomic(release/'previous-service-overrides.json',json.dumps({s:{'path':str(p),'content':v.decode() if v is not None else None} for s,(p,v) in overrides.items()},indent=2).encode())
   print('Gateway and DNS services upgraded; authenticated local TLS check passed.')
   print('Private owner connection file: /root/leyra-server-connection.json')
   print('Public domain routing, device DoH, Windows TUN and end-to-end acceptance still require validation.')
@@ -97,6 +117,8 @@ def install(address):
   for service in reversed(list(SERVICES)):systemctl('restart',service)
   print('Upgrade failed; previous service commands restored. New private data retained for diagnosis.',file=sys.stderr)
   raise
+ finally:
+  for sig,handler in prior_signals.items():signal.signal(sig,handler)
 if __name__=='__main__':
  parser=argparse.ArgumentParser();parser.add_argument('--address',required=True);args=parser.parse_args()
  try:install(args.address)
