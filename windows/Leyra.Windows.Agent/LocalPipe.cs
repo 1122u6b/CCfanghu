@@ -32,10 +32,11 @@ sealed class LocalPipe(Runtime runtime,SecurityIdentifier owner)
  {
   try
   {
-   SecurityIdentifier? caller=null;pipe.RunAsClient(()=>caller=WindowsIdentity.GetCurrent(true)?.User);
-   if(caller is null||!caller.Equals(owner))throw new UnauthorizedAccessException("caller "+(caller?.Value??"(none)")+" is not owner "+owner.Value);
    using var read=CancellationTokenSource.CreateLinkedTokenSource(stop);read.CancelAfter(TimeSpan.FromSeconds(5));
    var envelope=await PipeProtocol.ReadAsync(pipe,read.Token);
+   // Windows only allows checking who is on the other end after data has been read; nothing is acted on before this check.
+   SecurityIdentifier? caller=null;pipe.RunAsClient(()=>caller=WindowsIdentity.GetCurrent(true)?.User);
+   if(caller is null||!caller.Equals(owner))throw new UnauthorizedAccessException("caller "+(caller?.Value??"(none)")+" is not owner "+owner.Value);
    if(envelope.GetProperty("version").GetInt32()!=1)throw new InvalidDataException("本机通信版本不匹配");
    var request=envelope.GetProperty("request");var deep=request.TryGetProperty("type",out var type)&&type.GetString()=="doctor"&&request.TryGetProperty("deep",out var d)&&d.ValueKind==JsonValueKind.True;
    using var operation=CancellationTokenSource.CreateLinkedTokenSource(stop);operation.CancelAfter(TimeSpan.FromSeconds(deep?90:32));
