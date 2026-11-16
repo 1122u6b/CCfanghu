@@ -12,10 +12,10 @@ VERSION_PATTERN=r'[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(?:-[A-Za-z0-9.]{1,24})?'
 
 def exit_nodes(value):
     """Exits hold one or more upstream nodes; the gateway fails over in order."""
-    from gateway import validate_upstream
+    from gateway import validate_node
     nodes=value if isinstance(value,list) else [value]
     if not 1<=len(nodes)<=32:raise ManagementError('an exit needs 1 to 32 upstream nodes')
-    try:return [validate_upstream(x if isinstance(x,dict) else {}) for x in nodes]
+    try:return [validate_node(x if isinstance(x,dict) else {}) for x in nodes]
     except (ValueError,TypeError,KeyError) as e:raise ManagementError(str(e)) from None
 
 def text(value,limit,required=False):
@@ -236,6 +236,20 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
                 nodes=exit_nodes(req.get('nodes',req.get('node',{})))
                 if db.execute('SELECT COUNT(*) FROM exits').fetchone()[0]>=20:raise ManagementError('maximum 20 exits')
                 cur=db.execute('INSERT INTO exits(name,node,created_at) VALUES (?,?,?)',(text(req.get('name'),80,True),json.dumps(nodes),now));return {'id':cur.lastrowid,'lines':len(nodes)}
+            if kind=='import_exit_links':
+                from links import parse,LinkError
+                try:nodes,skipped=parse(text(req.get('links'),200000,True),**({'fetch':self.fetch} if getattr(self,'fetch',None) else {}))
+                except LinkError as e:raise ManagementError(str(e)) from None
+                if not nodes:raise ManagementError('没有可用的出口：'+(skipped[0] if skipped else '请粘贴链接或订阅地址'))
+                nodes=exit_nodes(nodes)
+                if req.get('exit_id') is not None:
+                    identity=int(req['exit_id'])
+                    if db.execute('UPDATE exits SET node=? WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
+                else:
+                    if db.execute('SELECT COUNT(*) FROM exits').fetchone()[0]>=20:raise ManagementError('maximum 20 exits')
+                    identity=db.execute('INSERT INTO exits(name,node,created_at) VALUES (?,?,?)',(text(req.get('name') or '我的出口',80,True),json.dumps(nodes),now)).lastrowid
+                self.put(db,'selected_exit',identity)
+                return {'id':identity,'lines':len(nodes),'skipped':skipped,'types':sorted({n['type'] for n in nodes})}
             if kind=='update_exit':
                 identity=int(req.get('id',0));nodes=exit_nodes(req.get('nodes',req.get('node',{})))
                 if db.execute('UPDATE exits SET node=? WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')

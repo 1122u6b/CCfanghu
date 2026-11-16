@@ -4,7 +4,7 @@ import argparse, asyncio, base64, contextlib, hashlib, hmac, ipaddress, json, os
 from pathlib import Path
 from urllib.parse import urlsplit,parse_qs
 from devices import Devices
-from management import ManagementError
+from management import Management,ManagementError
 
 def make_certificate(cert,key,host,days=365):
     # Explicit config avoids platform OpenSSL defaults adding duplicate extensions.
@@ -50,6 +50,13 @@ def validate_upstream(o):
             if not 0<len(str(v).encode())<=255 or any(c in str(v) for c in '\r\n'):raise ValueError('invalid credentials length')
         result.update(username=str(user),password=str(password))
     return result
+def validate_node(o):
+    """Gateway-direct SOCKS5/HTTP upstream, or a kernel protocol node run by upstream_kernel."""
+    if isinstance(o,dict) and o.get('type') not in (None,*UPSTREAM_TYPES):
+        from links import validate_kernel_node,LinkError
+        try:return validate_kernel_node(o)
+        except LinkError as e:raise ValueError(str(e)) from None
+    return validate_upstream(o)
 async def upstream_connect(o,target):
     o=validate_upstream(o)
     r,w=await asyncio.wait_for(asyncio.open_connection(o['server'],o['port']),12)
@@ -96,13 +103,34 @@ class Gateway:
         self.management=Management(config.get('data_dir') or str(Path(config.get('upstream_file',config['cert'])).parent))
         self.devices=Devices(self.management.root)
         self.device_active={}
+        from upstream_kernel import KernelUpstreams,find_binary
+        binary=config.get('kernel_binary') or find_binary()
+        self.kernel=KernelUpstreams(Path(self.management.root)/'upstream-kernel',Path(binary) if binary else None)
     def upstreams(self,management=None):
         selected=(management or self.management).selected_upstream()
-        if selected:return [validate_upstream(x) for x in selected]
+        if selected:return [validate_node(x) for x in selected]
         if 'upstream_file' in self.config:value=json.loads(Path(self.config['upstream_file']).read_text())
         else:value=self.config['upstream']
         return [validate_upstream(x) for x in (value if isinstance(value,list) else [value])]
     def upstream(self,management=None):return self.upstreams(management)[0]
+    async def dial_nodes(self,management=None):
+        """Kernel-protocol nodes of one exit share a single fallback listener on this server."""
+        nodes=self.upstreams(management);kernel=[n for n in nodes if n['type'] not in UPSTREAM_TYPES]
+        if not kernel:return nodes
+        local=await self.kernel.resolve(kernel);result=[];placed=False
+        for n in nodes:
+            if n['type'] in UPSTREAM_TYPES:result.append(n)
+            elif not placed:result.append(local);placed=True
+        return result
+    def kernel_exits(self):
+        groups=[]
+        for row in self.devices.list()['items']:
+            if not row['enabled']:continue
+            try:selected=Management(Path(self.devices.root)/row['id']).selected_upstream() or []
+            except Exception:continue
+            kernel=[n for n in selected if isinstance(n,dict) and n.get('type') not in UPSTREAM_TYPES]
+            if kernel:groups.append([validate_node(n) for n in kernel])
+        return groups
     def node(self,device=None):
         return {'name':'自建前置 · 住宅出口','type':'socks5','server':self.config['public_host'],'port':int(self.config['port']),'username':device.id if device else self.config['client_user'],'password':device.secret if device else self.config['client_password'],'tls':True,'fingerprint':self.config['fingerprint'],'udp':False}
     async def response(self,w,status,obj):
@@ -166,8 +194,11 @@ class Gateway:
             from management import ManagementError
             try:
                 request=json.loads(await exact(r,n))
-                result=self.devices.rpc(self.management,request) if is_admin else self.devices.device_rpc(self.management,device,request)
-            except (ManagementError,ValueError,TypeError,KeyError):return await self.response(w,400,{'error':'invalid management request'})
+                call=(lambda:self.devices.rpc(self.management,request)) if is_admin else (lambda:self.devices.device_rpc(self.management,device,request))
+                # Subscription imports fetch from the internet; keep the event loop free meanwhile.
+                result=await asyncio.to_thread(call) if isinstance(request,dict) and request.get('type')=='import_exit_links' else call()
+            except ManagementError as e:return await self.response(w,400,{'error':'invalid management request','detail':str(e)[:300]})
+            except (ValueError,TypeError,KeyError):return await self.response(w,400,{'error':'invalid management request'})
             return await self.response(w,200,result)
         if method=='POST' and path=='/api/v1/own-exit':
             n=int(h.get('content-length','0'))
@@ -216,7 +247,7 @@ class Gateway:
                 self.device_active[device.id]=self.device_active.get(device.id,0)+1;counted_device=True
             head=await exact(r,4)
             if head[:3]!=b'\x05\x01\x00':w.write(b'\x05\x07\x00\x01'+b'\x00'*6);await w.drain();return
-            target=await address(r,head[3]);upr,upwriter=await connect_any(self.upstreams(device.management if device else None),target)
+            target=await address(r,head[3]);upr,upwriter=await connect_any(await self.dial_nodes(device.management if device else None),target)
             w.write(b'\x05\x00\x00\x01'+b'\x00'*6);await w.drain()
             tasks=[asyncio.create_task(self.pipe(r,upwriter)),asyncio.create_task(self.pipe(upr,w))]
             if device:tasks.append(asyncio.create_task(self.watch_device(device)))
@@ -241,6 +272,10 @@ class Gateway:
     async def start(self):
         context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.minimum_version=ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(self.config['cert'],self.config['key'])
+        async def preload():
+            try:await self.kernel.preload(self.kernel_exits())
+            except Exception as e:print('kernel preload skipped: '+type(e).__name__,flush=True)
+        asyncio.get_running_loop().create_task(preload())
         return await asyncio.start_server(self.handle,self.config.get('listen','0.0.0.0'),int(self.config['port']),ssl=context,ssl_handshake_timeout=10,limit=16384)
 async def main(path):
     g=Gateway(json.loads(Path(path).read_text()));server=await g.start()

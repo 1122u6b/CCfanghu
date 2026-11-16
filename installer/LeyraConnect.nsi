@@ -33,6 +33,17 @@ ShowUninstDetails show
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "SimpChinese"
 Var Result
+; Each helper step's exit code and output go to %TEMP%\LEYRAConnect-setup.log, so a
+; failed silent install (automatic update) can be diagnosed afterwards.
+Function RunLogged
+ nsExec::ExecToStack $1
+ Pop $Result
+ Pop $2
+ FileOpen $9 "$TEMP\LEYRAConnect-setup.log" a
+ FileSeek $9 0 END
+ FileWrite $9 "[$0] exit=$Result$\r$\n$2$\r$\n"
+ FileClose $9
+FunctionEnd
 Function .onInit
  ${IfNot} ${RunningX64}
   MessageBox MB_ICONSTOP "此程序需要 64 位 Windows 10 或 Windows 11。" /SD IDOK
@@ -42,8 +53,9 @@ Function .onInit
  InitPluginsDir
  SetOutPath "$PLUGINSDIR"
  File "ValidateInstallPath.ps1"
- nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ValidateInstallPath.ps1" -Target "$INSTDIR"'
- Pop $Result
+ StrCpy $0 "validate-path"
+ StrCpy $1 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ValidateInstallPath.ps1" -Target "$INSTDIR"'
+ Call RunLogged
  ${If} $Result != 0
   MessageBox MB_ICONSTOP "安装目录检查未通过，不能写入包含链接的目录。" /SD IDOK
   Abort
@@ -58,8 +70,9 @@ Section "安装" SEC_MAIN
  File "VerifyRuntime.ps1"
  File "${PREREQUISITES}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
  DetailPrint "正在安装 Microsoft WebView2 运行环境……"
- nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\VerifyRuntime.ps1" -Installer "$PLUGINSDIR\MicrosoftEdgeWebView2RuntimeInstallerX64.exe" -ExpectedSha256 "${WEBVIEW_SHA256}"'
- Pop $Result
+ StrCpy $0 "webview2"
+ StrCpy $1 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\VerifyRuntime.ps1" -Installer "$PLUGINSDIR\MicrosoftEdgeWebView2RuntimeInstallerX64.exe" -ExpectedSha256 "${WEBVIEW_SHA256}"'
+ Call RunLogged
  ${If} $Result != 0
   MessageBox MB_ICONSTOP "Microsoft 运行环境未通过校验或安装失败，安装已停止。" /SD IDOK
   Abort
@@ -67,8 +80,9 @@ Section "安装" SEC_MAIN
  SetOutPath "$INSTDIR\versions\${VERSION}"
  File /r "${PAYLOAD}\*"
  DetailPrint "正在注册后台服务……"
- nsExec::ExecToLog '"$INSTDIR\versions\${VERSION}\Leyra.Agent.exe" --install'
- Pop $Result
+ StrCpy $0 "service-install"
+ StrCpy $1 '"$INSTDIR\versions\${VERSION}\Leyra.Agent.exe" --install'
+ Call RunLogged
  ${If} $Result != 0
   MessageBox MB_ICONSTOP "后台服务安装未完成，请保留安装详情。此安装不会创建可用状态的快捷方式。" /SD IDOK
   Abort
