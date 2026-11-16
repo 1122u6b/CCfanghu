@@ -21,7 +21,7 @@ public sealed class PrivateServerClient : IDisposable
     }
     public async Task<JsonElement> SendAsync(string path,object? body=null,CancellationToken cancellation=default)
     {
-        if (path!="/api/v1/config" && path!="/api/v1/status" && path!="/api/v1/rpc" && path!="/api/v1/egress-probe") throw new InvalidOperationException("不允许的服务接口");
+        if (path!="/api/v1/config" && path!="/api/v1/status" && path!="/api/v1/rpc" && path!="/api/v1/egress-probe" && path!="/api/v1/activate") throw new InvalidOperationException("不允许的服务接口");
         using var deadline=CancellationTokenSource.CreateLinkedTokenSource(cancellation);deadline.CancelAfter(timeout);
         var bounded=deadline.Token;
         using var request=new HttpRequestMessage(body is null ? HttpMethod.Get : HttpMethod.Post,profile.Address(path));

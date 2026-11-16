@@ -35,29 +35,30 @@ test('all nine original page views render with service data unavailable',async()
    const content=render(w,page);
    assert.ok(content.length>20,page);
    assert.equal(w.__proto.S.page,page);
-   assert.equal(w.document.querySelector('[data-keep="act-code"]'),null,page);
    assert.equal(w.document.querySelector('.p-group'),null,page);
    assert.equal(w.document.querySelector('.p-qqcard'),null,page);
   }
  }finally{await cleanup(w);}
 });
-test('unpaired setup imports a connection file without a license field',async()=>{
+test('unpaired setup activates with an authorization code and still offers a connection file',async()=>{
  const w=await setup();try{
   Object.assign(w.__proto.S,{screen:'activate',consentVer:w.__proto.DISCLAIMER_VER});w.__proto.render();
-  assert.match(w.document.body.textContent,/导入服务器连接文件/);
-  assert.doesNotMatch(w.document.body.textContent,/授权码/);
-  assert.equal(w.document.querySelector('[data-keep="act-code"]'),null);
+  assert.match(w.document.body.textContent,/授权码/);
+  assert.ok(w.document.querySelector('[data-keep="act-code"]'));
+  assert.ok(w.document.querySelector('[data-keep="act-agree"]'));
+  assert.ok(w.document.querySelector('[data-act="activate"]'));
   assert.ok(w.document.querySelector('[data-act="connectServer"]'));
  }finally{await cleanup(w);}
 });
-test('legacy license dialogs remain inaccessible when the license feature is off',async()=>{
+test('renewal dialog and support QQ group are available',async()=>{
  const w=await setup();try{
-  for(const type of ['switchCode','restoreCode']){
-   render(w,'profile');w.__proto.S.dialog={type};w.__proto.render();
-   assert.equal(w.document.querySelector('[data-keep="switch-code"]'),null);
-   assert.equal(w.document.querySelector('[data-keep="restore-code"]'),null);
-  }
-  assert.equal(w.LEYRA_FEATURES.licenseCodes,false);
-  assert.equal(w.LEYRA_FEATURES.supportGroup,false);
+  assert.equal(w.LEYRA_FEATURES.licenseCodes,true);
+  assert.equal(w.LEYRA_FEATURES.supportGroup,true);
+  render(w,'profile');w.__proto.S.dialog={type:'switchCode'};w.__proto.render();
+  assert.ok(w.document.querySelector('[data-keep="switch-code"]'));
+  w.__proto.CHANNELS.push(['Leyra 技术交流群（24小时）','1136427075','qqgroup','Leyra 技术交流群','24小时']);
+  w.__proto.S.dialog=null;
+  const overview=render(w,'overview');
+  assert.match(overview,/1136427075/);
  }finally{await cleanup(w);}
 });

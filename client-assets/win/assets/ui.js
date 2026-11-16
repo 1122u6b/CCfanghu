@@ -470,7 +470,7 @@
   }
   /* 售后 QQ 群（01 §6.4，2026-11-08 定）：概览只放 QQ 群这一个渠道——后台售后渠道里类型是 QQ 群号的第一条；没配 QQ 群时退回第一条渠道。
      其它渠道在帮助页、断网页的「联系售后」里照常有。 */
-  function qqChan() { return CHANNELS.filter(function (c) { return c[2] !== 'qqgroup'; })[0] || null; }
+  function qqChan() { return CHANNELS.filter(function (c) { return c[2] === 'qqgroup'; })[0] || CHANNELS[0] || null; }
   function qqBlock(short) {
     var c = qqChan();
     if (!c) return '<p class="p-sub">可以提交工单联系我们。</p>';
@@ -480,7 +480,10 @@
     return '<div class="p-qq"><div class="who">' + who + '</div>' +
       '<div class="no"><b class="hx-num" data-ctx="copy:' + c[1] + '">' + c[1] + '</b><button class="hx-btn hx-btn-secondary hx-btn-sm" data-hx-copy="' + c[1] + '">' + I('copy', 14) + (grp ? '复制群号' : '复制') + '</button></div></div>';
   }
-  function qqCard() { return ''; }
+  function qqCard() {
+    var c = qqChan(); if (!c) return '';
+    return '<div class="hx-card hx-data p-tile"><div class="lab">' + I('chat', 16) + (c[2] === 'qqgroup' ? '售后 QQ 群' : esc(c[3] || '售后')) + '</div>' + qqBlock(true) + '<div class="sub">联系时报账户编号 <b class="hx-num">' + ACCOUNT + '</b></div></div>';
+  }
   function supportCard(prep) {
     // 断网 / 准备中的概览里放在信息卡旁边：售后 QQ 群、账户编号、两个入口，和旁边两行卡一样高
     return '<div class="hx-card p-support"><div class="p-cardhead" style="margin:0"><h2>' + (prep ? '账户与售后' : '售后与账户') + '</h2><span>联系时请提供账户编号</span></div>' +
@@ -603,10 +606,10 @@
     var cRoute =
       '<button class="hx-card hx-data p-cardbtn" data-act="go:routes"><div class="lab">' + I('signal', 16) + '当前线路' + I('chevron', 16, 'go') + '</div><div class="val txt">' + (st === 'pm' ? '未连接' : r.n === '-' ? (st === 'down' ? '—' : '还没有线路') : '线路 ' + r.n) + '</div><div class="sub">' + (st === 'pm' ? '网络已断开' : r.n === '-' ? (st === 'down' ? '恢复防护后显示' : '开通后自动接入') : [r.tag, typeof r.ms === 'number' ? r.ms + ' ms' : ''].filter(Boolean).join(' · ')) + '</div></button>';
     var cTraffic = '<div class="hx-card hx-data"><div class="lab">' + I('download', 16) + '本月流量</div><div class="val">' + trafficVal(full) + '</div>' + tr + '<div class="sub"' + (full ? ' style="color:var(--danger)"' : '') + '>' + (full ? '已用完 · ' + INFO.reset + '重置' : '下次重置 ' + INFO.reset) + '</div></div>';
-    var cAccount = '<button class="hx-card hx-data p-cardbtn" data-act="go:profile"><div class="lab">' + I('calendar', 16) + '账户' + I('chevron', 16, 'go') + '</div><div class="val txt">' + (exp ? '已到期' : S.trial ? (S.trial === 'on' ? trialLeft() : '已到期') : byo() ? '永久使用' : S.exp.date === '—' ? '—' : '还有 ' + nodeLeft() + ' 天') + '</div><div class="sub">' + (exp ? suiteWord() + ' ' + S.exp.date + '已到期' : S.trial ? '免费试用 · ' + S.trialEnd.date + (S.trial === 'on' ? '到期' : '') : byo() ? '单独软件 · 自带出口' : S.exp.date === '—' ? '到期日还没拿到' : suiteWord() + ' ' + nodeDate() + '到期') + '</div></button>';
+    var cAccount = '<button class="hx-card hx-data p-cardbtn" data-act="go:profile"><div class="lab">' + I('calendar', 16) + '账户' + I('chevron', 16, 'go') + '</div><div class="val txt">' + (exp ? '已到期' : S.trial ? (S.trial === 'on' ? trialLeft() : '已到期') : byo() ? '永久使用' : S.exp.date === '—' ? '—' : '还有 ' + nodeLeft() + ' 天') + '</div><div class="sub">' + (exp ? suiteWord() + ' ' + S.exp.date + '已到期' : S.trial ? '免费试用 · ' + S.trialEnd.date + (S.trial === 'on' ? '到期' : '') : byo() ? '一次买断 · 永久授权' : S.exp.date === '—' ? '到期日还没拿到' : suiteWord() + ' ' + nodeDate() + '到期') + '</div></button>';
     if (side) return '<div class="p-sec p-pmgrid">' + supportCard(st !== 'pm') + '<div class="p-datagrid two">' + cRoute + cTraffic + cAccount + activityCard(2, true) + '</div></div>';
     // 已保护、暂停、启动中：线路和出口已经在上面的数据格里，第三张放售后 QQ 群（01 §6.4）
-    return '<div class="p-sec"><div class="p-datagrid two">' + cTraffic + cAccount + qqCard() + '</div></div><div class="p-sec">' + activityCard(3) + '</div>';
+    return '<div class="p-sec"><div class="p-datagrid ' + (qqChan() ? 'three' : 'two') + '">' + cTraffic + cAccount + qqCard() + '</div></div><div class="p-sec">' + activityCard(3) + '</div>';
   }
   /* 最近动态（01 §5.13）：最近几条，「全部」跳线路页的最近事件；矮窗口里只显示 2 条 */
   function activityCard(n, compact) {
@@ -799,7 +802,7 @@
     // 到期卡（01 §5.7）：全套一个到期日，线路和 Claude 账号一起，旁边「续费」；单独软件买断、永久使用，旁边「升级到全套」
     var tiles = S.trial ? (S.trial === 'on' ? tile('calendar', '免费试用', trialLeft(), S.trialEnd.date + '到期', btn('text', '购买', 'buySoft') + btn('text', '换授权码', 'dialog:switchCode'))
         : tile('calendar', '免费试用', '已到期', S.trialEnd.date + '已到期', btn('text', '购买', 'buySoft') + btn('text', '换授权码', 'dialog:switchCode'), ' danger'))
-      : byo() ? tile('calendar', '单独软件', '永久使用', '接你自己的出口，不用续费', btn('text', '升级到全套', 'upgrade') + btn('text', '填全套码升级', 'dialog:switchCode'))
+      : byo() ? tile('calendar', '授权', '永久使用', '一次买断，永久使用')
       : exp ? tile('calendar', suiteWord(), '已到期', suiteWord() + ' ' + S.exp.date + '已到期', (suiteWord() === '全套' ? btn('text', '重新开通全套', 'upgrade') : renewAct), ' danger')
       : S.exp.date === '—' ? tile('calendar', '账户', '—', '到期日还没拿到') : tile('calendar', suiteWord(), days(nodeLeft()), suiteWord() + ' ' + nodeDate() + '到期' + (renewTag ? ' · ' + renewTag : '') + offlinePaid(), renewAct + tierUpBtn());
     var nocap = unlimited(), full = !nocap && INFO.pct >= 100, pct = Math.min(100, INFO.pct);
@@ -935,7 +938,7 @@
       group + '<div class="hx-card p-mlist" style="padding:0">' + list + '</div>';
   }
   /* 售后 QQ 群：后台「售后渠道」里类型是 QQ 群号的第一条；没有就不显示 */
-  function groupCard() { return ''; }
+  function groupCard() { var c = qqChan(); return c ? '<div class="hx-card" style="padding:14px 16px;margin-bottom:12px">' + qqBlock() + '</div>' : ''; }
 
   /* 公告勾了弹窗的、「需要处理」消息：打开主界面时居中弹一次，一次只弹一个 */
   function popupView() {
@@ -1109,8 +1112,21 @@
 
   /* ---------------- 整页：激活 / 向导 ---------------- */
   function activateScreen() {
-    // LEYRA_FREE_SETUP: imports a device connection profile, not a license code.
-    return '<div class="p-full"><div class="p-wordmark" style="margin-bottom:20px"><span class="p-logo" aria-hidden="true"></span>Leyra</div><div class="p-act"><div class="hx-card"><h1 class="hx-title">连接你的服务器</h1><p class="p-sub">选择管理员提供的服务器连接文件，客户端会校验证书并登记这台设备。</p>' + btn('primary', '导入服务器连接文件', 'connectServer') + '<p class="p-sub">连接文件包含设备凭据，请妥善保管。</p></div></div></div>';
+    // 授权码激活：一个授权码绑定一台电脑；重装软件或系统后在同一台电脑上填原来的码即可恢复。
+    var E = S.actErr || {}, busyNow = S.busy.act;
+    function err(k) { return E[k] ? '<span class="hx-help is-error" style="display:flex;gap:4px">' + I('warning', 16) + esc(E[k]) + '</span>' : ''; }
+    var steps = [['填授权码激活', '在售后 QQ 群下单拿到授权码，填在左边点「激活」。一个授权码只能用于一台电脑。'], ['自动开始防护', '激活后自动连上独享线路，不用别的设置。'], ['检查时区和局域网', '按首次向导确认时区和局域网设备，再做一次安全检查。']];
+    return '<div class="p-full"><div class="p-wordmark" style="margin-bottom:20px"><span class="p-logo" aria-hidden="true"></span>Leyra</div>' +
+      '<div style="display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:32px;align-items:start;max-width:920px;width:100%">' +
+      '<div class="hx-card" style="padding:24px"><h1 class="hx-title">激活</h1><p class="p-sub">填你在售后 QQ 群买到的授权码。重装过系统的，填原来的授权码即可恢复。</p>' +
+      '<label class="hx-field"><span class="hx-label">授权码</span><input class="hx-input hx-num" data-keep="act-code" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false"' + (busyNow ? ' disabled' : '') + '>' + err('code') + '</label>' +
+      '<label class="hx-field"><span class="hx-label">联系方式（必填）</span>' + contactKind('act-contact-kind', '', !!busyNow) + '<input class="hx-input" data-keep="act-contact" placeholder="微信号或绑定的手机号"' + (busyNow ? ' disabled' : '') + ' style="margin-top:8px"><span class="hx-help">售后靠它联系你，请填真实账号</span>' + err('contact') + '</label>' +
+      '<label class="hx-field"><span class="hx-label">订单号（选填）</span><input class="hx-input" data-keep="act-order" placeholder="下单时的订单号或备注"' + (busyNow ? ' disabled' : '') + '></label>' +
+      '<label style="display:flex;gap:8px;align-items:center;margin:6px 0 4px"><input type="checkbox" data-keep="act-agree"> <span>我已阅读并同意 ' + btn('text', '用户协议', 'dialog:agreement') + '</span></label>' + err('agree') +
+      '<div style="margin-top:14px">' + (busyNow ? busy('act') : btn('primary', '激活', 'activate')) + '</div></div>' +
+      '<div style="padding-top:8px">' + steps.map(function (x, i) { return '<div style="display:flex;gap:14px;margin-bottom:22px"><span class="hx-num" style="flex:none;width:30px;height:30px;border-radius:50%;border:1px solid var(--hx-border, #ddd);display:grid;place-items:center">' + (i + 1) + '</span><div><b>' + x[0] + '</b><p class="p-sub" style="margin:4px 0 0">' + x[1] + '</p></div></div>'; }).join('') +
+      '<div class="hx-card" style="padding:14px 16px">' + qqBlock() + '</div>' +
+      '<p class="p-sub" style="margin-top:14px">管理员给了你连接文件？' + btn('text', '导入连接文件', 'connectServer') + '</p></div></div></div>';
   }
   function stepper(n) {
     var names = ['时区', '局域网', '安全检查'], heads = ['检查电脑时区', '确认局域网设备', '安全检查'];
@@ -1283,7 +1299,7 @@
       h = '<div class="hx-dialog wide terms' + k + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">免责声明</h3><p>第 ' + DISCLAIMER_VER + ' 版，共 ' + DISCLAIMER.length + ' 条。</p>' + disclaimerList() +
         '<div class="acts">' + btn('primary', '关闭', 'close', ' data-autofocus') + '</div></div>';
     } else if (D.type === 'agreement') {
-      h = '<div class="hx-dialog wide terms' + k + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">用户协议</h3><p>共十三条。</p><ol class="p-terms">' + TERMS.map(function (t) { return '<li><div><b>' + t[0] + '</b>' + t[1] + '</div></li>'; }).join('') + '</ol>' +
+      h = '<div class="hx-dialog wide terms' + k + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">用户协议</h3><p>共 ' + TERMS.length + ' 条。</p><ol class="p-terms">' + TERMS.map(function (t) { return '<li><div><b>' + t[0] + '</b>' + t[1] + '</div></li>'; }).join('') + '</ol>' +
         '<div class="acts">' + btn('primary', '关闭', 'close', ' data-autofocus') + '</div></div>';
     } else if (D.type === 'diag') {
       h = '<div class="hx-dialog' + k + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">诊断信息里有什么</h3><p>附在这张工单里，只给客服看，跟着工单删除。</p>' +
@@ -1305,15 +1321,12 @@
       h = '<div class="hx-dialog' + k + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">联系售后</h3><p>联系时请提供账户编号，续费、加购流量都通过售后办理。</p><div style="margin-bottom:12px">' + channels() + '</div>' + accountField() +
         '<div class="acts">' + btn('secondary', '提交工单', 'newTicket') + btn('primary', '关闭', 'close', ' data-autofocus') + '</div></div>';
     } else if (D.type === 'switchCode') {
-      // 换授权码（01 §3.1「试用换成买的」）：还是这台电脑，不用重装。试用电脑填单独软件的码转正、全套的码换成全套，试用码作废；
-      // 单独软件电脑是「填全套码升级」：只收全套码，换成全套，原来的单独软件码不作废
-      var up = !S.trial;
-      h = '<div class="hx-dialog' + k + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">' + (up ? '填全套码升级' : '换授权码') + '</h3>' +
-        '<p>' + (up ? '填你买到的全套授权码（这里只收全套码），这台电脑换成全套。不用重装、不用重新激活；线路开通前照常用你自己的出口，原来的单独软件码不作废。'
-          : '填你买到的授权码（单独软件或全套）。还是这台电脑，不用重装、不用重新激活，自己的出口和设置都留着；原来的试用码作废。') + '</p>' +
-        '<label class="hx-field"><span class="hx-label">授权码</span><input class="hx-input hx-num" data-keep="switch-code" id="f-switchcode" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false"' + (D.busy ? ' disabled' : '') + ' data-autofocus>' +
-        (D.err ? '<span class="hx-help is-error" style="display:flex;gap:4px">' + I('warning', 16) + esc(D.err) + '</span>' : '<span class="hx-help">' + (up ? '换成后线路开通会自动连上' : '换成全套的，线路开通后自动连上') + '，Claude 账号照全套发到「我的账号」</span>') + '</label>' +
-        '<div class="acts">' + (D.busy ? busy('switchCode') : btn('text', '还没买？去购买', up ? 'upgrade' : 'buySoft') + btn('secondary', '取消', 'close') + btn('primary', '换上', 'switchCodeGo')) + '</div></div>';
+      // 续费 / 换授权码：在这台电脑上填一个新的授权码，新码的天数加在原到期日后面。
+      h = '<div class="hx-dialog' + k + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">续费</h3>' +
+        '<p>在售后 QQ 群下单拿到新的授权码，填在下面。新授权码的天数会加在原来的到期日后面；还是这台电脑，不用重装。</p>' +
+        '<label class="hx-field"><span class="hx-label">新的授权码</span><input class="hx-input hx-num" data-keep="switch-code" id="f-switchcode" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false"' + (D.busy ? ' disabled' : '') + ' data-autofocus>' +
+        (D.err ? '<span class="hx-help is-error" style="display:flex;gap:4px">' + I('warning', 16) + esc(D.err) + '</span>' : '<span class="hx-help">一个授权码只能用一次</span>') + '</label>' +
+        '<div class="acts">' + (D.busy ? busy('switchCode') : btn('secondary', '取消', 'close') + btn('primary', '续费', 'switchCodeGo')) + '</div></div>';
     } else if (D.type === 'renew') {
       var rb = !!S.busy.renew;
       h = '<div class="hx-dialog wide' + k + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">已经线下付了钱？</h3><p>付过钱的在这里提交续费申请，客服核对后开通。还没付的' + btn('text', '在网页上续费', 'renewWeb', ' style="padding:0 2px;min-height:0;height:auto"') + '，付完自动顺延，不用提交申请。</p>' +

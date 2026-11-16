@@ -121,7 +121,8 @@ class Site:
     def info(self):
         manifest = self.gateway.management.update_manifest() or {}
         help_content = self.gateway.management.rpc({'type': 'help'})
-        return {'product': 'Leyra', 'version': manifest.get('version'), 'size': manifest.get('size'), 'published_at': manifest.get('published_at'),
+        group = next((c for c in help_content.get('channels', []) if c.get('kind') == 'qqgroup'), {})
+        return {'product': 'Leyra', 'price': help_content.get('price', ''), 'qq_group': group.get('value', ''), 'qq_group_name': group.get('label', ''), 'version': manifest.get('version'), 'size': manifest.get('size'), 'published_at': manifest.get('published_at'),
                 'notes': manifest.get('notes', ''), 'download': '/download/windows' if manifest.get('version') else None,
                 'faq': help_content.get('faq', []), 'guides': [g for g in help_content.get('guides', []) if str(g.get('url', '')).startswith('https://')]}
 

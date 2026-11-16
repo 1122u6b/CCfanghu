@@ -19,9 +19,14 @@ sealed partial class Runtime
  {
   if(profile is null)return new{activated=false};
   var account=await Remote(new{type="account"},stop);var ai=await Remote(new{type="ai_accounts"},stop);var messages=await Remote(new{type="messages"},stop);var exits=await Remote(new{type="exits"},stop);
+  var help=await Remote(new{type="help"},stop);
+  var channels=help.TryGetProperty("channels",out var ch)&&ch.ValueKind==JsonValueKind.Array?ch.Clone():JsonSerializer.SerializeToElement(Array.Empty<object>());
+  // Code-activated computers expire; computers set up by the owner with a connection file do not.
+  long? expires=account.TryGetProperty("expires_at",out var ex)&&ex.ValueKind==JsonValueKind.Number&&ex.GetInt64()<253402300799L?ex.GetInt64():null; // bought-out codes never expire
+  var daysLeft=expires is long e?(int?)Math.Max(0,(int)Math.Ceiling((e-DateTimeOffset.UtcNow.ToUnixTimeSeconds())/86400.0)):null;
   var aiversion=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(ai.GetRawText())))[..16];
   var exitItems=exits.GetProperty("items").EnumerateArray().Select(x=>new{id=x.GetProperty("id").GetInt32(),name=Text(x,"name"),own=true,sub=false,lines=1,region=""}).ToArray();
-  return new{activated=true,account_id=account.GetProperty("id").GetInt32(),contact=Text(account,"contact"),plan="自有服务器",device=Environment.MachineName+" · Windows",bound_at=account.GetProperty("created_at").GetInt64(),software_expires_at=253402300799L,node_expires_at=253402300799L,own_exit="connected",suite=new{kind="soft"},exits=exitItems,exits_mode="soft",current_exit=exits.GetProperty("selected").ValueKind==JsonValueKind.Null?(int?)null:exits.GetProperty("selected").GetInt32(),can_add_exit=true,channels=Array.Empty<object>(),announcements=Array.Empty<object>(),messages_unread=messages.GetProperty("unread").GetInt32(),messages_latest=messages.GetProperty("items").GetArrayLength()==0?0:messages.GetProperty("items")[0].GetProperty("id").GetInt32(),ai_accounts=ai.GetProperty("items").GetArrayLength()>0,ai_version=aiversion};
+  return new{activated=true,account_id=account.GetProperty("id").GetInt32(),contact=Text(account,"contact"),plan="自有服务器",device=Environment.MachineName+" · Windows",bound_at=account.GetProperty("created_at").GetInt64(),software_expires_at=expires??253402300799L,node_expires_at=expires??253402300799L,days_left=daysLeft,own_exit=expires is null?"connected":"",suite=new{kind=expires is null?"soft":"old"},exits=exitItems,exits_mode="soft",current_exit=exits.GetProperty("selected").ValueKind==JsonValueKind.Null?(int?)null:exits.GetProperty("selected").GetInt32(),can_add_exit=true,channels,announcements=Array.Empty<object>(),messages_unread=messages.GetProperty("unread").GetInt32(),messages_latest=messages.GetProperty("items").GetArrayLength()==0?0:messages.GetProperty("items")[0].GetProperty("id").GetInt32(),ai_accounts=ai.GetProperty("items").GetArrayLength()>0,ai_version=aiversion};
  }
  async Task<object> Doctor(bool deep,CancellationToken stop)
  {

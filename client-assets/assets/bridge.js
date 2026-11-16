@@ -818,7 +818,7 @@
     if (S.renew.phase !== phase && !S.renew.busy) S.renew = { phase: phase, at: '', items: S.renew.items || [], sel: null, busy: false };
     P.CHANNELS.length = 0;
     // [显示名（带备注）, 号码, 类型, 名称, 备注]：类型是 QQ 群号的第一条另外显示在「消息 → 公告」顶上。
-    (a.channels || []).filter(function (c) { return c.kind !== 'qqgroup'; }).forEach(function (c) { P.CHANNELS.push([esc(c.label + (c.note ? '（' + c.note + '）' : '')), esc(c.value), c.kind, esc(c.label), esc(c.note || '')]); });
+    (a.channels || []).forEach(function (c) { P.CHANNELS.push([esc(c.label + (c.note ? '（' + c.note + '）' : '')), esc(c.value), c.kind, esc(c.label), esc(c.note || '')]); });
     bannerNow = (a.announcements || []).filter(function (n) { return dismissedBanner.indexOf(n.id) < 0; })[0] || null;
     notifyNotices(a.announcements || []);
     if (S.alerts.expire1d) notifyOnce('expire.' + end, suiteWord() + '明天到期', '点「续费」在网页上付款，付完自动顺延');
@@ -872,6 +872,7 @@
 
   // 没拿到账户信息（刚打开、守护程序刚连上、上一次出错）时每 3 秒再要一次，拿到为止（平时 30 秒一次）；拿不到时界面留着上一次的。
   var accountFails = 0, accountLoading = 0;
+  window.CC_RELOAD_ACCOUNT = function () { return loadAccount(); };
   function loadAccount() {
     accountLoading++;
     return call({ type: 'account' }).then(function (r) { accountFails = 0; applyAccount(r); if (!busy()) P.render(); })

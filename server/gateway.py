@@ -179,11 +179,14 @@ class Gateway:
         if method=='GET' and path.split('?')[0] in ('/api/admin','/api/admin/','/admin','/admin/'):return await self.admin_page(w)
         if method=='GET' and path=='/api/v1/admin-login':return await self.response(w,200,{'password_set':self.management.admin_password_set()})
         if method=='POST' and path=='/api/v1/admin-login':return await self.admin_login(r,w,h,client_ip)
+        if method=='POST' and path=='/api/v1/activate':return await self.activate(r,w,h,client_ip)
         authorization=h.get('authorization','')
         token=authorization[7:] if authorization.startswith('Bearer ') else ''
         is_admin=hmac.compare_digest(authorization.encode(),('Bearer '+self.config['api_token']).encode()) or (token.startswith('adm_') and self.management.admin_session_valid(token))
         device=None if is_admin else self.devices.authenticate(token)
-        if not is_admin and device is None:return await self.response(w,401,{'error':'unauthorized'})
+        if not is_admin and device is None:
+            if self.devices.expired_token(token):return await self.response(w,403,{'error':'expired','detail':'授权已到期'})
+            return await self.response(w,401,{'error':'unauthorized'})
         if method=='GET' and path=='/api/v1/status':return await self.response(w,200,{'version':'0.6.0','active_connections':max(0,self.active-1) if is_admin else self.device_active.get(device.id,0),'uptime_seconds':int(time.time()-self.started),'scope':'server' if is_admin else 'device','license_required':False})
         if method=='GET' and path=='/api/v1/egress-probe':
             peer=w.get_extra_info('peername')
@@ -201,6 +204,12 @@ class Gateway:
                 request=json.loads(await asyncio.wait_for(r.readexactly(n),60))
                 if is_admin and isinstance(request,dict) and request.get('type') in ('create_device_profile','rotate_device_profile'):
                     return await self.response(w,200,self.device_profile(request))
+                if is_admin and isinstance(request,dict) and request.get('type') in ('licenses','license_create','license_revoke','license_unbind'):
+                    L=self.devices.licenses;t=request['type']
+                    if t=='licenses':return await self.response(w,200,L.list())
+                    if t=='license_create':return await self.response(w,200,L.create(request.get('count'),request.get('days'),request.get('note','')))
+                    if t=='license_revoke':return await self.response(w,200,L.revoke(request.get('code'),self.devices))
+                    return await self.response(w,200,L.unbind(request.get('code'),self.devices))
                 if is_admin and isinstance(request,dict) and request.get('type')=='customers':
                     return await self.response(w,200,self.site.customers.admin_list())
                 if is_admin and isinstance(request,dict) and request.get('type')=='customer_update':
@@ -234,6 +243,24 @@ class Gateway:
     def device_profile(self,request):
         issued=self.devices.issue(request.get('name')) if request['type']=='create_device_profile' else self.devices.rotate(request.get('id'))
         return {'id':issued['id'],'profile':self.profile_for(issued)}
+    async def activate(self,r,w,h,client_ip):
+        """Public: a customer's computer redeems an authorization code for its own device credentials."""
+        import time as _t
+        peer=w.get_extra_info('peername');ip=client_ip or (peer[0] if peer else 'unknown')
+        if ip in ('127.0.0.1','::1'):ip=h.get('x-forwarded-for','').split(',')[0].strip() or ip
+        now=_t.monotonic();tries=self.__dict__.setdefault('_activate_attempts',{})
+        recent=[t for t in tries.get(ip,[]) if now-t<900]
+        if len(recent)>=15:return await self.response(w,429,{'error':'尝试次数太多，请 15 分钟后再试','detail':'尝试次数太多，请 15 分钟后再试'})
+        recent.append(now);tries[ip]=recent
+        if len(tries)>5000:tries.clear()
+        n=int(h.get('content-length','0'))
+        if not 0<n<=4096:return await self.response(w,400,{'error':'请求无效'})
+        body=json.loads(await asyncio.wait_for(r.readexactly(n),10))
+        if not isinstance(body,dict):return await self.response(w,400,{'error':'请求无效'})
+        from licenses import LicenseError
+        try:issued=self.devices.licenses.activate(body.get('code'),body.get('machine'),body.get('contact'),body.get('order_no'),self.devices,str(body.get('label') or 'Windows')[:60])
+        except LicenseError as e:return await self.response(w,400,{'error':str(e),'detail':str(e)})
+        return await self.response(w,200,{'profile':self.profile_for(issued)})
     async def admin_login(self,r,w,h,client_ip):
         import time as _t
         peer=w.get_extra_info('peername');ip=client_ip or (peer[0] if peer else 'unknown')

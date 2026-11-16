@@ -54,7 +54,7 @@ sealed partial class Runtime:IDisposable
    catch(Exception e)
    {
     lastError=e.Message;configured=false;dnsVerified=false;exitVerified=false;kernel.Stop();
-    try{ApplyGuard(0);state="blocked";reason=e is HttpRequestException h&&h.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden?"device_unbound":"all_lines_down";}
+    try{ApplyGuard(0);state="blocked";reason=e is HttpRequestException h?h.StatusCode switch{HttpStatusCode.Forbidden=>"software_expired",HttpStatusCode.Unauthorized=>"device_unbound",_=>"all_lines_down"}:"all_lines_down";}
     catch{state="unprotected";reason="guard_failed";}
     retryAt=DateTimeOffset.UtcNow.AddSeconds(Math.Min(60,5*Math.Pow(2,Math.Min(failures++,4))));
     Record("blocked",reason);
@@ -179,13 +179,15 @@ sealed partial class Runtime:IDisposable
    switch(type)
    {
     case "pair":
-     NeedOwner(request);var imported=ServerProfile.Parse(JsonSerializer.SerializeToUtf8Bytes(request.GetProperty("profile")));
-     using(var setup=new PrivateServerClient(imported))
-     {
-      var paired=await setup.EnrollAsync(Guid.NewGuid(),Environment.MachineName,stop);
-      store.SetProfile(paired.Profile);profile=paired.Profile;cloud?.Dispose();cloud=new PrivateServerClient(profile);nodes=paired.Nodes;
-     }
-     store.Settings.Enabled=true;store.Settings.PausedUntil=0;store.Settings.QuitPause=false;store.Save();configured=false;kernel.Stop();return new{saved=true};
+     NeedOwner(request);await PairWith(ServerProfile.Parse(JsonSerializer.SerializeToUtf8Bytes(request.GetProperty("profile"))),stop);return new{saved=true};
+    case "activate":case "restore":
+     // One authorization code = one computer: the server binds the code to this hardware ID.
+     var issued=await RedeemCode(new{code=Text(request,"code"),machine=MachineId.Get(),contact=Text(request,"contact"),order_no=Text(request,"order_no"),label=Environment.MachineName},stop);
+     await PairWith(issued,stop);Record("protected");return new{saved=true};
+    case "switch_code":
+     var renewed=await Remote(new{type="license_renew",code=Text(request,"code"),machine=MachineId.Get()},stop);
+     retryAt=DateTimeOffset.MinValue;configured=false;state="starting";return new{saved=true,suite=false,expires_at=renewed.GetProperty("expires_at").GetInt64()};
+    case "access_code":throw new InvalidOperationException("暂不支持接入码，请在售后群联系客服");
     case "consent":store.Settings.ConsentVersion=request.GetProperty("version").GetInt32();store.Save();return new{saved=true};
     case "proxy_off":return proxy.Disable();
     case "proxy_undo":return proxy.Undo();
@@ -237,6 +239,36 @@ sealed partial class Runtime:IDisposable
    }
   }
   finally{Publish();gate.Release();}
+ }
+ async Task PairWith(ServerProfile imported,CancellationToken stop)
+ {
+  using(var setup=new PrivateServerClient(imported))
+  {
+   var paired=await setup.EnrollAsync(Guid.NewGuid(),Environment.MachineName,stop);
+   store.SetProfile(paired.Profile);profile=paired.Profile;cloud?.Dispose();cloud=new PrivateServerClient(profile);nodes=paired.Nodes;
+  }
+  store.Settings.Enabled=true;store.Settings.PausedUntil=0;store.Settings.QuitPause=false;store.Save();configured=false;kernel.Stop();retryAt=DateTimeOffset.MinValue;
+ }
+ const string ActivationUrl="https://leyra.xin/api/v1/activate";
+ async Task<ServerProfile> RedeemCode(object body,CancellationToken stop)
+ {
+  JsonElement result;
+  if(profile is not null)
+  {
+   // Already paired once (renewal after unbinding, reinstall): the protection rules only let this
+   // service reach its own pinned server, so ask that server directly.
+   using var pinned=new PrivateServerClient(profile);result=await pinned.SendAsync("/api/v1/activate",body,stop);
+  }
+  else
+  {
+   using var http=new HttpClient(new HttpClientHandler{AllowAutoRedirect=false}){Timeout=TimeSpan.FromSeconds(20)};
+   using var response=await http.PostAsync(ActivationUrl,new StringContent(JsonSerializer.Serialize(body),System.Text.Encoding.UTF8,"application/json"),stop);
+   var bytes=await response.Content.ReadAsByteArrayAsync(stop);if(bytes.Length>2*1024*1024)throw new InvalidDataException("服务器响应过大");
+   using var doc=JsonDocument.Parse(bytes);
+   if(!response.IsSuccessStatusCode)throw new InvalidOperationException(doc.RootElement.TryGetProperty("detail",out var d)&&d.ValueKind==JsonValueKind.String&&d.GetString()!.Length<=200?d.GetString():"激活失败，请稍后再试");
+   result=doc.RootElement.Clone();
+  }
+  return ServerProfile.Parse(JsonSerializer.SerializeToUtf8Bytes(result.GetProperty("profile")));
  }
  void ReadRules(JsonElement result)
  {

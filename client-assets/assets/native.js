@@ -18,7 +18,7 @@
     delete pending[data.id]; clearTimeout(item.timer);
     if (data.ok === true) item.resolve(data.value); else item.reject(new Error(data.error || '本机操作失败'));
   });
-  window.LEYRA_FEATURES = Object.freeze({ licenseCodes: false, supportGroup: false });
+  window.LEYRA_FEATURES = Object.freeze({ licenseCodes: true, supportGroup: true });
   window.__TAURI__ = { core: { invoke: invoke }, app: { getVersion: function () { return invoke('app_version'); } } };
   document.documentElement.classList.add('app');
 })();

@@ -258,7 +258,12 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
                 offset=int(req.get('offset',0));data=r[0]
                 if not 0<=offset<=len(data):raise ManagementError('invalid offset')
                 part=data[offset:offset+65536];return {'data':base64.b64encode(part).decode(),'offset':offset,'total':len(data),'mime':'image/png' if data.startswith(b'\x89PNG') else 'image/jpeg'}
-            if kind=='help':return self.get(db,'help')
+            if kind=='help':
+                value=self.get(db,'help') or {}
+                # Support channel and price shown in the client and on the website until the owner changes them.
+                value.setdefault('channels',[{'kind':'qqgroup','label':'Leyra 技术交流群','value':'1136427075','note':'24小时'}])
+                value.setdefault('price','300 元买断，永久使用')
+                return value
             if kind=='admin_help':
                 value=req.get('content')
                 if not isinstance(value,dict) or len(json.dumps(value))>64000:raise ManagementError('invalid help content')

@@ -46,7 +46,7 @@ jobs:
             rm -f "$key_file" "$RUNNER_TEMP/leyra-source.tar.gz"
           }
           trap cleanup EXIT
-          tar -czf "$RUNNER_TEMP/leyra-source.tar.gz" server/gateway.py server/management.py server/devices.py server/dns_probe.py server/ai_login.py server/verify_live.py server/admin.py server/links.py server/upstream_kernel.py server/admin.html server/website.py server/customers.py server/site/index.html server/site/favicon.svg scripts/prepare_kernel.py deploy/install_existing_server.py deploy/perform_server_deployment.py
+          tar -czf "$RUNNER_TEMP/leyra-source.tar.gz" server/gateway.py server/management.py server/devices.py server/dns_probe.py server/ai_login.py server/verify_live.py server/admin.py server/links.py server/upstream_kernel.py server/admin.html server/website.py server/customers.py server/licenses.py server/site/index.html server/site/favicon.svg scripts/prepare_kernel.py deploy/install_existing_server.py deploy/perform_server_deployment.py
           ssh "${ssh_options[@]}" ubuntu@43.129.187.240 "umask 077; mkdir -- '$remote_stage' && tar --no-same-owner -xzf - -C '$remote_stage'" < "$RUNNER_TEMP/leyra-source.tar.gz"
           ssh "${ssh_options[@]}" ubuntu@43.129.187.240 "sudo -n python3 '$remote_stage/deploy/perform_server_deployment.py'"
 

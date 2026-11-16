@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS probes(nonce TEXT PRIMARY KEY,device_id TEXT NOT NULL
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,target TEXT NOT NULL,at INTEGER NOT NULL);
 ''')
         os.chmod(self.path, 0o600)
+        from licenses import Licenses
+        self.licenses = Licenses(root)
 
     @contextmanager
     def db(self):
@@ -87,9 +89,20 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,tar
         # Also perform a digest comparison when no device exists.
         expected = row['secret_hash'] if row else '0' * 64
         valid = hmac.compare_digest(expected, self.hash(secret))
-        if not valid or not row or not row['enabled']:
+        if not valid or not row or not row['enabled'] or self.licenses.expired(identity):
             return None
         return Device(identity, secret, Management(self.root / identity))
+
+    def expired_token(self, token):
+        """True when the credentials are right but the authorization code has run out."""
+        if not isinstance(token, str) or token.count('.') != 1:
+            return False
+        identity, secret = token.split('.', 1)
+        if re.fullmatch(r'[a-f0-9]{32}', identity) is None:
+            return False
+        with self.db() as db:
+            row = db.execute('SELECT secret_hash FROM devices WHERE id=?', (identity,)).fetchone()
+        return bool(row) and hmac.compare_digest(row['secret_hash'], self.hash(secret)) and self.licenses.expired(identity)
 
     def allowed(self, identity):
         self.identity(identity)
@@ -100,7 +113,7 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,tar
     def current(self, device):
         with self.db() as db:
             row = db.execute('SELECT secret_hash,enabled FROM devices WHERE id=?', (device.id,)).fetchone()
-        return bool(row and row['enabled'] and hmac.compare_digest(row['secret_hash'], self.hash(device.secret)))
+        return bool(row and row['enabled'] and hmac.compare_digest(row['secret_hash'], self.hash(device.secret))) and not self.licenses.expired(device.id)
 
     def list(self):
         with self.db() as db:
@@ -166,9 +179,15 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,tar
                    'ticket_reply','ticket_rate','upload_chunk','ticket_image','help','exits','store_exit',
                    'select_exit','delete_exit','direct_rules','ai_accounts','ai_secrets','ai_report',
                    'add_direct_rule','remove_direct_rule','set_direct_note','dns_config','dns_probe_begin','dns_probe_result','ai_login_begin','ai_login_poll','ai_login_cancel',
-                   'update_exit','update_manifest','update_chunk','import_exit_links'}
+                   'update_exit','update_manifest','update_chunk','import_exit_links','license_renew'}
         if kind not in allowed:
             raise ManagementError('device is not allowed to perform this command')
+        if kind == 'license_renew':
+            return self.licenses.renew(req.get('code'), device, req.get('machine'))
+        if kind == 'account':
+            result = device.management.rpc(req)
+            result['expires_at'] = self.licenses.expires_at(device.id)
+            return result
         # Help and signed-off releases are published once by the owner and shared read-only.
         if kind in ('help', 'update_manifest', 'update_chunk'):
             return owner.rpc({k: v for k, v in req.items() if k in ('type', 'version', 'offset')})

@@ -74,7 +74,7 @@ function showLogin() {
 function logout() { TOKEN = null; try { sessionStorage.removeItem('leyra.admin'); localStorage.removeItem('leyra.admin'); } catch (e) {} showLogin(); }
 function download(name, obj) { var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' })); a.download = name; a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000); }
 
-var VIEWS = [['home', '概览'], ['customers', '客户账号'], ['devices', '设备'], ['tickets', '工单'], ['messages', '消息'], ['help', '帮助页'], ['updates', '客户端更新'], ['security', '安全']];
+var VIEWS = [['home', '概览'], ['licenses', '授权码'], ['customers', '客户账号'], ['devices', '设备'], ['tickets', '工单'], ['messages', '消息'], ['help', '帮助页'], ['updates', '客户端更新'], ['security', '安全']];
 function nav() { $('nav').innerHTML = VIEWS.map(function (v) { return '<button class="' + (v[0] === VIEW ? 'on' : '') + '" onclick="go(\'' + v[0] + '\')">' + v[1] + '</button>'; }).join(''); }
 function go(v) { VIEW = v; nav(); $('main').innerHTML = '<p class="muted">正在加载…</p>'; (R[v] || R.home)().catch(function (e) { $('main').innerHTML = '<div class="card">' + esc(e.message) + '</div>'; }); }
 function start() {
@@ -98,9 +98,37 @@ R.home = function () {
       '<div class="stat"><span class="muted">当前连接</span><b>' + s.active_connections + '</b></div>' +
       '<div class="stat"><span class="muted">服务已运行</span><b>' + Math.floor(s.uptime_seconds / 3600) + ' 小时</b></div>' +
       '<div class="stat"><span class="muted">已发布客户端</span><b>' + esc(x[3].version || '无') + '</b></div></div></div>' +
-      '<div class="card"><h2>怎么给客户开通</h2><ol><li>让客户打开 <b>https://leyra.xin</b> 注册账号。</li><li>在「客户账号」里找到他，点「开通」。</li><li>客户登录网站「我的账号」，自己下载软件和连接文件，装好导入就能用。</li></ol><p class="muted">也可以不让客户注册：在「设备」里直接创建连接文件发给客户。</p></div>';
+      '<div class="card"><h2>怎么给客户开通</h2><ol><li>客户在售后 QQ 群下单付款（300 元买断）。</li><li>在「授权码」里生成一个授权码，复制发给客户。</li><li>客户在 <b>https://leyra.xin</b> 下载 Leyra，装好后填授权码点「激活」，就能用了。</li></ol><p class="muted">一个授权码只能用于一台电脑。客户换电脑时，在「授权码」里点「解绑」，他就能在新电脑上激活。</p></div>';
   });
 };
+R.licenses = function () {
+  return rpc({ type: 'licenses' }).then(function (r) {
+    var items = r.items, unused = items.filter(function (x) { return x.status === 'unused'; }).length;
+    var st = function (x) {
+      if (x.status === 'revoked') return '<span class="tag x">已作废</span>';
+      if (x.status === 'unused') return '<span class="tag">未使用</span>';
+      if (x.expires_at && x.expires_at < 253402300799 && x.expires_at * 1000 < Date.now()) return '<span class="tag x">已到期</span>';
+      return x.bound ? '<span class="tag ok">已激活</span>' : '<span class="tag w">已解绑，可换电脑</span>';
+    };
+    var term = function (x) { return x.days === 0 ? '永久' : x.days + ' 天'; };
+    $('main').innerHTML = '<div class="card"><h2>生成授权码</h2><p class="muted">客户在售后群下单后，复制一个「未使用」的授权码发给他。客户在 Leyra 里填授权码就能激活。<b>一个授权码只能用于一台电脑。</b></p>' +
+      '<div class="row"><input id="lc" type="number" min="1" max="200" value="1" style="max-width:120px" title="数量"><select id="ld" style="max-width:180px"><option value="0">永久（买断）</option><option value="30">30 天</option><option value="90">90 天</option><option value="365">365 天</option></select><input id="ln" placeholder="备注（可选，比如客户名字、订单号）"><button class="b p" onclick="newCodes()">生成</button></div><div id="newcodes"></div></div>' +
+      '<div class="card"><h2>全部授权码（' + items.length + '，未使用 ' + unused + '）</h2>' + (items.length ? '<table><tr><th>授权码</th><th>期限</th><th>状态</th><th>客户联系方式 / 订单号</th><th>激活时间</th><th>备注</th><th></th></tr>' + items.map(function (x) {
+        return '<tr><td><code>' + esc(x.code) + '</code> <button class="b" onclick="copyText(\'' + esc(x.code) + '\')">复制</button></td><td>' + term(x) + '</td><td>' + st(x) + '</td><td>' + esc(x.contact || '-') + (x.order_no ? '<br><span class="muted">' + esc(x.order_no) + '</span>' : '') + '</td><td>' + when(x.activated_at) + '</td><td>' + esc(x.note || '') + '</td><td>' +
+          (x.status === 'active' && x.bound ? '<button class="b" onclick="unbindCode(\'' + esc(x.code) + '\')">解绑（换电脑）</button> ' : '') +
+          (x.status !== 'revoked' ? '<button class="b d" onclick="revokeCode(\'' + esc(x.code) + '\')">作废</button>' : '') + '</td></tr>';
+      }).join('') + '</table>' : '<p class="muted">还没有授权码，在上面生成。</p>') + '</div>';
+  });
+};
+function copyText(t) { (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { toast('已复制'); }, function () { prompt('复制下面的内容', t); }); }
+function newCodes() {
+  rpc({ type: 'license_create', count: parseInt($('lc').value, 10) || 1, days: parseInt($('ld').value, 10), note: $('ln').value.trim() }).then(function (r) {
+    var text = r.codes.join('\n');
+    go('licenses'); setTimeout(function () { $('newcodes').innerHTML = '<p>新生成的授权码（' + r.codes.length + ' 个，' + (r.days === 0 ? '永久' : r.days + ' 天') + '）：</p><textarea readonly style="min-height:' + Math.min(240, 40 + r.codes.length * 22) + 'px">' + esc(text) + '</textarea><div class="row"><span></span><button class="b p" onclick="copyText(' + esc(JSON.stringify(text)) + ')">全部复制</button></div>'; }, 300);
+  }).catch(fail);
+}
+function unbindCode(c) { if (confirm('解绑后，原来那台电脑会立即停用，客户可以用这个授权码在新电脑上激活。确定吗？')) rpc({ type: 'license_unbind', code: c }).then(function () { toast('已解绑，客户可以在新电脑上激活了'); go('licenses'); }).catch(fail); }
+function revokeCode(c) { if (confirm('作废后这个授权码不能再用，已激活的电脑会立即停用。确定吗？')) rpc({ type: 'license_revoke', code: c }).then(function () { toast('已作废'); go('licenses'); }).catch(fail); }
 R.customers = function () {
   return rpc({ type: 'customers' }).then(function (r) {
     var items = r.items, pending = items.filter(function (c) { return c.status === 'pending'; }).length;
@@ -200,13 +228,15 @@ function sendMsg() {
 }
 R.help = function () {
   return rpc({ type: 'help' }).then(function (h) {
-    CACHE.help = { faq: h.faq || [], guides: h.guides || [], web_center: h.web_center || '' };
+    var ch = (h.channels || [])[0] || {};
+    CACHE.help = { faq: h.faq || [], guides: h.guides || [], web_center: h.web_center || '', qq: ch.value || '', qqname: ch.label || 'Leyra 技术交流群', price: h.price || '' };
     renderHelp();
   });
 };
 function renderHelp() {
   var h = CACHE.help;
-  $('main').innerHTML = '<div class="card"><h2>常见问题（客户端「帮助」页）</h2>' + h.faq.map(function (f, i) {
+  $('main').innerHTML = '<div class="card"><h2>售后 QQ 群和价格（软件和官网都会显示）</h2><div class="row"><input value="' + esc(h.qqname) + '" oninput="CACHE.help.qqname=this.value" placeholder="群名称"><input value="' + esc(h.qq) + '" oninput="CACHE.help.qq=this.value" placeholder="群号"></div><div class="row"><input value="' + esc(h.price) + '" oninput="CACHE.help.price=this.value" placeholder="价格，例如：300 元买断，永久使用"></div></div>' +
+    '<div class="card"><h2>常见问题（客户端「帮助」页和官网）</h2>' + h.faq.map(function (f, i) {
     return '<div class="row"><input value="' + esc(f.q) + '" oninput="CACHE.help.faq[' + i + '].q=this.value" placeholder="问题"><button class="b d" onclick="CACHE.help.faq.splice(' + i + ',1);renderHelp()">删除</button></div><textarea oninput="CACHE.help.faq[' + i + '].a=this.value" placeholder="回答">' + esc(f.a) + '</textarea>';
   }).join('') + '<button class="b" onclick="CACHE.help.faq.push({q:\'\',a:\'\'});renderHelp()">+ 添加问题</button></div>' +
     '<div class="card"><h2>使用指南（在浏览器打开的 https 链接）</h2>' + h.guides.map(function (g, i) {
@@ -219,6 +249,9 @@ function saveHelp() {
   if (bad.length) { toast('链接必须以 https:// 开头'); return; }
   var content = { faq: h.faq.filter(function (f) { return f.q.trim(); }), guides: h.guides.filter(function (g) { return g.title.trim(); }) };
   if (h.web_center) content.web_center = h.web_center;
+  if (!/^\d{5,12}$/.test(h.qq)) { toast('QQ 群号应该是 5 到 12 位数字'); return; }
+  content.channels = [{ kind: 'qqgroup', label: h.qqname || 'Leyra 技术交流群', value: h.qq, note: '24小时' }];
+  content.price = h.price || '300 元买断，永久使用';
   rpc({ type: 'admin_help', content: content }).then(function () { toast('已保存，所有客户端下次打开帮助页时生效'); }).catch(fail);
 }
 R.updates = function () {
