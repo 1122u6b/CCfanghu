@@ -3,7 +3,7 @@ Run ON THE OWNER'S SERVER as root. Keeps only infrastructure DNS settings, certi
 and upstream configuration. Business data starts in a separate fresh directory.
 Never prints credentials; exports an owner connection file with mode 0600.
 """
-import argparse,hashlib,http.client,ipaddress,json,os,secrets,shlex,shutil,signal,sqlite3,ssl,subprocess,sys,time
+import argparse,hashlib,http.client,ipaddress,json,os,secrets,shlex,shutil,signal,socket,sqlite3,ssl,subprocess,sys,time
 from pathlib import Path
 SERVICES={'leyra-server.service':'gateway.py','leyra-dns.service':'dns_probe.py'}
 def systemctl(*args):return subprocess.run(['systemctl',*args],check=True,capture_output=True,text=True).stdout.strip()
@@ -20,7 +20,7 @@ def read_service(service,entrypoint):
  config=Path(argv[argv.index('--config')+1]);working=Path(os.readlink(f'/proc/{pid}/cwd'))
  if not config.is_absolute():config=working/config
  value=json.loads(config.read_text())
- for key in ('cert','key','upstream_file'):
+ for key in ('cert','key','upstream_file','data_dir'):
   if key in value and not Path(value[key]).is_absolute():value[key]=str(working/value[key])
  return config,value
 
@@ -48,6 +48,38 @@ def check_endpoint(host,port,fingerprint,token):
   value=json.loads(data)
   if value['identity']['role']!='owner' or value.get('license_required',True):raise ValueError('Deployed gateway has wrong identity or licensing state')
  finally:conn.close()
+
+def local_gateway_host(config):
+ # Public reachability is a separate acceptance check, not a local startup check.
+ host=config.get('listen','0.0.0.0')
+ return '127.0.0.1' if host=='0.0.0.0' else '::1' if host=='::' else host
+
+def wait_endpoint(config,fingerprint,timeout=30):
+ deadline=time.monotonic()+timeout
+ while True:
+  try:
+   check_endpoint(local_gateway_host(config),int(config['port']),fingerprint,config['api_token']);return
+  except (ConnectionError,TimeoutError,socket.gaierror):
+   # systemd's active state does not imply the Python listener has bound yet.
+   remaining=deadline-time.monotonic()
+   if remaining<=0:raise
+   time.sleep(min(.5,remaining))
+
+def restore_services(overrides,changed):
+ errors=[]
+ for service in changed:
+  try:
+   path,prior=overrides[service]
+   if prior is None:path.unlink(missing_ok=True)
+   else:atomic(path,prior,0o644)
+  except Exception as error:errors.append(error)
+ try:systemctl('daemon-reload')
+ except Exception as error:errors.append(error)
+ # Always attempt both services, even if restoring one of them fails.
+ for service in reversed(list(SERVICES)):
+  try:systemctl('restart',service)
+  except Exception as error:errors.append(error)
+ if errors:raise RuntimeError('service_rollback_incomplete') from None
 
 def install(address):
  if os.geteuid()!=0:raise PermissionError('Run this installer as root on the existing server')
@@ -101,7 +133,7 @@ def install(address):
   systemctl('daemon-reload');systemctl('restart','leyra-dns.service');systemctl('restart','leyra-server.service')
   for service in SERVICES:
    if systemctl('is-active',service)!='active':raise ValueError(service+' failed to start')
-  check_endpoint(address,int(gateway['port']),fingerprint,gateway['api_token'])
+  wait_endpoint(gateway,fingerprint)
   profile={'leyra_server':{'host':address,'port':int(gateway['port']),'token':gateway['api_token'],'certificate':cert,'fingerprint':fingerprint,'role':'owner'}}
   exported=Path('/root/leyra-server-connection.json');atomic(exported,(json.dumps(profile,indent=2)+'\n').encode())
   # Credentials are backed up on this same server only, never uploaded to the repository.
@@ -109,12 +141,7 @@ def install(address):
   print('Private owner connection file: /root/leyra-server-connection.json')
   print('Public domain routing, device DoH, Windows TUN and end-to-end acceptance still require validation.')
  except BaseException:
-  for service in changed:
-   path,prior=overrides[service]
-   if prior is None:path.unlink(missing_ok=True)
-   else:atomic(path,prior,0o644)
-  systemctl('daemon-reload')
-  for service in reversed(list(SERVICES)):systemctl('restart',service)
+  restore_services(overrides,changed)
   print('Upgrade failed; previous service commands restored. New private data retained for diagnosis.',file=sys.stderr)
   raise
  finally:
@@ -125,3 +152,4 @@ if __name__=='__main__':
  except Exception as error:
   # No config values, API tokens or upstream credentials in diagnostics.
   print('Server upgrade stopped: '+type(error).__name__,file=sys.stderr);sys.exit(1)
+

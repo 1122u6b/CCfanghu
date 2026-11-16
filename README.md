@@ -14,11 +14,13 @@
 - 时区设置/恢复、服务端同步时间、服务端保存并按设备隔离的自定义直连规则（本机保留离线保护缓存）、系统代理关闭与两分钟撤销、浏览器策略设置与按原值恢复。
 - 账户、消息、工单、帮助、住宅 SOCKS5 出口接入、实际点击触发的测速；受保护状态下显示账户登录资料及邮箱辅助登录。
 - 标准安装/卸载脚本和离线候选安装器：附 .NET 与官方 Microsoft WebView2 离线运行环境；安装时同时校验运行环境哈希及 Microsoft Authenticode 签名。
-- 现有两项 Linux 服务的部署脚本：读取现有基础设施配置、创建全新业务存储、导出私有连接文件、鉴权 TLS 健康检查、失败恢复原服务命令。尚未在用户服务器运行。
+- 现有两项 Linux 服务的部署脚本：保留服务账户、读取现有基础设施配置、创建全新业务存储、导出私有连接文件、鉴权 TLS 健康检查、失败恢复原服务命令。已尝试在用户服务器运行，但最近一次部署任务失败，尚无部署成功证据。
 
 ## 验证边界与待完成项
 
 **开发候选，尚未达到用户要求的完整成品。不要用于客户交付。**
+
+仓库逐项核查及真实任务记录见 [成品缺项与验收清单](validation/product-acceptance.md)。界面迁入、接口存在及专项测试通过，均不能代表全部功能接入或完整成品验收。
 
 已在 Linux 交叉编译 Windows 桌面、后台和检查程序。已执行核心策略/IPC、设备隔离、真实 loopback TLS、官方网络内核转发及错误证书拒绝测试，以及九个界面的 DOM 检查。
 
@@ -41,6 +43,8 @@ dotnet build windows/Leyra.Windows.Agent -m:1
 
 Python 测试设置 `PYTHONPATH=server`，`LEYRA_DOTNET` 为 dotnet 路径，依赖见 `requirements-dev.txt`。`python -m unittest discover -s server/tests -v`。内核联调额外使用 `scripts/prepare_kernel.py linux artifacts/kernel-linux` 下载并校验的官方 Linux 内核；没有该组件时明确跳过该项。
 
+部署回归检查：`python -m unittest discover -s deploy/tests -v`。覆盖服务慢启动、监听地址、证书错误不重试、超时，以及某一服务回滚失败时仍尝试恢复另一服务。
+
 `scripts/build_windows_package.py` 交叉发布自包含 Windows 程序并调用 NSIS。需提供 Microsoft 官方 WebView2 离线安装器及其来源/哈希清单；脚本不会触发云任务。
 
 ## 云测试与生产部署
@@ -54,3 +58,4 @@ Python 测试设置 `PYTHONPATH=server`，`LEYRA_DOTNET` 为 dotnet 路径，依
 真实配置、令牌、密码、证书私钥、数据库和客户资料不得提交到仓库。测试只用临时虚构凭据和证书。
 
 组件来源和许可见 `THIRD-PARTY-NOTICES.txt`。Mihomo 使用官方未修改兼容版本并保留 GPL 许可证、源码地址和校验记录；不使用原程序的定制脏构建内核。
+

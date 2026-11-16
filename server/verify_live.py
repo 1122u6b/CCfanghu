@@ -31,7 +31,7 @@ def response(sock):
  return status,exact(sock,size)
 
 def api(conf,token,path,request=None):
- raw=socket.create_connection(('127.0.0.1',int(conf['port'])),8)
+ raw=socket.create_connection((local_gateway_host(conf),int(conf['port'])),8)
  with context().wrap_socket(raw,server_hostname=conf['public_host']) as sock:
   pin(sock,conf['fingerprint']);body=b'' if request is None else json.dumps(request).encode()
   method='GET' if request is None else 'POST'
@@ -62,8 +62,12 @@ class NestedTLS:
    count=self.call(lambda:self.upper.write(data));data=data[count:]
  def recv(self,size):return self.call(lambda:self.upper.read(size))
 
+def local_gateway_host(conf):
+ host=conf.get('listen','0.0.0.0')
+ return '127.0.0.1' if host=='0.0.0.0' else '::1' if host=='::' else host
+
 def observe_exit(conf,device):
- raw=socket.create_connection(('127.0.0.1',int(conf['port'])),8)
+ raw=socket.create_connection((local_gateway_host(conf),int(conf['port'])),8)
  with context().wrap_socket(raw,server_hostname=conf['public_host']) as lower:
   pin(lower,conf['fingerprint']);lower.sendall(b'\x05\x01\x02')
   if exact(lower,2)!=b'\x05\x02':raise ValueError('socks_authentication_required')
@@ -144,3 +148,4 @@ if __name__=='__main__':
  parser=argparse.ArgumentParser();parser.add_argument('--config',required=True);args=parser.parse_args()
  try:main(args.config)
  except Exception as error:print('LEYRA_LIVE_FATAL='+type(error).__name__,flush=True);raise SystemExit(1)
+

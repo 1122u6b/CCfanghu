@@ -20,7 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Compile deployment source before sending it
-        run: python3 -m compileall -q server deploy
+        run: |
+          python3 -m compileall -q server deploy
+          python3 -m unittest discover -s deploy/tests -v
       - name: Apply only the LEYRA gateway and DNS release, then verify locally
         env:
           LEYRA_SSH_KEY: ${{ secrets.LEYRA_SSH_KEY }}
@@ -47,3 +49,4 @@ jobs:
           tar -czf "$RUNNER_TEMP/leyra-source.tar.gz" server/gateway.py server/management.py server/devices.py server/dns_probe.py server/ai_login.py server/verify_live.py deploy/install_existing_server.py deploy/perform_server_deployment.py
           ssh "${ssh_options[@]}" ubuntu@43.129.187.240 "umask 077; mkdir -- '$remote_stage' && tar --no-same-owner -xzf - -C '$remote_stage'" < "$RUNNER_TEMP/leyra-source.tar.gz"
           ssh "${ssh_options[@]}" ubuntu@43.129.187.240 "sudo -n python3 '$remote_stage/deploy/perform_server_deployment.py'"
+
