@@ -3,57 +3,122 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Leyra · 你的专属网络通道</title>
-<meta name="description" content="Leyra：独享线路、断线自动保护真实 IP 的 Windows 桌面客户端。">
+<title>Leyra · 独享线路，真实 IP 不外泄</title>
+<meta name="description" content="Leyra：独享加密线路 + 全时防护的 Windows 客户端，线路一断就先断网，真实 IP 不外泄。">
+<meta name="theme-color" content="#121110">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
-:root{--bg:#f7f8f6;--card:#ffffff;--text:#16201c;--muted:#5f6b66;--line:#e2e7e4;--accent:#0f7b5f;--accent-2:#e8f4ef;--danger:#b4342b;--warn:#9a6200;--shadow:0 1px 2px rgba(20,40,30,.06),0 8px 24px rgba(20,40,30,.06)}
-@media (prefers-color-scheme:dark){:root{--bg:#0f1412;--card:#161d1a;--text:#e6ece9;--muted:#9aa8a2;--line:#26302c;--accent:#3cc497;--accent-2:#16302a;--danger:#ff7a6e;--warn:#e8b14d;--shadow:none}}
+:root{
+ --bg:#121110;--glass:rgba(255,255,255,.045);--glass2:rgba(255,255,255,.075);--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.15);
+ --text:#f4efea;--muted:#a59c94;--dim:#776f68;--acc:#f0875a;--acc2:#e9673a;--grad:linear-gradient(100deg,#ffa26f 0%,#ec6d3e 100%);
+ --soft:rgba(240,135,90,.12);--ring:rgba(240,135,90,.35);--ok:#4fd18b;--warn:#f2b84b;--danger:#ff6f61;--radius:18px;--shadow:0 22px 60px rgba(0,0,0,.5);
+}
 *{box-sizing:border-box}html{scroll-behavior:smooth}
-body{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
-a{color:var(--accent)}
-.wrap{max-width:1040px;margin:0 auto;padding:0 20px}
-header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
-header .wrap{display:flex;align-items:center;gap:20px;height:60px}
-.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;color:var(--text);text-decoration:none;letter-spacing:.3px}
-nav{display:flex;gap:2px;flex:1;overflow-x:auto}nav a{color:var(--muted);text-decoration:none;padding:6px 12px;border-radius:8px;white-space:nowrap}nav a.on,nav a:hover{color:var(--text);background:var(--accent-2)}
-.btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--card);color:var(--text);padding:9px 18px;border-radius:10px;font:inherit;font-weight:600;cursor:pointer;text-decoration:none}
-.btn.p{background:var(--accent);border-color:var(--accent);color:#fff}.btn.big{padding:14px 26px;font-size:17px}.btn:disabled{opacity:.5;cursor:default}
-.hero{padding:72px 0 48px;display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center}
-.hero h1{font-size:44px;line-height:1.2;margin:0 0 16px;letter-spacing:-.5px}.hero h1 em{font-style:normal;color:var(--accent)}
-.hero p.lead{font-size:17px;color:var(--muted);margin:0 0 28px;max-width:34em}
-.sub{color:var(--muted);font-size:13px;margin-top:12px}
-.panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:var(--shadow)}
-.status{display:flex;align-items:center;gap:10px;font-weight:600}.dot{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 6px var(--accent-2)}
-.flow{display:flex;align-items:center;justify-content:space-between;margin:26px 0;gap:8px}.node{text-align:center;font-size:13px;color:var(--muted)}.node b{display:block;width:56px;height:56px;margin:0 auto 6px;border-radius:14px;background:var(--accent-2);display:grid;place-items:center;color:var(--accent);font-size:22px}
-.line{flex:1;height:2px;background:repeating-linear-gradient(90deg,var(--accent) 0 8px,transparent 8px 14px);opacity:.6}
-.checks{list-style:none;margin:0;padding:0}.checks li{display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line);font-size:14px}.checks li span{color:var(--accent);font-weight:600}
-section{padding:48px 0}h2{font-size:28px;margin:0 0 8px}.lead2{color:var(--muted);margin:0 0 28px}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}.card h3{margin:6px 0 6px;font-size:17px}.card p{margin:0;color:var(--muted);font-size:14px}
-.ico{width:36px;height:36px;border-radius:10px;background:var(--accent-2);color:var(--accent);display:grid;place-items:center;font-weight:700}
-.steps{counter-reset:s;display:grid;gap:14px}.step{display:grid;grid-template-columns:44px 1fr;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
-.step::before{counter-increment:s;content:counter(s);width:36px;height:36px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:700}
-.step h3{margin:4px 0 4px;font-size:16px}.step p{margin:0;color:var(--muted);font-size:14px}
-details{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:10px}summary{cursor:pointer;font-weight:600}details p{color:var(--muted);margin:10px 0 0;white-space:pre-wrap}
-.form{max-width:420px;margin:56px auto}.form h2{margin-bottom:18px}label{display:block;font-size:13px;color:var(--muted);margin:14px 0 6px}
-input{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:11px 12px}input:focus{outline:2px solid var(--accent);border-color:transparent}
-.err{color:var(--danger);font-size:14px;min-height:22px;margin-top:10px}.ok{color:var(--accent)}
-.tag{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600}.tag.wait{background:#fff3dc;color:var(--warn)}.tag.on{background:var(--accent-2);color:var(--accent)}.tag.off{background:#fde6e4;color:var(--danger)}
-table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:10px 6px;border-bottom:1px solid var(--line);font-size:14px}th{color:var(--muted);font-weight:500}
-footer{border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:13px;margin-top:40px}
-#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 18px;border-radius:10px;display:none;z-index:9;max-width:90vw}
-@media (max-width:820px){nav a{font-size:14px}.logo span{display:none}.hero{grid-template-columns:1fr;padding-top:40px}.hero h1{font-size:34px}.grid{grid-template-columns:1fr}nav a{padding:6px 8px}header .wrap{gap:10px}.hide-sm{display:none}}
+body{margin:0;min-height:100vh;color:var(--text);background:var(--bg);font:15px/1.75 "Inter",system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+body::before{content:"";position:fixed;inset:0;z-index:-2;background:
+ radial-gradient(900px 520px at 80% -10%,rgba(236,109,62,.16),transparent 60%),
+ radial-gradient(700px 480px at 5% 15%,rgba(255,162,111,.08),transparent 60%),
+ radial-gradient(900px 600px at 50% 115%,rgba(236,109,62,.08),transparent 60%),var(--bg)}
+body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.32;
+ background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);background-size:56px 56px;
+ -webkit-mask-image:radial-gradient(ellipse at 50% 20%,#000 30%,transparent 75%);mask-image:radial-gradient(ellipse at 50% 20%,#000 30%,transparent 75%)}
+a{color:var(--acc);text-decoration:none}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+header{position:sticky;top:0;z-index:20;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);background:rgba(18,17,16,.65);border-bottom:1px solid var(--line)}
+header .wrap{display:flex;align-items:center;height:68px;gap:16px}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:19px;color:var(--text);letter-spacing:.2px}
+.logo svg{filter:drop-shadow(0 0 12px rgba(236,109,62,.45))}
+nav{display:flex;gap:4px;margin:0 auto;padding:4px;border:1px solid var(--line);border-radius:999px;background:var(--glass)}
+nav a{color:var(--muted);padding:6px 16px;border-radius:999px;font-size:14px;white-space:nowrap;transition:.2s}
+nav a:hover{color:var(--text)}nav a.on{color:var(--text);background:var(--glass2);box-shadow:inset 0 0 0 1px var(--line2)}
+.acct{display:flex;gap:8px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;border:1px solid var(--line2);background:var(--glass);color:var(--text);padding:9px 18px;border-radius:12px;font:inherit;font-weight:600;cursor:pointer;transition:transform .15s,box-shadow .2s,background .2s;white-space:nowrap}
+.btn:hover{background:var(--glass2);transform:translateY(-1px)}
+.btn.p{border:0;color:#1d0d05;background:var(--grad);box-shadow:0 8px 28px rgba(236,109,62,.3)}.btn.p:hover{box-shadow:0 12px 36px rgba(236,109,62,.45)}
+.btn.big{padding:15px 26px;font-size:16px;border-radius:14px}.btn:disabled{opacity:.5;cursor:default;transform:none}
+.btn.link{border:0;background:none;color:var(--muted);padding:15px 8px}.btn.link:hover{color:var(--text);background:none}
+.hero{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center;padding:76px 0 40px}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;border-radius:999px;border:1px solid var(--line2);background:var(--glass);color:var(--muted);font-size:13px}
+.pill i{width:7px;height:7px;border-radius:50%;background:var(--acc);box-shadow:0 0 0 4px var(--soft)}
+h1{font-size:60px;line-height:1.12;margin:22px 0 20px;letter-spacing:-1.5px;font-weight:800}
+.g{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{font-size:17px;color:var(--muted);margin:0 0 22px;max-width:36em}.lead b{color:var(--acc);font-weight:600}
+.ticks{list-style:none;padding:0;margin:0 0 30px;display:grid;gap:8px}.ticks li{display:flex;gap:10px;align-items:center;color:#d8d0c9}
+.ticks svg{flex:none}
+.cta{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.meta{color:var(--dim);font-size:13px;margin-top:14px;display:flex;align-items:center;gap:8px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);margin-top:40px;border-top:1px solid var(--line);padding-top:24px}
+.stats div{padding-right:18px}.stats div+div{padding-left:22px;border-left:1px solid var(--line)}
+.stats b{display:block;font-size:26px;font-weight:800;letter-spacing:-.5px}.stats span{color:var(--muted);font-size:13px}
+.engine{position:relative;border:1px solid var(--line2);border-radius:24px;background:linear-gradient(160deg,rgba(255,255,255,.07),rgba(255,255,255,.02));box-shadow:var(--shadow);padding:22px;backdrop-filter:blur(10px)}
+.engine::before{content:"";position:absolute;inset:-1px;border-radius:24px;padding:1px;background:linear-gradient(140deg,rgba(255,162,111,.6),transparent 35%,transparent 70%,rgba(236,109,62,.45));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+.ehead{display:flex;justify-content:space-between;align-items:center;font-weight:700}
+.live{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--ok);background:rgba(79,209,139,.1);border:1px solid rgba(79,209,139,.25);padding:3px 11px;border-radius:999px}
+.live i{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:pulse 1.8s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(79,209,139,.6)}70%{box-shadow:0 0 0 8px rgba(79,209,139,0)}100%{box-shadow:0 0 0 0 rgba(79,209,139,0)}}
+.viz{display:block;width:100%;height:auto;margin:6px 0 2px}
+.spin{transform-origin:150px 140px;animation:spin 40s linear infinite}.spin2{transform-origin:150px 140px;animation:spin 26s linear infinite reverse}
+@keyframes spin{to{transform:rotate(360deg)}}
+.pkt{animation:flow 2.4s linear infinite}.pkt.b{animation-delay:-.8s}.pkt.c{animation-delay:-1.6s}
+@keyframes flow{from{offset-distance:0%;opacity:0}10%{opacity:1}90%{opacity:1}to{offset-distance:100%;opacity:0}}
+.rows{display:grid;gap:8px;margin-top:6px}
+.row{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.035);border:1px solid var(--line);font-size:14px}
+.row b{font-weight:600}.row span{color:var(--muted);font-size:13px;flex:1}.row em{font-style:normal;color:var(--dim);font-size:12px}
+.chip-ver{position:absolute;top:-16px;right:24px;display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;background:#241812;border:1px solid var(--ring);font-size:13px;color:var(--text);box-shadow:0 10px 30px rgba(0,0,0,.45)}
+.chip-ver b{color:var(--acc)}
+section{padding:72px 0}
+.sh{text-align:center;max-width:680px;margin:0 auto 44px}.sh h2{font-size:38px;line-height:1.2;margin:10px 0 12px;letter-spacing:-.8px}.sh p{color:var(--muted);margin:0}
+.eyebrow{color:var(--acc);font-size:13px;font-weight:700;letter-spacing:2px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.card{position:relative;padding:24px;border-radius:var(--radius);border:1px solid var(--line);background:var(--glass);transition:.25s;overflow:hidden}
+.card:hover{border-color:var(--ring);transform:translateY(-3px);background:var(--glass2)}
+.card:hover::after{opacity:1}.card::after{content:"";position:absolute;width:220px;height:220px;right:-80px;top:-80px;border-radius:50%;background:radial-gradient(rgba(240,135,90,.2),transparent 70%);opacity:0;transition:.3s}
+.card h3{margin:16px 0 6px;font-size:18px}.card p{margin:0;color:var(--muted);font-size:14px}
+.ico{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;background:linear-gradient(145deg,rgba(255,162,111,.22),rgba(236,109,62,.08));border:1px solid var(--ring);color:var(--acc)}
+.marquee{overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent,#000 10%,#000 90%,transparent);mask-image:linear-gradient(90deg,transparent,#000 10%,#000 90%,transparent);margin-top:12px}
+.track{display:flex;gap:10px;width:max-content;animation:slide 60s linear infinite}.track.rev{animation-direction:reverse;animation-duration:70s}
+@keyframes slide{to{transform:translateX(-50%)}}
+.tag{display:inline-flex;align-items:center;gap:7px;padding:7px 14px;border-radius:999px;border:1px solid var(--line);background:var(--glass);color:#d8d0c9;font-size:13px;white-space:nowrap}
+.tag i{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;counter-reset:s}
+.step{position:relative;padding:26px;border-radius:var(--radius);border:1px solid var(--line);background:var(--glass)}
+.step::before{counter-increment:s;content:"0" counter(s);font-size:44px;font-weight:800;line-height:1;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;opacity:.9}
+.step h3{margin:14px 0 6px;font-size:18px}.step p{margin:0;color:var(--muted);font-size:14px}
+.band{margin:24px 0 0;padding:44px;border-radius:26px;border:1px solid var(--ring);background:radial-gradient(600px 240px at 20% 0%,rgba(255,162,111,.16),transparent 70%),radial-gradient(500px 240px at 90% 100%,rgba(236,109,62,.16),transparent 70%),var(--glass);display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap}
+.band h2{margin:0 0 6px;font-size:30px;letter-spacing:-.5px}.band p{margin:0;color:var(--muted)}
+.page{padding:56px 0 24px}.page>h2{font-size:38px;margin:0 0 8px;letter-spacing:-.8px}.page>.sub{color:var(--muted);margin:0 0 30px}
+.list{display:grid;gap:14px;counter-reset:s}.list .step{display:grid;grid-template-columns:64px 1fr;align-items:start}.list .step::before{font-size:34px}.list .step h3{margin-top:0}
+details{border:1px solid var(--line);border-radius:14px;background:var(--glass);padding:16px 20px;margin-bottom:10px;transition:.2s}details[open]{border-color:var(--ring)}
+summary{cursor:pointer;font-weight:600;list-style:none;display:flex;justify-content:space-between;gap:10px}summary::-webkit-details-marker{display:none}summary::after{content:"+";color:var(--acc);font-size:20px;line-height:1}details[open] summary::after{content:"–"}
+details p{color:var(--muted);margin:12px 0 0;white-space:pre-wrap}
+.panel{border:1px solid var(--line2);border-radius:22px;background:linear-gradient(160deg,rgba(255,255,255,.06),rgba(255,255,255,.02));padding:28px;box-shadow:var(--shadow)}
+.form{max-width:440px;margin:64px auto}.form h2{margin:0 0 4px;font-size:28px}.form .sub{color:var(--muted);margin:0 0 18px;font-size:14px}
+label{display:block;font-size:13px;color:var(--muted);margin:16px 0 7px}
+input{width:100%;font:inherit;color:var(--text);background:rgba(0,0,0,.28);border:1px solid var(--line2);border-radius:12px;padding:12px 14px;transition:.2s}
+input:focus{outline:0;border-color:var(--acc);box-shadow:0 0 0 4px var(--soft)}
+.err{color:var(--danger);font-size:14px;min-height:22px;margin:12px 0 4px}
+.badge{display:inline-flex;align-items:center;padding:3px 11px;border-radius:999px;font-size:12px;font-weight:700;vertical-align:middle}
+.badge.wait{color:var(--warn);background:rgba(242,184,75,.12);border:1px solid rgba(242,184,75,.3)}.badge.on{color:var(--ok);background:rgba(79,209,139,.1);border:1px solid rgba(79,209,139,.3)}.badge.off{color:var(--danger);background:rgba(255,111,97,.1);border:1px solid rgba(255,111,97,.3)}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:12px 8px;border-bottom:1px solid var(--line);font-size:14px}th{color:var(--dim);font-weight:500}
+.mini{color:var(--dim);font-size:13px}
+.me{display:grid;gap:18px;padding:48px 0}
+footer{border-top:1px solid var(--line);margin-top:56px;padding:30px 0;color:var(--dim);font-size:13px}footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+#toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#241812;color:var(--text);border:1px solid var(--ring);padding:11px 18px;border-radius:12px;display:none;z-index:30;max-width:90vw;box-shadow:var(--shadow)}
+@media (max-width:980px){.hero{grid-template-columns:1fr;gap:44px;padding-top:48px}h1{font-size:46px}.grid,.steps{grid-template-columns:1fr 1fr}}
+@media (max-width:640px){header .wrap{height:auto;flex-wrap:wrap;padding-top:10px;padding-bottom:10px}nav{order:3;margin:0;width:100%;justify-content:space-between}nav a{padding:6px 10px}
+ h1{font-size:36px;letter-spacing:-.8px}.grid,.steps{grid-template-columns:1fr}.stats{grid-template-columns:1fr;gap:14px}.stats div+div{padding-left:0;border-left:0}.sh h2,.page>h2{font-size:30px}.band{padding:28px}.list .step{grid-template-columns:1fr}.chip-ver{right:12px}.hide-sm{display:none}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
 <header><div class="wrap">
- <a class="logo" href="#/"><svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 8v16h11" stroke="#fff" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>Leyra</a>
- <nav id="nav"><a href="#/">首页</a><a href="#/guide">使用教程</a><a href="#/help">常见问题</a></nav>
- <span id="acct"></span>
+ <a class="logo" href="#/"><svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffa26f"/><stop offset="1" stop-color="#ec6d3e"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg1)"/><path d="M11 8v16h11" stroke="#1d0d05" stroke-width="3.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>Leyra</a>
+ <nav id="nav"><a href="#/">首页</a><a href="#/guide">使用教程</a><a href="#/help">常见问题</a><a href="#/me">我的</a></nav>
+ <div class="acct" id="acct"></div>
 </div></header>
-<main id="main" class="wrap"></main>
-<footer><div class="wrap">Leyra · 仅支持 64 位 Windows 10 / 11</div></footer>
-<div id="toast"></div>
+<main id="main"></main>
+<footer><div class="wrap"><span>© Leyra</span><span>支持 Windows 10 / 11（64 位）</span></div></footer>
+<div id="toast" role="status"></div>
 <script>
 'use strict';
 var INFO = null, TOKEN = null;
@@ -66,70 +131,116 @@ function api(path, body) {
   var h = {}; if (TOKEN) h.Authorization = 'Bearer ' + TOKEN; if (body) h['Content-Type'] = 'application/json';
   return fetch('/api/site/' + path, { method: body ? 'POST' : 'GET', headers: h, body: body ? JSON.stringify(body) : undefined }).then(function (r) {
     return r.json().catch(function () { return {}; }).then(function (j) {
-      if (r.status === 401 && TOKEN) { setToken(null); }
+      if (r.status === 401 && TOKEN) setToken(null);
       if (!r.ok) throw new Error(j.error || '出错了，请稍后再试'); return j;
     });
   });
 }
 function setToken(t) { TOKEN = t; try { t ? localStorage.setItem('leyra.session', t) : localStorage.removeItem('leyra.session'); } catch (e) {} acct(); }
-function acct() { $('acct').innerHTML = TOKEN ? '<a class="btn" href="#/me">我的账号</a>' : '<a class="btn hide-sm" href="#/login">登录</a> <a class="btn p" href="#/register">注册</a>'; }
+function acct() { $('acct').innerHTML = TOKEN ? '<a class="btn" href="#/me">我的账号</a>' : '<a class="btn hide-sm" href="#/login">登录</a><a class="btn p" href="#/register">注册</a>'; }
 function save(name, obj) { var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' })); a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
-function dl() {
-  if (!INFO) return '<button class="btn p big" disabled>正在读取…</button>';
-  if (!INFO.download) return '<button class="btn p big" disabled>安装包即将上线</button>';
-  return '<a class="btn p big" href="' + INFO.download + '"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5.5 10.5 4.5v7H3zm8.5-1.2L21 3v8.5h-9.5zM3 12.5h7.5v7L3 18.5zm8.5 0H21V21l-9.5-1.3z"/></svg>下载 Windows 版</a>';
+function current() { return (location.hash.replace(/^#\/?/, '') || 'home').split('?')[0]; }
+
+var WIN = '<svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5.5 10.5 4.5v7H3zm8.5-1.2L21 3v8.5h-9.5zM3 12.5h7.5v7L3 18.5zm8.5 0H21V21l-9.5-1.3z"/></svg>';
+var TICK = '<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="rgba(240,135,90,.14)" stroke="#f0875a" stroke-width="1.5"/><path d="m7.5 12.3 3 3 6-6.4" stroke="#f0875a" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+var OKI = '<svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#4fd18b"/><path d="m7 12.3 3.2 3.2L17 8.8" stroke="#08180f" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+function I(name) {
+  var p = {
+    lock: '<rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>',
+    cut: '<path d="M4 12h5M15 12h5"/><path d="m10 9 4 6M14 9l-4 6"/>',
+    scan: '<path d="M4 8V5h3M17 5h3v3M20 16v3h-3M7 19H4v-3"/><path d="M7 12h10"/>',
+    route: '<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5"/>',
+    chat: '<path d="M5 5h14v10H9l-4 4z"/><path d="M9 9.5h6M9 12h4"/>',
+    up: '<path d="M12 16V5M7.5 9.5 12 5l4.5 4.5"/><path d="M5 19h14"/>'
+  }[name];
+  return '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + p + '</svg>';
 }
-function dlNote() { return INFO && INFO.version ? '版本 ' + esc(INFO.version) + ' · ' + (INFO.size / 1048576).toFixed(0) + ' MB · Windows 10 / 11（64 位）' : 'Windows 10 / 11（64 位）'; }
+function dl(big) {
+  var cls = 'btn p' + (big === false ? '' : ' big');
+  if (!INFO) return '<button class="' + cls + '" disabled>' + WIN + '正在读取…</button>';
+  if (!INFO.download) return '<button class="' + cls + '" disabled>' + WIN + '安装包即将上线</button>';
+  return '<a class="' + cls + '" href="' + INFO.download + '">' + WIN + '下载 Windows 版</a>';
+}
+function dlNote() { return WIN + (INFO && INFO.version ? ' 版本 ' + esc(INFO.version) + ' · ' + Math.round(INFO.size / 1048576) + ' MB · Windows 10 / 11（64 位）' : ' Windows 10 / 11（64 位）'); }
+
+var VIZ = '<svg class="viz" viewBox="0 0 300 300" aria-hidden="true"><defs>' +
+  '<radialGradient id="core"><stop offset="0" stop-color="rgba(240,135,90,.32)"/><stop offset="1" stop-color="rgba(240,135,90,0)"/></radialGradient>' +
+  '<linearGradient id="ln" x1="0" x2="1"><stop offset="0" stop-color="#ffa26f"/><stop offset="1" stop-color="#ec6d3e"/></linearGradient></defs>' +
+  '<circle cx="150" cy="140" r="106" fill="url(#core)"/>' +
+  '<g class="spin">' + (function () { var t = ''; for (var i = 0; i < 60; i++) { var a = i * 6 * Math.PI / 180, r1 = 90, r2 = i % 5 ? 96 : 102; t += '<line x1="' + (150 + r1 * Math.cos(a)).toFixed(1) + '" y1="' + (140 + r1 * Math.sin(a)).toFixed(1) + '" x2="' + (150 + r2 * Math.cos(a)).toFixed(1) + '" y2="' + (140 + r2 * Math.sin(a)).toFixed(1) + '" stroke="#f0875a" stroke-opacity="' + (i % 5 ? .35 : .85) + '" stroke-width="2" stroke-linecap="round"/>'; } return t; })() + '</g>' +
+  '<circle class="spin2" cx="150" cy="140" r="74" fill="none" stroke="#ffa26f" stroke-opacity=".4" stroke-dasharray="3 9"/>' +
+  '<circle cx="150" cy="140" r="54" fill="rgba(24,18,15,.92)" stroke="url(#ln)" stroke-width="1.5"/>' +
+  '<path d="M150 108l24 9v19c0 15-10 27-24 32-14-5-24-17-24-32v-19z" fill="rgba(240,135,90,.12)" stroke="#f0875a" stroke-width="2" stroke-linejoin="round"/>' +
+  '<path d="m140 139 7 7 14-15" fill="none" stroke="#f0875a" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '<path d="M44 140 H96 M204 140 H256" stroke="url(#ln)" stroke-opacity=".5" stroke-dasharray="2 6" stroke-width="2"/>' +
+  '<rect x="6" y="122" width="36" height="36" rx="10" fill="#211915" stroke="#4a362c"/><rect x="15" y="132" width="18" height="12" rx="2" fill="none" stroke="#a59c94" stroke-width="1.6"/><path d="M13 148h22" stroke="#a59c94" stroke-width="1.6" stroke-linecap="round"/>' +
+  '<rect x="258" y="122" width="36" height="36" rx="10" fill="#211915" stroke="#4a362c"/><circle cx="276" cy="140" r="9" fill="none" stroke="#a59c94" stroke-width="1.6"/><path d="M267 140h18M276 131c3 3 3 15 0 18M276 131c-3 3-3 15 0 18" fill="none" stroke="#a59c94" stroke-width="1.3"/>' +
+  '<circle class="pkt" r="3.5" fill="#ffa26f" style="offset-path:path(\'M44 140 H92\')"/><circle class="pkt b" r="3.5" fill="#ffa26f" style="offset-path:path(\'M44 140 H92\')"/>' +
+  '<circle class="pkt" r="3.5" fill="#ec6d3e" style="offset-path:path(\'M208 140 H256\')"/><circle class="pkt c" r="3.5" fill="#ec6d3e" style="offset-path:path(\'M208 140 H256\')"/>' +
+  '<text x="24" y="178" text-anchor="middle" fill="#a59c94" font-size="11">你的电脑</text><text x="276" y="178" text-anchor="middle" fill="#a59c94" font-size="11">网站</text>' +
+  '<text x="150" y="270" text-anchor="middle" fill="#f4efea" font-size="13" font-weight="600">独享加密线路</text><text x="150" y="288" text-anchor="middle" fill="#776f68" font-size="11">线路异常 · 先断网再重连</text></svg>';
+
+var CHECKS = ['系统版本', '防护程序权限', '系统时间', '其他网络软件', '系统防火墙', '安全软件', '虚拟网卡', '磁盘空间', '服务器连接', '开机自动运行', '防护规则', '防护组件', '独享线路已接入',
+  '流量全部走线路', '网址解析', '浏览器保护设置', '暂停状态', '出口 IP', '直连公网拦截', '直发 DNS 拦截', '解析不经本地', '浏览器看到的 IP', 'WebRTC 泄露', 'IPv6 泄露', '绕过线路的软件', '1 分钟观察', '时区一致', '配置是否最新', '线路质量', '线路速度', '加密通道', '最近同步'];
+function marquee(list, rev) { var row = list.map(function (n) { return '<span class="tag"><i></i>' + n + '</span>'; }).join(''); return '<div class="marquee"><div class="track' + (rev ? ' rev' : '') + '">' + row + row + '</div></div>'; }
 
 var P = {};
 P.home = function () {
-  return '<div class="hero"><div><h1>一条只属于你的线路，<br><em>开着就安心</em></h1>' +
-    '<p class="lead">Leyra 是一个 Windows 桌面客户端：电脑的网络统一走你的独享线路，线路一断就先断网，绝不悄悄换回本地网络，真实 IP 不会漏出去。装好导入连接文件就能用，不用自己配代理。</p>' +
-    dl() + ' <a class="btn big" href="#/register">注册账号</a><div class="sub">' + dlNote() + '</div></div>' +
-    '<div class="panel"><div class="status"><span class="dot"></span>防护中 <span class="sub" style="margin:0;font-weight:400">（示意）</span></div>' +
-    '<div class="flow"><div class="node"><b>▣</b>你的电脑</div><div class="line"></div><div class="node"><b>⛨</b>独享线路</div><div class="line"></div><div class="node"><b>◎</b>网站</div></div>' +
-    '<ul class="checks"><li>真实 IP 隐藏<span>已确认</span></li><li>网址查询不经过本地<span>已确认</span></li><li>浏览器 WebRTC 不泄露<span>已确认</span></li><li>线路断开时自动断网<span>已开启</span></li></ul></div></div>' +
-    '<section><h2>为什么用 Leyra</h2><p class="lead2">不只是「能连上」，而是每时每刻都确认没有漏。</p><div class="grid">' +
-    card('独', '独享线路', '每台电脑独立凭据，不和别人共用，单独停用、单独更换。') +
-    card('断', '断线即断网', '线路出问题时先断网再重连，不会退回本地网络暴露真实地址。') +
-    card('检', '全面自检', '30 多项检查：系统、防护规则、网址查询、浏览器、绕过的软件，一键体检。') +
-    card('出', '自带出口也能用', '支持粘贴卖家给的 SOCKS5、HTTP、ss、vmess、trojan 等链接和订阅。') +
-    card('单', '断网也能提工单', '遇到问题在软件里直接提交工单、上传截图，客服在后台回复。') +
-    card('新', '自动更新', '新版本自动下载、核对完整性后再提示安装，不用重新下载。') +
-    '</div></section>' +
-    '<section><h2>三步开始</h2><p class="lead2">注册 → 等开通 → 下载连接文件导入软件。</p><div class="steps">' +
-    step('注册账号', '在本站注册，留下联系方式。') + step('等待开通', '我们确认后会为你开通，开通后登录「我的账号」能看到。') +
-    step('下载连接文件，导入软件', '在「我的账号」里为这台电脑生成连接文件；安装 Leyra 后点「导入设备连接文件」选它即可。') + '</div></section>';
+  var ver = INFO && INFO.version ? '<div class="chip-ver">最新版本 <b>' + esc(INFO.version) + '</b></div>' : '';
+  return '<div class="wrap"><div class="hero"><div>' +
+    '<span class="pill"><i></i>Windows 10 / 11 可用</span>' +
+    '<h1>独享一条线路，<br><span class="g">真实 IP 不外泄</span></h1>' +
+    '<p class="lead">Leyra 是一个<b>全时防护</b>的 Windows 客户端：电脑的网络统一走<b>只属于你的加密线路</b>。线路一旦出问题，<b>先断网、再重连</b>，绝不悄悄退回本地网络。</p>' +
+    '<ul class="ticks"><li>' + TICK + '装好导入连接文件就能用，不用自己配代理</li><li>' + TICK + '断网时也能提交工单，问题照样有人回</li><li>' + TICK + '自带的住宅代理、订阅链接也能直接接入</li></ul>' +
+    '<div class="cta">' + dl() + '<a class="btn big" href="#/register">注册账号</a><a class="btn link" href="#/guide">怎么用 →</a></div>' +
+    '<div class="meta">' + dlNote() + '</div>' +
+    '<div class="stats"><div><b>一机一证</b><span>每台电脑独立凭据</span></div><div><b>断线即断网</b><span>不会回退本地网络</span></div><div><b>30+ 项</b><span>一键全面自检</span></div></div>' +
+    '</div><div class="engine">' + ver + '<div class="ehead">Leyra 防护引擎<span class="live"><i></i>运行中</span></div>' + VIZ +
+    '<div class="rows"><div class="row">' + OKI + '<b>全时自检</b><span>环境 · 防护 · 真实 IP · 浏览器</span><em>本机</em></div>' +
+    '<div class="row">' + OKI + '<b>断线保护</b><span>线路异常时拦截所有直连</span><em>本机</em></div>' +
+    '<div class="row">' + OKI + '<b>私有解析</b><span>网址查询走自有服务器</span><em>云端</em></div></div></div></div></div>' +
+    '<section><div class="wrap"><div class="sh"><div class="eyebrow">WHY LEYRA</div><h2>不只是「能连上」，<br>而是每时每刻确认<span class="g">没有漏</span></h2><p>普通代理断了会悄悄退回本地网络。Leyra 把「不漏」放在第一位。</p></div><div class="grid">' +
+    card('lock', '独享线路', '每台电脑独立凭据，不与别人共用；单独停用、单独更换，互不影响。') +
+    card('cut', '断线即断网', '线路异常时由系统防火墙拦截所有直连，恢复后自动重连。') +
+    card('scan', '全面自检', '一键检查 30 多项：防护规则、DNS、WebRTC、IPv6、绕过线路的软件……') +
+    card('route', '自带出口也能用', 'SOCKS5、HTTP、ss、vmess、vless、trojan、hysteria2、tuic 和订阅地址都能接。') +
+    card('chat', '断网也能提工单', '在软件里直接提交问题、上传截图，客服在后台回复。') +
+    card('up', '安全自动更新', '新版本自动下载，核对完整性后才提示安装。') +
+    '</div></div></section>' +
+    '<section style="padding-top:0"><div class="wrap"><div class="sh"><div class="eyebrow">SELF CHECK</div><h2>30 多项检查，逐项给出结论</h2><p>每一项都是实际探测，不是看配置猜结果。</p></div>' + marquee(CHECKS.slice(0, 16)) + marquee(CHECKS.slice(16), true) + '</div></section>' +
+    '<section><div class="wrap"><div class="sh"><div class="eyebrow">GET STARTED</div><h2>三步开始使用</h2><p>注册 → 开通 → 导入，五分钟搞定。</p></div><div class="steps">' +
+    step('注册账号', '在本站注册并留下联系方式，方便开通后通知你。') + step('等待开通', '我们确认后为你开通，登录「我的账号」就能看到。') + step('下载并导入', '为这台电脑生成连接文件，装好 Leyra 后导入，几秒就显示「已保护」。') + '</div>' +
+    '<div class="band"><div><h2>现在就开始</h2><p>先把软件装好，开通后导入连接文件即可使用。</p></div><div class="cta">' + dl() + '<a class="btn big" href="#/register">注册账号</a></div></div></div></section>';
 };
-function card(i, t, d) { return '<div class="card"><div class="ico">' + i + '</div><h3>' + t + '</h3><p>' + d + '</p></div>'; }
+function card(i, t, d) { return '<div class="card"><div class="ico">' + I(i) + '</div><h3>' + t + '</h3><p>' + d + '</p></div>'; }
 function step(t, d) { return '<div class="step"><div><h3>' + t + '</h3><p>' + d + '</p></div></div>'; }
 P.guide = function () {
-  return '<section><h2>使用教程</h2><p class="lead2">第一次使用，照着做一遍大约 5 分钟。</p><div class="steps">' +
+  return '<div class="wrap page"><div class="eyebrow">GUIDE</div><h2>使用教程</h2><p class="sub">第一次使用，照着做一遍大约 5 分钟。</p><div class="list">' +
     step('下载并安装', '点首页的「下载 Windows 版」，双击安装包，一路点「下一步」。如果 Windows 提示「已保护你的电脑」，点「更多信息」→「仍要运行」。') +
     step('拿到连接文件', '登录本站「我的账号」，账号开通后点「添加这台电脑」，浏览器会下载一个 .json 文件。一台电脑一个文件，不要给别人用。') +
     step('导入连接文件', '打开桌面上的 Leyra，点「导入设备连接文件」，选刚才下载的 .json 文件，等几秒显示「已保护」就好了。') +
-    step('（可选）接入你自己的出口', '如果你自己买了住宅代理，在 Leyra 的出口设置里粘贴卖家给的链接或订阅地址。') +
-    step('做一次安全检查', '在 Leyra 里点「安全检查」，全部通过就可以放心使用了。') +
-    '</div>' + (INFO && INFO.guides && INFO.guides.length ? '<h2 style="margin-top:36px">更多指南</h2>' + INFO.guides.map(function (g) { return '<p><a href="' + esc(g.url) + '" target="_blank" rel="noopener noreferrer">' + esc(g.title) + '</a> <span class="sub">' + esc(g.text || '') + '</span></p>'; }).join('') : '') + '</section>';
+    step('（可选）接入你自己的出口', '自己买了住宅代理的，在 Leyra 的出口设置里粘贴卖家给的链接或订阅地址。') +
+    step('做一次安全检查', '在 Leyra 里点「安全检查」，全部通过就可以放心使用了。') + '</div>' +
+    (INFO && INFO.guides && INFO.guides.length ? '<h2 style="margin-top:44px">更多指南</h2>' + INFO.guides.map(function (g) { return '<p><a href="' + esc(g.url) + '" target="_blank" rel="noopener noreferrer">' + esc(g.title) + ' →</a> <span class="mini">' + esc(g.text || '') + '</span></p>'; }).join('') : '') + '</div>';
 };
 var DEFAULT_FAQ = [
   ['安装时 Windows 提示「已保护你的电脑」怎么办？', '点「更多信息」，再点「仍要运行」。这是因为安装包还没有购买微软的代码签名，不影响使用。'],
   ['为什么有时候会断网？', '线路暂时不通时，Leyra 会先断网再重连，防止你的真实 IP 暴露。通常几秒到几十秒会自动恢复。'],
-  ['连接文件丢了或者想换电脑？', '登录「我的账号」，对那台电脑点「重新下载」，旧文件会立即失效。换电脑时在新电脑上导入新文件即可。'],
+  ['连接文件丢了，或者想换电脑？', '登录「我的账号」，对那台电脑点「重新下载连接文件」，旧文件会立即失效。'],
   ['我能在几台电脑上用？', '每个账号能用的电脑数量由开通时确定，需要更多请联系客服。'],
   ['怎么暂停或退出？', '在 Leyra 里点「暂停防护」或「彻底退出」，为了安全会先要求输入电脑开机密码。']];
 P.help = function () {
   var faq = INFO && INFO.faq && INFO.faq.length ? INFO.faq.map(function (f) { return [f.q, f.a]; }) : DEFAULT_FAQ;
-  return '<section><h2>常见问题</h2><p class="lead2">没找到答案？登录后在 Leyra 软件里提交工单。</p>' + faq.map(function (f) { return '<details><summary>' + esc(f[0]) + '</summary><p>' + esc(f[1]) + '</p></details>'; }).join('') + '</section>';
+  return '<div class="wrap page"><div class="eyebrow">FAQ</div><h2>常见问题</h2><p class="sub">没找到答案？登录后在 Leyra 软件里提交工单。</p>' + faq.map(function (f) { return '<details><summary>' + esc(f[0]) + '</summary><p>' + esc(f[1]) + '</p></details>'; }).join('') + '</div>';
 };
 P.login = function () {
-  return '<div class="form panel"><h2>登录</h2><label>账号</label><input id="lg" autocomplete="username"><label>密码</label><input id="pw" type="password" autocomplete="current-password" onkeydown="if(event.key===\'Enter\')doLogin()">' +
-    '<div class="err" id="err"></div><button class="btn p big" style="width:100%" onclick="doLogin()">登录</button><p class="sub">还没有账号？<a href="#/register">注册</a></p></div>';
+  return '<div class="wrap"><div class="form panel"><h2>登录</h2><p class="sub">欢迎回来</p><label>账号</label><input id="lg" autocomplete="username"><label>密码</label><input id="pw" type="password" autocomplete="current-password" onkeydown="if(event.key===\'Enter\')doLogin()">' +
+    '<div class="err" id="err"></div><button class="btn p big" style="width:100%" onclick="doLogin()">登录</button><p class="mini" style="margin-top:14px">还没有账号？<a href="#/register">注册</a></p></div></div>';
 };
 P.register = function () {
-  return '<div class="form panel"><h2>注册</h2><label>账号（手机号、邮箱或字母数字，3 到 64 位）</label><input id="lg" autocomplete="username"><label>密码（至少 8 位）</label><input id="pw" type="password" autocomplete="new-password">' +
+  return '<div class="wrap"><div class="form panel"><h2>注册</h2><p class="sub">注册后等待开通，开通后即可下载连接文件。</p><label>账号（手机号、邮箱或字母数字，3 到 64 位）</label><input id="lg" autocomplete="username"><label>密码（至少 8 位）</label><input id="pw" type="password" autocomplete="new-password">' +
     '<label>再输一次密码</label><input id="pw2" type="password" autocomplete="new-password"><label>联系方式（微信 / QQ / 邮箱，开通后通知你）</label><input id="ct">' +
-    '<div class="err" id="err"></div><button class="btn p big" style="width:100%" onclick="doRegister()">注册</button><p class="sub">已有账号？<a href="#/login">登录</a></p></div>';
+    '<div class="err" id="err"></div><button class="btn p big" style="width:100%" onclick="doRegister()">注册</button><p class="mini" style="margin-top:14px">已有账号？<a href="#/login">登录</a></p></div></div>';
 };
 function doLogin() {
   $('err').textContent = '';
@@ -144,24 +255,24 @@ function doRegister() {
     .then(function (r) { setToken(r.token); location.hash = '#/me'; toast('注册成功'); }).catch(function (e) { $('err').textContent = e.message; });
 }
 P.me = function () {
-  if (!TOKEN) { location.hash = '#/login'; return ''; }
+  if (!TOKEN) { setTimeout(function () { location.hash = '#/login'; }); return ''; }
   api('me').then(function (m) {
     if (current() !== 'me') return;
-    var st = m.status === 'active' ? '<span class="tag on">已开通</span>' : m.status === 'pending' ? '<span class="tag wait">等待开通</span>' : '<span class="tag off">已停用</span>';
-    var html = '<section><div class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><h2 style="margin:0">' + esc(m.login) + ' ' + st + '</h2><div class="sub">联系方式：' + esc(m.contact) + '</div></div><button class="btn" onclick="doLogout()">退出登录</button></div></div>';
-    if (m.status === 'pending') html += '<div class="panel" style="margin-top:16px"><h3>账号正在等待开通</h3><p class="sub" style="font-size:15px">我们会尽快通过你留的联系方式联系你。开通后刷新本页，就能为你的电脑下载连接文件。</p><p>先把软件装好：</p>' + dl() + '</div>';
+    var st = m.status === 'active' ? '<span class="badge on">已开通</span>' : m.status === 'pending' ? '<span class="badge wait">等待开通</span>' : '<span class="badge off">已停用</span>';
+    var html = '<div class="wrap me"><div class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><div class="eyebrow">MY ACCOUNT</div><h2 style="margin:6px 0 2px;font-size:28px">' + esc(m.login) + ' ' + st + '</h2><div class="mini">联系方式：' + esc(m.contact) + '</div></div><button class="btn" onclick="doLogout()">退出登录</button></div></div>';
+    if (m.status === 'pending') html += '<div class="panel"><h3 style="margin-top:0">账号正在等待开通</h3><p class="mini" style="font-size:15px">我们会尽快通过你留的联系方式联系你。开通后刷新本页，就能为你的电脑下载连接文件。可以先把软件装好：</p>' + dl() + '</div>';
     if (m.status === 'active') {
-      html += '<div class="panel" style="margin-top:16px"><h3 style="margin-top:0">我的电脑（' + m.devices.length + ' / ' + m.max_devices + '）</h3>' +
+      html += '<div class="panel"><h3 style="margin-top:0">我的电脑 <span class="mini">（' + m.devices.length + ' / ' + m.max_devices + '）</span></h3>' +
         (m.devices.length ? '<table><tr><th>名称</th><th>添加时间</th><th>状态</th><th></th></tr>' + m.devices.map(function (d) {
-          return '<tr><td>' + esc(d.name) + '</td><td>' + day(d.created_at) + '</td><td>' + (d.enabled ? '<span class="tag on">可用</span>' : '<span class="tag off">已停用</span>') + '</td><td><button class="btn" onclick="rotate(\'' + d.id + '\',\'' + esc(d.name) + '\')">重新下载连接文件</button></td></tr>';
-        }).join('') + '</table><p class="sub">「重新下载」会让这台电脑的旧连接文件立即失效，需要在 Leyra 里重新导入新文件。</p>' : '<p class="sub">还没有添加电脑。</p>') +
-        (m.devices.length < m.max_devices ? '<label>给这台电脑起个名字</label><div style="display:flex;gap:10px"><input id="dn" placeholder="例如：家里的电脑" maxlength="40"><button class="btn p" onclick="addDevice()">添加这台电脑</button></div>' : '<p class="sub">已达到账号可用的电脑数量，需要更多请联系客服。</p>') +
-        '</div><div class="panel" style="margin-top:16px"><h3 style="margin-top:0">下载软件</h3>' + dl() + '<div class="sub">' + dlNote() + '</div></div>';
+          return '<tr><td>' + esc(d.name) + '</td><td>' + day(d.created_at) + '</td><td>' + (d.enabled ? '<span class="badge on">可用</span>' : '<span class="badge off">已停用</span>') + '</td><td style="text-align:right"><button class="btn" onclick="rotate(\'' + d.id + '\',\'' + esc(d.name) + '\')">重新下载连接文件</button></td></tr>';
+        }).join('') + '</table><p class="mini">「重新下载」会让这台电脑的旧连接文件立即失效，需要在 Leyra 里重新导入新文件。</p>' : '<p class="mini">还没有添加电脑。</p>') +
+        (m.devices.length < m.max_devices ? '<label>给这台电脑起个名字</label><div style="display:flex;gap:10px;flex-wrap:wrap"><input id="dn" placeholder="例如：家里的电脑" maxlength="40" style="flex:1;min-width:200px"><button class="btn p" onclick="addDevice()">添加这台电脑</button></div>' : '<p class="mini">已达到账号可用的电脑数量，需要更多请联系客服。</p>') +
+        '</div><div class="panel"><h3 style="margin-top:0">下载软件</h3>' + dl() + '<div class="meta">' + dlNote() + '</div></div>';
     }
-    if (m.status === 'disabled') html += '<div class="panel" style="margin-top:16px"><p>这个账号已停用，如有疑问请联系客服。</p></div>';
-    $('main').innerHTML = html + '</section>';
+    if (m.status === 'disabled') html += '<div class="panel"><p>这个账号已停用，如有疑问请联系客服。</p></div>';
+    $('main').innerHTML = html + '</div>';
   }).catch(function (e) { if (current() !== 'me') return; toast(e.message); if (!TOKEN) location.hash = '#/login'; });
-  return '<section><p class="sub">正在读取…</p></section>';
+  return '<div class="wrap page"><p class="mini">正在读取…</p></div>';
 };
 function fileName(n) { return 'Leyra-' + n.replace(/[\\/:*?"<>|\s]+/g, '_') + '.json'; }
 function addDevice() {
@@ -174,16 +285,14 @@ function rotate(id, n) {
 }
 function doLogout() { api('logout', {}).catch(function () {}).then(function () { setToken(null); location.hash = '#/'; }); }
 function route() {
-  var page = (location.hash.replace(/^#\/?/, '') || 'home').split('?')[0];
-  if (!P[page]) page = 'home';
+  var page = current(); if (!P[page]) page = 'home';
   Array.prototype.forEach.call(document.querySelectorAll('#nav a'), function (a) { a.className = a.getAttribute('href') === '#/' + (page === 'home' ? '' : page) ? 'on' : ''; });
   $('main').innerHTML = P[page](); window.scrollTo(0, 0);
 }
 window.addEventListener('hashchange', route);
-acct(); route();
-function current() { return (location.hash.replace(/^#\/?/, '') || 'home').split('?')[0]; }
 // Only pages that show download/help data re-render; never wipe a form the visitor is typing in.
-function refreshInfo() { if (['home', 'guide', 'help', 'me', ''].indexOf(current()) >= 0 || !P[current()]) route(); }
+function refreshInfo() { if (['home', 'guide', 'help', 'me'].indexOf(current()) >= 0 || !P[current()]) route(); }
+acct(); route();
 fetch('/api/site/info').then(function (r) { return r.json(); }).then(function (i) { INFO = i; refreshInfo(); }).catch(function () { INFO = {}; refreshInfo(); });
 </script>
 </body>
