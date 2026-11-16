@@ -1,7 +1,5 @@
 name: Windows native validation (explicit compute opt-in)
 on:
-  push:
-    branches: [windows-validation-once-20261116-allow1]
   workflow_dispatch:
     inputs:
       allow_hosted_compute:
@@ -16,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   native:
-    if: ${{ inputs.allow_hosted_compute == true || (github.event_name == 'push' && github.ref == 'refs/heads/windows-validation-once-20261116-allow1') }}
+    if: ${{ inputs.allow_hosted_compute == true }}
     runs-on: windows-2022
     timeout-minutes: 20
     steps:
@@ -50,10 +48,7 @@ jobs:
       - name: Execute existing assertions
         run: dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll
       - name: Exercise actual WFP only on this disposable hosted runner
-        shell: pwsh
-        run: |
-          dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll --native-wfp-fixture 2>&1 | Tee-Object -FilePath native-proof.txt
-          if ($LASTEXITCODE -ne 0) { throw 'Native Windows fixture failed' }
+        run: dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll --native-wfp-fixture
       - name: Remove fixture-owned filters even after a failed check
         if: always()
         shell: pwsh
@@ -63,11 +58,3 @@ jobs:
             dotnet $fixture --cleanup-wfp-fixture
             if ($LASTEXITCODE -ne 0) { throw 'WFP cleanup failed; runner must be discarded' }
           }
-      - name: Retain bounded native verification evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-native-proof
-          path: native-proof.txt
-          if-no-files-found: ignore
-          retention-days: 1
