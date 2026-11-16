@@ -1,7 +1,5 @@
 name: Owner application deployment (manual only)
 on:
-  push:
-    branches: [server-connection-20261116]
   workflow_dispatch:
     inputs:
       allow_hosted_compute:
@@ -16,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   deploy:
-    if: ${{ inputs.allow_hosted_compute == true || (github.event_name == 'push' && github.ref == 'refs/heads/server-connection-20261116') }}
+    if: ${{ inputs.allow_hosted_compute == true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
