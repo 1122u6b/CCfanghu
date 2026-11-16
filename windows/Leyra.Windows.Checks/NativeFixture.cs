@@ -12,21 +12,33 @@ public static class NativeFixture
         using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(4));
         await socket.ConnectAsync(new IPEndPoint(IPAddress.Parse("1.1.1.1"),443),deadline.Token);
     }
+    public static async Task Processes()
+    {
+        if(!OperatingSystem.IsWindows())throw new PlatformNotSupportedException("Native process fixture requires Windows");
+        var host=Environment.ProcessPath??throw new InvalidOperationException("Process host is unknown");
+        var prefix=Path.GetFileNameWithoutExtension(host).Equals("dotnet",StringComparison.OrdinalIgnoreCase)?new[]{typeof(NativeFixture).Assembly.Location}:Array.Empty<string>();
+        var directory=Path.GetDirectoryName(typeof(NativeFixture).Assembly.Location)!;
+        using var job=new NativeJob();
+        using(var child=job.Launch(host,prefix.Concat(new[]{"--fixture-job-exit","有 空格"}).ToArray(),directory))
+        {
+            using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(10));await child.WaitForExitAsync(deadline.Token);
+            var actual=child.ExitCode;if(actual!=7)throw new Exception($"Native ordinary-argv child exit code: {actual} (0x{actual:X8}), expected 7");
+        }
+        using(var child=job.Launch(host,prefix.Concat(new[]{"--fixture-job-wait"}).ToArray(),directory))
+        {job.Stop();if(!child.WaitForExit(5000))throw new Exception("Job-owned child survived termination");}
+        Console.WriteLine("PASS atomic job-owned process launch, Unicode/space argv, exit code and bounded teardown");
+        var kernel=Environment.GetEnvironmentVariable("LEYRA_NATIVE_KERNEL");
+        if(string.IsNullOrEmpty(kernel))throw new InvalidOperationException("Provide the verified official Windows kernel for native process acceptance");
+        using(var child=job.Launch(kernel,new[]{"-v"},Path.GetDirectoryName(kernel)!))
+        {
+            using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(10));await child.WaitForExitAsync(deadline.Token);
+            if(child.ExitCode!=0)throw new Exception($"Official kernel did not start successfully: {child.ExitCode}");
+        }
+        Console.WriteLine("PASS official Windows Mihomo executable launched inside the owned job");
+    }
     public static async Task Run()
     {
         if(!OperatingSystem.IsWindows())throw new PlatformNotSupportedException("Native fixture requires a disposable Windows machine");
-        var system=Environment.GetFolderPath(Environment.SpecialFolder.System);
-        using(var job=new NativeJob())
-        {
-            using(var child=job.Launch(Path.Combine(system,"cmd.exe"),["/c","exit 7"],system))
-            {
-                using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(5));await child.WaitForExitAsync(deadline.Token);
-                if(child.ExitCode!=7)throw new Exception("Native process exit code mismatch");
-            }
-            using(var child=job.Launch(Path.Combine(system,"WindowsPowerShell","v1.0","powershell.exe"),["-NoProfile","-NonInteractive","-Command","Start-Sleep -Seconds 30"],system))
-            {job.Stop();if(!child.WaitForExit(5000))throw new Exception("Job-owned child survived termination");}
-        }
-        Console.WriteLine("PASS atomic job-owned process launch, exit code and bounded teardown");
         using var engine=new WfpEngine();
         if(engine.DefaultGuardsInstalled())throw new InvalidOperationException("Existing LEYRA guard detected; refusing to replace it");
         // No customer endpoint, credentials, DNS queries or application content.

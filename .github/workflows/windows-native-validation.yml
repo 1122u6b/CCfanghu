@@ -47,7 +47,17 @@ jobs:
           python -m unittest discover -s server/tests -v
       - name: Execute existing assertions
         run: dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll
+      - name: Prepare verified official Windows kernel
+        run: python scripts/prepare_kernel.py windows artifacts/native-kernel
+      - name: Exercise actual job-owned process management
+        id: native_processes
+        shell: pwsh
+        run: |
+          $env:LEYRA_NATIVE_KERNEL = "$pwd/artifacts/native-kernel/mihomo.exe"
+          dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll --native-job-fixture
+          if ($LASTEXITCODE -ne 0) { throw 'Native process fixture failed' }
       - name: Exercise actual WFP only on this disposable hosted runner
+        if: ${{ success() || (failure() && steps.native_processes.outcome == 'failure') }}
         run: dotnet windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll --native-wfp-fixture
       - name: Remove fixture-owned filters even after a failed check
         if: always()

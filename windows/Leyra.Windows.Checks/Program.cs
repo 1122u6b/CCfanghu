@@ -3,6 +3,9 @@ using Leyra.Windows.Platform;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
+// Controlled child modes exercise the same ordinary argv launch used by the kernel.
+if(args.Length>0 && args[0]=="--fixture-job-exit")Environment.Exit(args.Length==2 && args[1]=="有 空格"?7:9);
+if(args.Length==1 && args[0]=="--fixture-job-wait"){await Task.Delay(TimeSpan.FromSeconds(30));Environment.Exit(0);}
 var passed=0;
 void Check(string name,Action test){test();passed++;Console.WriteLine("PASS "+name);}
 void Require(bool value){if(!value)throw new Exception("Check failed");}
@@ -112,6 +115,11 @@ if(args.Length==2 && args[0]=="--timeout-fixture")
 }
 
 
+if(args.Length==1 && args[0]=="--native-job-fixture")
+{
+ if(!OperatingSystem.IsWindows())throw new PlatformNotSupportedException("Disposable Windows runner required");
+ await NativeFixture.Processes();
+}
 if(args.Length==1 && args[0]=="--native-wfp-fixture")
 {
  if(!OperatingSystem.IsWindows())throw new PlatformNotSupportedException("Disposable Windows runner required");
