@@ -27,7 +27,7 @@ class AdminError(RuntimeError):
 
 
 class Client:
-    def __init__(self, profile_path):
+    def __init__(self, profile_path, connect=None):
         try:
             data = json.loads(Path(profile_path).read_text(encoding='utf-8'))['leyra_server']
         except (OSError, ValueError, KeyError) as e:
@@ -35,7 +35,9 @@ class Client:
         if data.get('role', 'owner') != 'owner':
             raise AdminError('这是设备连接文件，不是管理员连接文件')
         self.profile = data
-        self.host = data['host']; self.port = int(data['port']); self.token = data['token']
+        # --connect lets the tool run on the server itself (cloud NAT may not loop back to the public IP);
+        # the certificate pin still decides whether the peer is genuine.
+        self.host = connect or data['host']; self.port = int(data['port']); self.token = data['token']
         self.fingerprint = data['fingerprint'].replace(':', '').lower()
 
     def request(self, method, path, body=None, timeout=30):
@@ -98,6 +100,7 @@ def resolve_device(client, prefix):
 def main(argv=None):
     parser = argparse.ArgumentParser(description='LEYRA 自有服务器管理工具')
     parser.add_argument('--profile', default=os.environ.get('LEYRA_ADMIN_PROFILE', DEFAULT_PROFILE), help='管理员连接文件')
+    parser.add_argument('--connect', help='实际连接的地址（在服务器本机运行时用 127.0.0.1）')
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('status', help='服务器状态')
     sub.add_parser('devices', help='列出设备')
@@ -118,7 +121,7 @@ def main(argv=None):
     sub.add_parser('update-status', help='当前发布的客户端版本')
     sub.add_parser('withdraw-update', help='撤回已发布的客户端版本')
     a = parser.parse_args(argv)
-    c = Client(a.profile)
+    c = Client(a.profile, a.connect)
 
     if a.command == 'status':
         print(json.dumps(c.request('GET', '/api/v1/status'), ensure_ascii=False, indent=2))

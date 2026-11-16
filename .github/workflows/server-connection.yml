@@ -7,6 +7,11 @@ on:
         type: boolean
         required: true
         default: false
+      new_device_name:
+        description: 'Optional: create a device for this customer computer and attach its connection file (download within 1 day)'
+        type: string
+        required: false
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -35,3 +40,33 @@ jobs:
           printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
           ssh-keygen -y -f "$key_file" > /dev/null
           ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 'sudo -n python3 -' < deploy/inspect_existing_server.py
+  device:
+    if: ${{ inputs.allow_hosted_compute == true && inputs.new_device_name != '' }}
+    needs: inspect
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create one device on the server and fetch only its connection file
+        env:
+          LEYRA_SSH_KEY: ${{ secrets.LEYRA_SSH_KEY }}
+          DEVICE_NAME: ${{ inputs.new_device_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          key_file="$RUNNER_TEMP/leyra-key"
+          trap 'rm -f "$key_file"' EXIT
+          umask 077
+          printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
+          # The name travels base64-encoded so no shell quoting can be abused.
+          encoded=$(printf '%s' "$DEVICE_NAME" | head -c 100 | base64 -w0)
+          [[ "$encoded" =~ ^[A-Za-z0-9+/=]+$ ]]
+          remote="release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); name=\$(printf %s '$encoded' | base64 -d); out=\$(mktemp); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 device-new \"\$name\" --out \"\$out\" >/dev/null && sudo -n cat \"\$out\"; sudo -n rm -f \"\$out\""
+          mkdir -p device
+          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 "$remote" > device/leyra-device.json
+          python3 -c "import json;d=json.load(open('device/leyra-device.json'))['leyra_server'];assert d['role']=='device' and len(d['device_id'])==32;print('LEYRA_DEVICE_CREATED=YES')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: device-connection-file
+          path: device/leyra-device.json
+          retention-days: 1
