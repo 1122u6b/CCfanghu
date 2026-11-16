@@ -136,7 +136,7 @@ class Gateway:
     def node(self,device=None):
         return {'name':'自建前置 · 住宅出口','type':'socks5','server':self.config['public_host'],'port':int(self.config['port']),'username':device.id if device else self.config['client_user'],'password':device.secret if device else self.config['client_password'],'tls':True,'fingerprint':self.config['fingerprint'],'udp':False}
     async def response(self,w,status,obj):
-        data=json.dumps(obj,ensure_ascii=False).encode();reason={200:'OK',400:'Bad Request',401:'Unauthorized',404:'Not Found',405:'Method Not Allowed',413:'Payload Too Large'}.get(status,'Error')
+        data=json.dumps(obj,ensure_ascii=False).encode();reason={200:'OK',400:'Bad Request',401:'Unauthorized',404:'Not Found',405:'Method Not Allowed',413:'Payload Too Large',429:'Too Many Requests'}.get(status,'Error')
         w.write(f'HTTP/1.1 {status} {reason}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {len(data)}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n'.encode()+data);await w.drain()
     async def binary_response(self,w,status,data):
         w.write(f'HTTP/1.1 {status} {"OK" if status==200 else "Error"}\r\nContent-Type: application/dns-message\r\nContent-Length: {len(data)}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n'.encode()+data);await w.drain()
@@ -170,13 +170,15 @@ class Gateway:
                 finally:ww.close()
             return await self.binary_response(w,200,reply)
         except (ValueError,TimeoutError,asyncio.IncompleteReadError):return await self.response(w,400,{'error':'DNS request failed'})
-    async def http(self,r,w,first):
-        header=first+await asyncio.wait_for(r.readuntil(b'\r\n\r\n'),10)
+    async def http(self,r,w,first,header=None,client_ip=None):
+        if header is None:header=first+await asyncio.wait_for(r.readuntil(b'\r\n\r\n'),10)
         if len(header)>8192:raise ValueError('header too large')
         rows=header.decode('iso-8859-1').split('\r\n');method,path,_=rows[0].split(' ',2)
         h={k.lower().strip():v.strip() for line in rows[1:] if ':' in line for k,v in [line.split(':',1)]}
         if path.startswith('/private-dns/'):return await self.doh(r,w,method,path,h)
-        if method=='GET' and path.split('?')[0] in ('/api/admin','/api/admin/'):return await self.admin_page(w)
+        if method=='GET' and path.split('?')[0] in ('/api/admin','/api/admin/','/admin','/admin/'):return await self.admin_page(w)
+        if method=='GET' and path=='/api/v1/admin-login':return await self.response(w,200,{'password_set':self.management.admin_password_set()})
+        if method=='POST' and path=='/api/v1/admin-login':return await self.admin_login(r,w,h,client_ip)
         authorization=h.get('authorization','')
         token=authorization[7:] if authorization.startswith('Bearer ') else ''
         is_admin=hmac.compare_digest(authorization.encode(),('Bearer '+self.config['api_token']).encode()) or (token.startswith('adm_') and self.management.admin_session_valid(token))
@@ -232,6 +234,22 @@ class Gateway:
     def device_profile(self,request):
         issued=self.devices.issue(request.get('name')) if request['type']=='create_device_profile' else self.devices.rotate(request.get('id'))
         return {'id':issued['id'],'profile':self.profile_for(issued)}
+    async def admin_login(self,r,w,h,client_ip):
+        import time as _t
+        peer=w.get_extra_info('peername');ip=client_ip or (peer[0] if peer else 'unknown')
+        if ip in ('127.0.0.1','::1'):ip=h.get('x-forwarded-for','').split(',')[0].strip() or ip
+        now=_t.monotonic();attempts=self.__dict__.setdefault('_admin_attempts',{})
+        recent=[t for t in attempts.get(ip,[]) if now-t<900];everyone=[t for v in attempts.values() for t in v if now-t<900]
+        if len(recent)>=8 or len(everyone)>=40:return await self.response(w,429,{'error':'尝试次数太多，请 15 分钟后再试'})
+        n=int(h.get('content-length','0'))
+        if not 0<n<=2048:return await self.response(w,400,{'error':'请求无效'})
+        body=json.loads(await asyncio.wait_for(r.readexactly(n),10))
+        result=self.management.admin_login(body.get('username'),body.get('password'),body.get('remember') is True) if isinstance(body,dict) else None
+        if result is None:
+            recent.append(now);attempts[ip]=recent
+            if len(attempts)>5000:attempts.clear()
+            return await self.response(w,401,{'error':'账号或密码不对'})
+        attempts.pop(ip,None);return await self.response(w,200,result)
     async def admin_page(self,w):
         page=Path(__file__).with_name('admin.html')
         data=page.read_bytes() if page.is_file() else b'admin page missing'

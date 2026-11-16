@@ -3,19 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LEYRA 管理中心</title>
+<title>Leyra 管理后台</title>
 <style>
-:root{--bg:#f6f7fb;--card:#fff;--text:#1d2130;--muted:#6b7286;--line:#e3e6ef;--accent:#4945df;--danger:#c7372f;--ok:#13804b;--warn:#b46a00}
-@media (prefers-color-scheme:dark){:root{--bg:#14161d;--card:#1d2029;--text:#e8eaf2;--muted:#9aa1b5;--line:#2c3040;--accent:#8a87ff;--danger:#ff6b61;--ok:#4fd18b;--warn:#f0b04a}}
+:root{--bg:#121110;--card:#1b1917;--text:#f4efea;--muted:#a59c94;--line:#2e2a27;--accent:#ec6d3e;--danger:#ff6f61;--ok:#4fd18b;--warn:#f2b84b}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 system-ui,-apple-system,"Microsoft YaHei",sans-serif}
 header{display:flex;align-items:center;gap:16px;padding:14px 20px;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap}
 header b{font-size:16px}nav{display:flex;gap:4px;flex-wrap:wrap}nav button{border:0;background:none;color:var(--muted);padding:6px 12px;border-radius:8px;cursor:pointer;font:inherit}
-nav button.on{background:var(--accent);color:#fff}main{max-width:1100px;margin:0 auto;padding:20px 16px}
+nav button.on{background:rgba(240,135,90,.16);color:#ffa26f}main{max-width:1100px;margin:0 auto;padding:20px 16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:16px}
 h2{font-size:15px;margin:0 0 12px}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:500}
 input,textarea,select{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px;width:100%}textarea{min-height:90px;resize:vertical}
 button.b{border:1px solid var(--line);background:var(--card);color:var(--text);padding:6px 12px;border-radius:8px;cursor:pointer;font:inherit;white-space:nowrap}
-button.p{background:var(--accent);border-color:var(--accent);color:#fff}button.d{color:var(--danger)}button:disabled{opacity:.5;cursor:default}
+button.p{background:linear-gradient(100deg,#ffa26f,#ec6d3e);border-color:transparent;color:#1d0d05;font-weight:600}button.d{color:var(--danger)}button:disabled{opacity:.5;cursor:default}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}.row>*{flex:1}.row>button{flex:0}
 .muted{color:var(--muted)}.tag{display:inline-block;padding:0 8px;border-radius:99px;font-size:12px;border:1px solid var(--line)}.tag.w{color:var(--warn);border-color:var(--warn)}.tag.ok{color:var(--ok);border-color:var(--ok)}.tag.x{color:var(--danger);border-color:var(--danger)}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.stat b{display:block;font-size:24px}
@@ -27,19 +26,25 @@ button.p{background:var(--accent);border-color:var(--accent);color:#fff}button.d
 </head>
 <body>
 <div id="login" class="card" hidden>
- <h2>LEYRA 管理中心</h2>
- <p class="muted">请用管理登录链接打开本页，或粘贴登录密钥。登录链接由 GitHub 上的「Owner server connection」任务生成。</p>
- <div class="row"><input id="key" type="password" placeholder="登录密钥（adm_ 开头）" autocomplete="off"><button class="b p" onclick="login()">登录</button></div>
+ <h2>Leyra 管理后台</h2>
+ <div id="pwlogin">
+  <div class="row"><input id="lu" placeholder="管理员账号" autocomplete="username"></div>
+  <div class="row"><input id="lp" type="password" placeholder="密码" autocomplete="current-password" onkeydown="if(event.key==='Enter')pwLogin()"></div>
+  <label class="muted" style="display:flex;gap:8px;align-items:center"><input id="lr" type="checkbox" checked style="width:auto"> 在这台电脑上保持登录 30 天（公用电脑请取消）</label>
+  <div class="row"><span id="lerr" style="color:var(--danger)"></span><button class="b p" onclick="pwLogin()">登录</button></div>
+ </div>
+ <p id="nopw" class="muted" hidden>还没有设置管理员账号密码。请先用一次「登录链接」进入，然后在「安全」页设置账号密码，以后就直接在这里登录。</p>
+ <details style="margin-top:12px"><summary class="muted">用登录链接里的密钥登录</summary><div class="row"><input id="key" type="password" placeholder="登录密钥（adm_ 开头）" autocomplete="off"><button class="b" onclick="login()">登录</button></div></details>
 </div>
 <div id="app" hidden>
-<header><b>LEYRA 管理中心</b><nav id="nav"></nav><span style="flex:1"></span><button class="b" onclick="logout()">退出</button></header>
+<header><b>Leyra 管理后台</b><nav id="nav"></nav><span style="flex:1"></span><button class="b" onclick="logout()">退出</button></header>
 <main id="main"></main>
 </div>
 <div id="toast"></div>
 <script>
 'use strict';
 var TOKEN = null, VIEW = 'home', CACHE = {};
-try { TOKEN = sessionStorage.getItem('leyra.admin'); } catch (e) {}
+try { TOKEN = sessionStorage.getItem('leyra.admin') || localStorage.getItem('leyra.admin'); } catch (e) {}
 if (location.hash.length > 5) { TOKEN = decodeURIComponent(location.hash.slice(1)); try { sessionStorage.setItem('leyra.admin', TOKEN); } catch (e) {} history.replaceState(null, '', location.pathname); }
 var $ = function (id) { return document.getElementById(id); };
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
@@ -54,15 +59,26 @@ function call(method, path, body) {
 function rpc(req) { return call('POST', '/api/v1/rpc', req); }
 function dev(id, req) { return rpc({ type: 'device_rpc', id: id, request: req }); }
 function fail(e) { toast(e.message || String(e)); }
-function login() { TOKEN = $('key').value.trim(); try { sessionStorage.setItem('leyra.admin', TOKEN); } catch (e) {} start(); }
-function logout() { TOKEN = null; try { sessionStorage.removeItem('leyra.admin'); } catch (e) {} $('app').hidden = true; $('login').hidden = false; }
+function keep(t, remember) { TOKEN = t; try { sessionStorage.setItem('leyra.admin', t); if (remember) localStorage.setItem('leyra.admin', t); else localStorage.removeItem('leyra.admin'); } catch (e) {} }
+function login() { keep($('key').value.trim(), false); start(); }
+function pwLogin() {
+  $('lerr').textContent = '';
+  fetch('/api/v1/admin-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: $('lu').value.trim(), password: $('lp').value, remember: $('lr').checked }) })
+    .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || '登录失败'); return j; }); })
+    .then(function (j) { keep(j.token, $('lr').checked); start(); }).catch(function (e) { $('lerr').textContent = e.message; });
+}
+function showLogin() {
+  $('app').hidden = true; $('login').hidden = false;
+  fetch('/api/v1/admin-login').then(function (r) { return r.json(); }).then(function (j) { $('nopw').hidden = !!j.password_set; $('pwlogin').hidden = !j.password_set; }).catch(function () {});
+}
+function logout() { TOKEN = null; try { sessionStorage.removeItem('leyra.admin'); localStorage.removeItem('leyra.admin'); } catch (e) {} showLogin(); }
 function download(name, obj) { var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' })); a.download = name; a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000); }
 
 var VIEWS = [['home', '概览'], ['customers', '客户账号'], ['devices', '设备'], ['tickets', '工单'], ['messages', '消息'], ['help', '帮助页'], ['updates', '客户端更新'], ['security', '安全']];
 function nav() { $('nav').innerHTML = VIEWS.map(function (v) { return '<button class="' + (v[0] === VIEW ? 'on' : '') + '" onclick="go(\'' + v[0] + '\')">' + v[1] + '</button>'; }).join(''); }
 function go(v) { VIEW = v; nav(); $('main').innerHTML = '<p class="muted">正在加载…</p>'; (R[v] || R.home)().catch(function (e) { $('main').innerHTML = '<div class="card">' + esc(e.message) + '</div>'; }); }
 function start() {
-  if (!TOKEN) { $('login').hidden = false; return; }
+  if (!TOKEN) { showLogin(); return; }
   call('GET', '/api/v1/status').then(function (s) {
     if (s.scope !== 'server') throw new Error('这是设备凭据，不是管理登录密钥');
     $('login').hidden = true; $('app').hidden = false; go(VIEW);
@@ -233,10 +249,19 @@ function publish() {
 }
 function withdraw() { if (confirm('撤回后客户端不会再提示这个版本，确定吗？')) rpc({ type: 'admin_update_withdraw' }).then(function () { go('updates'); }).catch(fail); }
 R.security = function () {
-  $('main').innerHTML = '<div class="card"><h2>管理登录链接</h2><p>每个登录链接有效 7 天。怀疑链接泄露时，点下面按钮让所有登录链接立即失效（包括你当前这个），之后在 GitHub 重新生成。</p><button class="b d" onclick="revoke()">让所有登录链接失效</button></div>';
-  return Promise.resolve();
+  return rpc({ type: 'admin_password_info' }).then(function (info) {
+    $('main').innerHTML = '<div class="card"><h2>管理员账号密码</h2><p class="muted">' + (info.set ? '当前账号：<b>' + esc(info.username) + '</b>。可以在下面修改。' : '还没有设置。设置后，以后直接打开 <b>https://leyra.xin/admin</b> 用账号密码登录，不用再去 GitHub。') + '</p>' +
+      '<div class="row"><input id="su" placeholder="管理员账号（3 到 40 位字母或数字）" value="' + esc(info.username || '') + '" autocomplete="username"></div>' +
+      '<div class="row"><input id="sp" type="password" placeholder="新密码（至少 10 位）" autocomplete="new-password"><input id="sp2" type="password" placeholder="再输一次新密码" autocomplete="new-password"></div>' +
+      '<div class="row"><span></span><button class="b p" onclick="setPassword()">保存账号密码</button></div></div>' +
+      '<div class="card"><h2>退出所有地方的登录</h2><p class="muted">怀疑密码或登录链接泄露时用：所有已登录的电脑（包括你当前这台）都会立即退出。退出后用账号密码重新登录。</p><button class="b d" onclick="revoke()">退出所有登录</button></div>';
+  });
 };
-function revoke() { if (confirm('确定？当前页面也会退出。')) rpc({ type: 'admin_session_revoke_all' }).then(logout).catch(fail); }
+function setPassword() {
+  if ($('sp').value !== $('sp2').value) { toast('两次输入的密码不一样'); return; }
+  rpc({ type: 'admin_set_password', username: $('su').value.trim(), password: $('sp').value }).then(function () { toast('已保存。以后打开 https://leyra.xin/admin 用这个账号密码登录'); go('security'); }).catch(fail);
+}
+function revoke() { if (confirm('确定？所有电脑都会退出登录，包括这台。')) rpc({ type: 'admin_session_revoke_all' }).then(logout).catch(fail); }
 start();
 </script>
 </body>

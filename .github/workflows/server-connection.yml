@@ -95,8 +95,8 @@ jobs:
           mkdir -p login
           ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
             'release=$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 "${release}admin.py" --profile /root/leyra-server-connection.json --connect 127.0.0.1 login-link' > login/link.txt
-          grep -qE '^https://api\.leyra\.xin/api/admin#adm_[A-Za-z0-9_-]{40,80}$' login/link.txt
-          { echo '打开下面的链接即可进入 LEYRA 管理中心（7 天内有效，请勿转发）：'; cat login/link.txt; } > login/管理中心登录链接.txt
+          grep -qE '^https://leyra\.xin/admin#adm_[A-Za-z0-9_-]{40,80}$' login/link.txt
+          { echo '打开下面的链接进入 Leyra 管理后台（7 天内有效，请勿转发）。'; echo '进去后在「安全」页设置管理员账号密码，以后直接打开 https://leyra.xin/admin 登录即可。'; echo; cat login/link.txt; } > login/管理后台登录链接.txt
           rm login/link.txt
           echo 'LEYRA_ADMIN_LINK_CREATED=YES'
       - uses: actions/upload-artifact@v4

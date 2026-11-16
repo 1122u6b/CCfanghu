@@ -49,6 +49,9 @@ class Site:
             # Only Caddy on this machine connects here, so its forwarded client address is trusted.
             ip = h.get('x-forwarded-for', '').split(',')[0].strip() or 'local'
             path = path.split('?', 1)[0]
+            # leyra.xin/admin: the management center and its API, served by the gateway's own handler.
+            if path in ('/admin', '/admin/') or path.startswith('/api/v1/'):
+                return await self.gateway.http(r, w, b'', header=header, client_ip=ip)
             body = {}
             if method == 'POST':
                 n = int(h.get('content-length', '0'))

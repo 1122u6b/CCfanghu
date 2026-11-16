@@ -1,4 +1,5 @@
 import tempfile
+from pathlib import Path
 import unittest
 
 from customers import Customers, CustomerError
@@ -37,3 +38,20 @@ class CustomerAccounts(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class AdminPassword(unittest.TestCase):
+    def test_password_login_and_session_lengths(self):
+        import time
+        from management import Management, ManagementError
+        with tempfile.TemporaryDirectory() as tmp:
+            m = Management(tmp)
+            self.assertFalse(m.admin_password_set()); self.assertIsNone(m.admin_login('boss', 'whatever-123', True))
+            with self.assertRaises(ManagementError): m.rpc({'type': 'admin_set_password', 'username': 'boss', 'password': 'short'})
+            m.rpc({'type': 'admin_set_password', 'username': 'boss', 'password': 'correct-horse-9'})
+            self.assertIsNone(m.admin_login('boss', 'wrong-password', True))
+            long = m.admin_login('BOSS', 'correct-horse-9', True); short = m.admin_login('boss', 'correct-horse-9', False)
+            self.assertTrue(m.admin_session_valid(long['token'])); self.assertTrue(m.admin_session_valid(short['token']))
+            self.assertGreater(long['expires'] - time.time(), 29 * 86400); self.assertLess(short['expires'] - time.time(), 25 * 3600)
+            self.assertNotIn(b'correct-horse-9', (Path(tmp) / 'management.sqlite3').read_bytes())
+            m.rpc({'type': 'admin_session_revoke_all'}); self.assertFalse(m.admin_session_valid(long['token']))

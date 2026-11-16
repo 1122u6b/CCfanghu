@@ -145,6 +145,22 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
             count=db.execute('SELECT COUNT(*) FROM dns_observations WHERE nonce=?',(nonce,)).fetchone()[0]
             if count<16:db.execute('INSERT OR IGNORE INTO dns_observations VALUES (?,?,?)',(nonce,source,now))
             return True
+    def admin_login(self,username,password,remember):
+        """Owner password login for the management center; returns a session token or None."""
+        from customers import _check_password,_hash_password
+        with self.db() as db:cred=self.get(db,'admin_password')
+        if not isinstance(username,str) or not isinstance(password,str) or len(password)>128:return None
+        ok=_check_password(password,cred['hash'] if cred else _hash_password('x'))
+        if not cred or not ok or username.strip().lower()!=cred['username'].lower():return None
+        with self.db() as db:return self.new_admin_session(db,720 if remember else 24)
+    def admin_password_set(self):
+        with self.db() as db:return self.get(db,'admin_password') is not None
+    def new_admin_session(self,db,hours):
+        import hashlib
+        token='adm_'+secrets.token_urlsafe(40);now=int(time.time())
+        sessions=[s for s in self.get(db,'admin_sessions',[]) if s['expires']>now][-19:]
+        sessions.append({'hash':hashlib.sha256(token.encode()).hexdigest(),'expires':now+hours*3600})
+        self.put(db,'admin_sessions',sessions);return {'token':token,'expires':now+hours*3600}
     def admin_session_valid(self,token):
         import hashlib,hmac
         if not isinstance(token,str) or not re.fullmatch(r'adm_[A-Za-z0-9_-]{40,80}',token):return False
@@ -188,13 +204,18 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
                     self._time_status=(now,ok)
                 return {'unix':time.time(),'synchronized':self._time_status[1],'source':'server operating-system NTP synchronization state'}
             if kind=='admin_session_create':
-                import hashlib
                 hours=req.get('hours',168)
                 if not isinstance(hours,int) or not 1<=hours<=720:raise ManagementError('hours must be 1 to 720')
-                token='adm_'+secrets.token_urlsafe(40)
-                sessions=[s for s in self.get(db,'admin_sessions',[]) if s['expires']>now][-19:]
-                sessions.append({'hash':hashlib.sha256(token.encode()).hexdigest(),'expires':now+hours*3600})
-                self.put(db,'admin_sessions',sessions);return {'token':token,'expires':now+hours*3600}
+                return self.new_admin_session(db,hours)
+            if kind=='admin_set_password':
+                from customers import _hash_password
+                username=req.get('username');password=req.get('password')
+                if not isinstance(username,str) or not re.fullmatch(r'[A-Za-z0-9_.@-]{3,40}',username.strip()):raise ManagementError('管理员账号需要 3 到 40 位字母或数字')
+                if not isinstance(password,str) or not 10<=len(password)<=128:raise ManagementError('管理员密码至少 10 位')
+                self.put(db,'admin_password',{'username':username.strip(),'hash':_hash_password(password),'changed_at':now})
+                return {'saved':True}
+            if kind=='admin_password_info':
+                cred=self.get(db,'admin_password');return {'set':cred is not None,'username':cred['username'] if cred else None}
             if kind=='admin_session_revoke_all':self.put(db,'admin_sessions',[]);return {'saved':True}
             if kind=='account':return self.get(db,'account')
             if kind=='set_contact':
