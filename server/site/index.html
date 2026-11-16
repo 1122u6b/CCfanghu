@@ -120,7 +120,7 @@ footer{border-top:1px solid var(--line);margin-top:56px;padding:30px 0;color:var
 <body>
 <header><div class="wrap">
  <a class="logo" href="#/"><svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffa26f"/><stop offset="1" stop-color="#ec6d3e"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg1)"/><path d="M11 8v16h11" stroke="#1d0d05" stroke-width="3.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>Leyra</a>
- <nav id="nav"><a href="#/">首页</a><a href="#/price">价格</a><a href="#/guide">使用教程</a><a href="#/help">常见问题</a></nav>
+ <nav id="nav"><a href="#/">首页</a><a href="#/register">免费试用</a><a href="#/price">价格</a><a href="#/guide">使用教程</a><a href="#/help">常见问题</a></nav>
  <div class="acct" id="acct"></div>
 </div></header>
 <main id="main"></main>
@@ -144,10 +144,11 @@ function api(path, body) {
   });
 }
 function setToken(t) { TOKEN = t; try { t ? localStorage.setItem('leyra.session', t) : localStorage.removeItem('leyra.session'); } catch (e) {} acct(); }
-function acct() { $('acct').innerHTML = '<button class="btn hide-sm" onclick="copyGroup()">' + QQI + '售后 QQ 群</button><a class="btn p" href="#/price">购买</a>'; }
+function acct() { $('acct').innerHTML = '<button class="btn hide-sm" onclick="copyGroup()">' + QQI + '售后 QQ 群</button>' + (TOKEN ? '<a class="btn" href="#/me">我的账号</a>' : '<a class="btn hide-sm" href="#/login">登录</a>') + '<a class="btn p" href="#/price">购买</a>'; }
 var QQI = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5h14v10H9l-4 4z"/></svg>';
 function group() { return INFO && INFO.qq_group ? INFO.qq_group : '1136427075'; }
 function price() { return INFO && INFO.price ? INFO.price : '300 元买断，永久使用'; }
+function copyText(t) { (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { toast('已复制'); }, function () { prompt('复制下面的内容', t); }); }
 function copyGroup() { var g = group(); (navigator.clipboard ? navigator.clipboard.writeText(g) : Promise.reject()).then(function () { toast('群号 ' + g + ' 已复制，打开 QQ 搜索加群即可'); }, function () { prompt('售后 QQ 群号', g); }); }
 function groupCard() {
   return '<div class="qq"><div class="qqi">' + QQI + '</div><div style="flex:1;min-width:0"><div class="mini">售后 QQ 群 · 下单 / 技术支持</div><b class="qqn">' + esc(group()) + '</b><div class="mini">' + esc((INFO && INFO.qq_group_name) || 'Leyra 技术交流群') + '</div></div><button class="btn p" onclick="copyGroup()">复制群号</button></div>';
@@ -206,7 +207,7 @@ P.home = function () {
     '<h1>独享一条线路，<br><span class="g">真实 IP 不外泄</span></h1>' +
     '<p class="lead">Leyra 是一个<b>全时防护</b>的 Windows 客户端：电脑的网络统一走<b>只属于你的加密线路</b>。线路一旦出问题，<b>先断网、再重连</b>，绝不悄悄退回本地网络。</p>' +
     '<ul class="ticks"><li>' + TICK + '装好填授权码就能用，不用自己配代理</li><li>' + TICK + '断网时也能提交工单，问题照样有人回</li><li>' + TICK + '自带的住宅代理、订阅链接也能直接接入</li></ul>' +
-    '<div class="cta">' + dl() + '<a class="btn big" href="#/price">购买授权码</a><a class="btn link" href="#/guide">怎么用 →</a></div>' +
+    '<div class="cta">' + dl() + '<a class="btn big" href="#/register">免费试用 1 天</a><a class="btn link" href="#/price">价格 →</a></div>' +
     '<div class="meta">' + dlNote() + '</div>' +
     '<div class="stats"><div><b>300 元买断</b><span>一次购买，永久使用</span></div><div><b>断线即断网</b><span>不会回退本地网络</span></div><div><b>30+ 项</b><span>一键全面自检</span></div></div>' +
     '</div><div class="engine">' + ver + '<div class="ehead">Leyra 防护引擎<span class="live"><i></i>运行中</span></div>' + VIZ +
@@ -264,9 +265,9 @@ P.login = function () {
     '<div class="err" id="err"></div><button class="btn p big" style="width:100%" onclick="doLogin()">登录</button><p class="mini" style="margin-top:14px">还没有账号？<a href="#/register">注册</a></p></div></div>';
 };
 P.register = function () {
-  return '<div class="wrap"><div class="form panel"><h2>注册</h2><p class="sub">注册后等待开通，开通后即可下载连接文件。</p><label>账号（手机号、邮箱或字母数字，3 到 64 位）</label><input id="lg" autocomplete="username"><label>密码（至少 8 位）</label><input id="pw" type="password" autocomplete="new-password">' +
+  return '<div class="wrap"><div class="form panel"><h2>注册</h2><p class="sub">注册就送 1 天免费试用授权码，在 Leyra 里填入即可使用。每台电脑只能试用一次。</p><label>账号（手机号、邮箱或字母数字，3 到 64 位）</label><input id="lg" autocomplete="username"><label>密码（至少 8 位）</label><input id="pw" type="password" autocomplete="new-password">' +
     '<label>再输一次密码</label><input id="pw2" type="password" autocomplete="new-password"><label>联系方式（微信 / QQ / 邮箱，开通后通知你）</label><input id="ct">' +
-    '<div class="err" id="err"></div><button class="btn p big" style="width:100%" onclick="doRegister()">注册</button><p class="mini" style="margin-top:14px">已有账号？<a href="#/login">登录</a></p></div></div>';
+    '<div class="err" id="err"></div><button class="btn p big" style="width:100%" onclick="doRegister()">注册，领取 1 天试用</button><p class="mini" style="margin-top:14px">已有账号？<a href="#/login">登录</a></p></div></div>';
 };
 function doLogin() {
   $('err').textContent = '';
@@ -284,9 +285,15 @@ P.me = function () {
   if (!TOKEN) { setTimeout(function () { location.hash = '#/login'; }); return ''; }
   api('me').then(function (m) {
     if (current() !== 'me') return;
-    var st = m.status === 'active' ? '<span class="badge on">已开通</span>' : m.status === 'pending' ? '<span class="badge wait">等待开通</span>' : '<span class="badge off">已停用</span>';
+    var st = m.status === 'active' ? '<span class="badge on">已开通</span>' : m.status === 'pending' ? '<span class="badge on">已注册</span>' : '<span class="badge off">已停用</span>';
     var html = '<div class="wrap me"><div class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><div class="eyebrow">MY ACCOUNT</div><h2 style="margin:6px 0 2px;font-size:28px">' + esc(m.login) + ' ' + st + '</h2><div class="mini">联系方式：' + esc(m.contact) + '</div></div><button class="btn" onclick="doLogout()">退出登录</button></div></div>';
-    if (m.status === 'pending') html += '<div class="panel"><h3 style="margin-top:0">账号正在等待开通</h3><p class="mini" style="font-size:15px">我们会尽快通过你留的联系方式联系你。开通后刷新本页，就能为你的电脑下载连接文件。可以先把软件装好：</p>' + dl() + '</div>';
+    if (m.trial) {
+      var t = m.trial, now = Date.now() / 1000, tst = t.status === 'unused' ? '还没使用' : t.status === 'revoked' ? '已作废' : (t.expires_at && t.expires_at < now ? '已到期' : '使用中' + (t.expires_at ? '，' + new Date(t.expires_at * 1000).toLocaleString() + ' 到期' : ''));
+      html += '<div class="panel"><div class="eyebrow">FREE TRIAL</div><h3 style="margin:8px 0 6px">你的 1 天免费试用授权码</h3>' +
+        '<div class="qq" style="margin:14px 0"><div style="flex:1;min-width:0"><b class="qqn" style="font-family:ui-monospace,Consolas,monospace">' + esc(t.code) + '</b><div class="mini">' + tst + '</div></div><button class="btn p" onclick="copyText(\'' + esc(t.code) + '\')">复制授权码</button></div>' +
+        '<ol class="mini" style="font-size:14px;line-height:1.9;margin:0 0 16px;padding-left:20px"><li>下载并安装 Leyra</li><li>打开 Leyra，在「激活」页填这个授权码，点「激活」</li><li>试用 1 天，满意后在售后 QQ 群购买正式授权码（' + esc(price()) + '），在软件里点「续费」填入，直接转为永久</li></ol>' +
+        '<p class="mini">每台电脑只能试用一次，重新注册账号也不会再送试用。</p>' + dl() + '</div>';
+    } else if (m.status === 'pending') html += '<div class="panel"><h3 style="margin-top:0">欢迎</h3><p class="mini" style="font-size:15px">需要购买授权码请加售后 QQ 群 ' + esc(group()) + '。</p>' + dl() + '</div>';
     if (m.status === 'active') {
       html += '<div class="panel"><h3 style="margin-top:0">我的电脑 <span class="mini">（' + m.devices.length + ' / ' + m.max_devices + '）</span></h3>' +
         (m.devices.length ? '<table><tr><th>名称</th><th>添加时间</th><th>状态</th><th></th></tr>' + m.devices.map(function (d) {

@@ -90,7 +90,7 @@ class Site:
         if action == 'register':
             if self.limited('reg:' + ip, 5, 3600):
                 return await self.send(w, 429, {'error': '注册太频繁，请一小时后再试'})
-            self.customers.register(body.get('login'), body.get('password'), body.get('contact'))
+            self.customers.register(body.get('login'), body.get('password'), body.get('contact'), self.gateway.devices.licenses)
             return await self.send(w, 200, {'saved': True})
         if action == 'login':
             if self.limited('login:' + ip, 10, 600):
@@ -102,7 +102,7 @@ class Site:
         if action == 'logout':
             self.customers.logout(token); return await self.send(w, 200, {'saved': True})
         if action == 'me':
-            return await self.send(w, 200, self.customers.me(customer, self.gateway.devices))
+            return await self.send(w, 200, self.customers.me(customer, self.gateway.devices, self.gateway.devices.licenses))
         if action == 'devices':
             if self.limited('dev:%d' % customer['id'], 10, 3600):
                 return await self.send(w, 429, {'error': '操作太频繁，请稍后再试'})

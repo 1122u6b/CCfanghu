@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,tar
                 'socks_username': identity, 'socks_password': secret,
                 'license_required': False}
 
-    def authenticate(self, token):
+    def authenticate(self, token, allow_expired=False):
         if not isinstance(token, str) or len(token) > 256 or token.count('.') != 1:
             return None
         identity, secret = token.split('.', 1)
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,tar
         # Also perform a digest comparison when no device exists.
         expected = row['secret_hash'] if row else '0' * 64
         valid = hmac.compare_digest(expected, self.hash(secret))
-        if not valid or not row or not row['enabled'] or self.licenses.expired(identity):
+        if not valid or not row or not row['enabled'] or (self.licenses.expired(identity) and not allow_expired):
             return None
         return Device(identity, secret, Management(self.root / identity))
 
@@ -187,6 +187,7 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,tar
         if kind == 'account':
             result = device.management.rpc(req)
             result['expires_at'] = self.licenses.expires_at(device.id)
+            result['license_kind'] = self.licenses.kind_of(device.id)
             return result
         # Help and signed-off releases are published once by the owner and shared read-only.
         if kind in ('help', 'update_manifest', 'update_chunk'):

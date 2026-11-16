@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS customers(id INTEGER PRIMARY KEY,login TEXT NOT NULL 
 CREATE TABLE IF NOT EXISTS customer_devices(device_id TEXT PRIMARY KEY,customer_id INTEGER NOT NULL REFERENCES customers(id),name TEXT NOT NULL,created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS customer_sessions(hash TEXT PRIMARY KEY,customer_id INTEGER NOT NULL REFERENCES customers(id),expires INTEGER NOT NULL);
 ''')
+            if 'trial_code' not in [r[1] for r in db.execute('PRAGMA table_info(customers)')]:
+                db.execute('ALTER TABLE customers ADD COLUMN trial_code TEXT')
         os.chmod(self.path, 0o600)
 
     @contextmanager
@@ -53,7 +55,7 @@ CREATE TABLE IF NOT EXISTS customer_sessions(hash TEXT PRIMARY KEY,customer_id I
             conn.close()
 
     # ---------- public side ----------
-    def register(self, login, password, contact):
+    def register(self, login, password, contact, licenses=None):
         if not isinstance(login, str) or not LOGIN_RE.match(login.strip()):
             raise CustomerError('账号需要 3 到 64 位，可用字母、数字、手机号或邮箱')
         if not isinstance(password, str) or not 8 <= len(password) <= 128:
@@ -69,6 +71,8 @@ CREATE TABLE IF NOT EXISTS customer_sessions(hash TEXT PRIMARY KEY,customer_id I
                                  (login.strip(), _hash_password(password), contact.strip(), 'pending', 1, now))
             except sqlite3.IntegrityError:
                 raise CustomerError('这个账号已经被注册了') from None
+            if licenses is not None:
+                db.execute('UPDATE customers SET trial_code=? WHERE id=?', (licenses.create_trial('网站注册 ' + login.strip()), cur.lastrowid))
         return {'id': cur.lastrowid}
 
     def login(self, login, password):
@@ -100,11 +104,15 @@ CREATE TABLE IF NOT EXISTS customer_sessions(hash TEXT PRIMARY KEY,customer_id I
         with self.db() as db:
             db.execute('DELETE FROM customer_sessions WHERE hash=?', (hashlib.sha256(token.encode()).hexdigest(),))
 
-    def me(self, customer, devices):
+    def me(self, customer, devices, licenses=None):
         with self.db() as db:
             rows = [dict(r) for r in db.execute('SELECT device_id,name,created_at FROM customer_devices WHERE customer_id=? ORDER BY created_at', (customer['id'],))]
         enabled = {d['id']: d['enabled'] for d in devices.list()['items']}
-        return {'login': customer['login'], 'contact': customer['contact'], 'status': customer['status'], 'max_devices': customer['max_devices'],
+        trial = None
+        if licenses is not None and customer.get('trial_code'):
+            info = licenses.status(customer['trial_code']) or {}
+            trial = {'code': customer['trial_code'], 'status': info.get('status', 'unused'), 'expires_at': info.get('expires_at')}
+        return {'login': customer['login'], 'contact': customer['contact'], 'status': customer['status'], 'max_devices': customer['max_devices'], 'trial': trial,
                 'devices': [{'id': r['device_id'], 'name': r['name'], 'created_at': r['created_at'], 'enabled': bool(enabled.get(r['device_id']))} for r in rows]}
 
     def add_device(self, customer, name, devices):
@@ -127,7 +135,7 @@ CREATE TABLE IF NOT EXISTS customer_sessions(hash TEXT PRIMARY KEY,customer_id I
     # ---------- owner side ----------
     def admin_list(self):
         with self.db() as db:
-            rows = [dict(r) for r in db.execute('SELECT id,login,contact,status,max_devices,note,created_at,last_login FROM customers ORDER BY id DESC')]
+            rows = [dict(r) for r in db.execute('SELECT id,login,contact,status,max_devices,note,created_at,last_login,trial_code FROM customers ORDER BY id DESC')]
             for r in rows:
                 r['devices'] = [x[0] for x in db.execute('SELECT device_id FROM customer_devices WHERE customer_id=?', (r['id'],))]
         return {'items': rows}

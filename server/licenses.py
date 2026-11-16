@@ -46,7 +46,10 @@ class Licenses:
 CREATE TABLE IF NOT EXISTS licenses(code TEXT PRIMARY KEY,days INTEGER NOT NULL,note TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'unused',device_id TEXT,machine TEXT,contact TEXT NOT NULL DEFAULT '',order_no TEXT NOT NULL DEFAULT '',activated_at INTEGER);
 CREATE TABLE IF NOT EXISTS device_expiry(device_id TEXT PRIMARY KEY,machine TEXT NOT NULL,expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS trial_machines(machine TEXT PRIMARY KEY,code TEXT NOT NULL,at INTEGER NOT NULL);
 ''')
+            if 'kind' not in [r[1] for r in db.execute('PRAGMA table_info(licenses)')]:
+                db.execute("ALTER TABLE licenses ADD COLUMN kind TEXT NOT NULL DEFAULT 'paid'")
         os.chmod(self.path, 0o600)
 
     @contextmanager
@@ -60,6 +63,27 @@ CREATE TABLE IF NOT EXISTS device_expiry(device_id TEXT PRIMARY KEY,machine TEXT
             conn.close()
 
     # ---------- owner ----------
+    def create_trial(self, note=''):
+        """A one-day code for a newly registered website account; each computer may run one trial ever."""
+        now = int(time.time())
+        with self.db() as db:
+            while True:
+                code = '-'.join(''.join(secrets.choice(ALPHABET) for _ in range(4)) for _ in range(4))
+                try:
+                    db.execute("INSERT INTO licenses(code,days,note,created_at,kind) VALUES(?,?,?,?,'trial')", (code, 1, str(note or '')[:100], now)); return code
+                except sqlite3.IntegrityError:
+                    pass
+
+    def status(self, code):
+        with self.db() as db:
+            row = db.execute('SELECT l.status,l.kind,e.expires_at FROM licenses l LEFT JOIN device_expiry e ON e.device_id=l.device_id WHERE l.code=?', (code,)).fetchone()
+        return dict(row) if row else None
+
+    def kind_of(self, device_id):
+        with self.db() as db:
+            rows = [r[0] for r in db.execute("SELECT kind FROM licenses WHERE device_id=? AND status='active'", (device_id,))]
+        return 'paid' if 'paid' in rows else ('trial' if rows else None)
+
     def create(self, count, days, note=''):
         if not isinstance(count, int) or not 1 <= count <= 200:
             raise LicenseError('一次可以生成 1 到 200 个')
@@ -77,7 +101,7 @@ CREATE TABLE IF NOT EXISTS device_expiry(device_id TEXT PRIMARY KEY,machine TEXT
 
     def list(self):
         with self.db() as db:
-            rows = [dict(r) for r in db.execute('''SELECT l.code,l.days,l.note,l.created_at,l.status,l.device_id,l.contact,l.order_no,l.activated_at,e.expires_at
+            rows = [dict(r) for r in db.execute('''SELECT l.code,l.days,l.note,l.created_at,l.status,l.kind,l.device_id,l.contact,l.order_no,l.activated_at,e.expires_at
                 FROM licenses l LEFT JOIN device_expiry e ON e.device_id=l.device_id ORDER BY l.created_at DESC,l.code LIMIT 2000''')]
         for r in rows:
             r['bound'] = r.pop('device_id') is not None
@@ -128,6 +152,11 @@ CREATE TABLE IF NOT EXISTS device_expiry(device_id TEXT PRIMARY KEY,machine TEXT
             if row['status'] == 'revoked':
                 raise LicenseError('这个授权码已作废，请联系售后')
             if row['status'] == 'unused':
+                if row['kind'] == 'trial':
+                    # One trial per computer, however many website accounts are registered.
+                    if db.execute('SELECT 1 FROM trial_machines WHERE machine=?', (machine,)).fetchone():
+                        raise LicenseError('这台电脑已经试用过了，请在售后 QQ 群购买授权码')
+                    db.execute('INSERT INTO trial_machines VALUES(?,?,?)', (machine, code, now))
                 issued = devices.issue(('%s · %s' % (contact or label, code[-4:]))[:100])
                 db.execute("UPDATE licenses SET status='active',device_id=?,machine=?,contact=?,order_no=?,activated_at=? WHERE code=?",
                            (issued['id'], machine, contact, order_no, now, code))
@@ -156,11 +185,13 @@ CREATE TABLE IF NOT EXISTS device_expiry(device_id TEXT PRIMARY KEY,machine TEXT
                 raise LicenseError('只能在原来激活的电脑上续费')
             if expiry['expires_at'] >= PERMANENT:
                 raise LicenseError('这台电脑是永久授权，不需要续费')
-            row = db.execute('SELECT days,status FROM licenses WHERE code=?', (code,)).fetchone()
+            row = db.execute('SELECT days,status,kind FROM licenses WHERE code=?', (code,)).fetchone()
             if not row:
                 raise LicenseError('授权码不存在，请检查是否输错')
             if row['status'] != 'unused':
                 raise LicenseError('这个授权码已经用过了，续费需要一个新的授权码')
+            if row['kind'] == 'trial':
+                raise LicenseError('试用授权码不能用来续费，请在售后 QQ 群购买正式授权码')
             expires = expiry_for(row['days'], max(now, expiry['expires_at']))
             db.execute("UPDATE licenses SET status='active',device_id=?,machine=?,activated_at=? WHERE code=?", (device.id, machine, now, code))
             db.execute('UPDATE device_expiry SET expires_at=? WHERE device_id=?', (expires, device.id))

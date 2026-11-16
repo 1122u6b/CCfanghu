@@ -110,7 +110,7 @@ R.licenses = function () {
       if (x.expires_at && x.expires_at < 253402300799 && x.expires_at * 1000 < Date.now()) return '<span class="tag x">已到期</span>';
       return x.bound ? '<span class="tag ok">已激活</span>' : '<span class="tag w">已解绑，可换电脑</span>';
     };
-    var term = function (x) { return x.days === 0 ? '永久' : x.days + ' 天'; };
+    var term = function (x) { return x.kind === 'trial' ? '<span class="tag w">试用 1 天</span>' : x.days === 0 ? '永久' : x.days + ' 天'; };
     $('main').innerHTML = '<div class="card"><h2>生成授权码</h2><p class="muted">客户在售后群下单后，复制一个「未使用」的授权码发给他。客户在 Leyra 里填授权码就能激活。<b>一个授权码只能用于一台电脑。</b></p>' +
       '<div class="row"><input id="lc" type="number" min="1" max="200" value="1" style="max-width:120px" title="数量"><select id="ld" style="max-width:180px"><option value="0">永久（买断）</option><option value="30">30 天</option><option value="90">90 天</option><option value="365">365 天</option></select><input id="ln" placeholder="备注（可选，比如客户名字、订单号）"><button class="b p" onclick="newCodes()">生成</button></div><div id="newcodes"></div></div>' +
       '<div class="card"><h2>全部授权码（' + items.length + '，未使用 ' + unused + '）</h2>' + (items.length ? '<table><tr><th>授权码</th><th>期限</th><th>状态</th><th>客户联系方式 / 订单号</th><th>激活时间</th><th>备注</th><th></th></tr>' + items.map(function (x) {
@@ -134,9 +134,9 @@ R.customers = function () {
     var items = r.items, pending = items.filter(function (c) { return c.status === 'pending'; }).length;
     var label = { pending: '<span class="tag w">等待开通</span>', active: '<span class="tag ok">已开通</span>', disabled: '<span class="tag x">已停用</span>' };
     $('main').innerHTML = '<div class="card"><h2>网站注册的客户（' + items.length + '，其中 ' + pending + ' 个等待开通）</h2>' +
-      '<p class="muted">客户在 leyra.xin 注册后显示在这里。点「开通」后，客户登录网站就能自己下载连接文件。「电脑数」是这个客户最多能用几台电脑。停用会让这个客户的所有电脑立即断开。</p>' +
-      (items.length ? '<table><tr><th>账号</th><th>联系方式</th><th>状态</th><th>电脑数</th><th>注册时间</th><th></th></tr>' + items.map(function (c) {
-        return '<tr><td>' + esc(c.login) + '</td><td>' + esc(c.contact) + '</td><td>' + label[c.status] + '</td><td>' + c.devices.length + ' / <input type="number" min="0" max="50" value="' + c.max_devices + '" style="width:64px" onchange="setMax(' + c.id + ',this.value)"></td><td>' + when(c.created_at) + '</td><td>' +
+      '<p class="muted">客户在 leyra.xin 注册后显示在这里，系统自动送一个 1 天试用码（每台电脑只能试用一次，试用码是否用过可在「授权码」页查看）。</p>' +
+      (items.length ? '<table><tr><th>账号</th><th>联系方式</th><th>试用码</th><th>状态</th><th>电脑数</th><th>注册时间</th><th></th></tr>' + items.map(function (c) {
+        return '<tr><td>' + esc(c.login) + '</td><td>' + esc(c.contact) + '</td><td><code>' + esc(c.trial_code || '-') + '</code></td><td>' + label[c.status] + '</td><td>' + c.devices.length + ' / <input type="number" min="0" max="50" value="' + c.max_devices + '" style="width:64px" onchange="setMax(' + c.id + ',this.value)"></td><td>' + when(c.created_at) + '</td><td>' +
           (c.status !== 'active' ? '<button class="b p" onclick="setStatus(' + c.id + ',\'active\')">开通</button> ' : '') +
           (c.status !== 'disabled' ? '<button class="b d" onclick="setStatus(' + c.id + ',\'disabled\')">停用</button>' : '') + '</td></tr>';
       }).join('') + '</table>' : '<p class="muted">还没有客户注册。把 https://leyra.xin 发给客户，让他们注册即可。</p>') + '</div>';

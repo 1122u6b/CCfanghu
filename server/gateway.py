@@ -184,9 +184,13 @@ class Gateway:
         token=authorization[7:] if authorization.startswith('Bearer ') else ''
         is_admin=hmac.compare_digest(authorization.encode(),('Bearer '+self.config['api_token']).encode()) or (token.startswith('adm_') and self.management.admin_session_valid(token))
         device=None if is_admin else self.devices.authenticate(token)
+        renew_only=False
         if not is_admin and device is None:
-            if self.devices.expired_token(token):return await self.response(w,403,{'error':'expired','detail':'授权已到期'})
-            return await self.response(w,401,{'error':'unauthorized'})
+            if self.devices.expired_token(token):
+                # An expired computer may still do exactly one thing: renew with a new code.
+                if method=='POST' and path=='/api/v1/rpc':device=self.devices.authenticate(token,allow_expired=True);renew_only=True
+                else:return await self.response(w,403,{'error':'expired','detail':'授权已到期'})
+            else:return await self.response(w,401,{'error':'unauthorized'})
         if method=='GET' and path=='/api/v1/status':return await self.response(w,200,{'version':'0.6.0','active_connections':max(0,self.active-1) if is_admin else self.device_active.get(device.id,0),'uptime_seconds':int(time.time()-self.started),'scope':'server' if is_admin else 'device','license_required':False})
         if method=='GET' and path=='/api/v1/egress-probe':
             peer=w.get_extra_info('peername')
@@ -202,6 +206,7 @@ class Gateway:
             from management import ManagementError
             try:
                 request=json.loads(await asyncio.wait_for(r.readexactly(n),60))
+                if renew_only and not (isinstance(request,dict) and request.get('type')=='license_renew'):return await self.response(w,403,{'error':'expired','detail':'授权已到期'})
                 if is_admin and isinstance(request,dict) and request.get('type') in ('create_device_profile','rotate_device_profile'):
                     return await self.response(w,200,self.device_profile(request))
                 if is_admin and isinstance(request,dict) and request.get('type') in ('licenses','license_create','license_revoke','license_unbind'):

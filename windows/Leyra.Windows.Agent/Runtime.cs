@@ -198,6 +198,10 @@ sealed partial class Runtime:IDisposable
      var renewed=await Remote(new{type="license_renew",code=Text(request,"code"),machine=MachineId.Get()},stop);
      retryAt=DateTimeOffset.MinValue;configured=false;state="starting";return new{saved=true,suite=false,expires_at=renewed.GetProperty("expires_at").GetInt64()};
     case "access_code":throw new InvalidOperationException("暂不支持接入码，请在售后群联系客服");
+    case "trial_quit":
+     // Trial over and the customer chose to quit: stop taking over the network until a code is entered.
+     store.Settings.Enabled=false;store.Settings.QuitPause=true;store.Settings.PausedUntil=0;store.Save();
+     kernel.Stop();filters.RemoveOwned();configured=false;state="paused";Record("paused","quit");return new{saved=true};
     case "consent":store.Settings.ConsentVersion=request.GetProperty("version").GetInt32();store.Save();return new{saved=true};
     case "proxy_off":return proxy.Disable();
     case "proxy_undo":return proxy.Undo();
