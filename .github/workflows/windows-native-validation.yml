@@ -195,6 +195,8 @@ jobs:
           [IO.File]::WriteAllText("$env:ProgramData\LeyraConnect\owner.sid", $sid)
           Start-Service LeyraConnect; Start-Sleep 5
           Write-Host "   owner set to $sid"
+          Write-Host "   whoami: $(whoami) / elevated: $(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrators'))"
+          Write-Host "   service runs as: $((Get-CimInstance Win32_Service -Filter "Name='LeyraConnect'").StartName)"
           # Safety net: whatever happens below, give this machine its network back within 4 minutes.
           $at = (Get-Date).AddMinutes(4).ToString('HH:mm')
           schtasks /Create /TN LeyraCiRecover /SC ONCE /ST $at /RU SYSTEM /TR "`"$agent`" --recover" /F | Out-Null

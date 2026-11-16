@@ -33,7 +33,7 @@ sealed class LocalPipe(Runtime runtime,SecurityIdentifier owner)
   try
   {
    SecurityIdentifier? caller=null;pipe.RunAsClient(()=>caller=WindowsIdentity.GetCurrent(true)?.User);
-   if(caller is null||!caller.Equals(owner))throw new UnauthorizedAccessException("本机操作身份不匹配");
+   if(caller is null||!caller.Equals(owner))throw new UnauthorizedAccessException("caller "+(caller?.Value??"(none)")+" is not owner "+owner.Value);
    using var read=CancellationTokenSource.CreateLinkedTokenSource(stop);read.CancelAfter(TimeSpan.FromSeconds(5));
    var envelope=await PipeProtocol.ReadAsync(pipe,read.Token);
    if(envelope.GetProperty("version").GetInt32()!=1)throw new InvalidDataException("本机通信版本不匹配");
@@ -45,6 +45,9 @@ sealed class LocalPipe(Runtime runtime,SecurityIdentifier owner)
    await PipeProtocol.WriteAsync(pipe,result,operation.Token);
   }
   catch(Exception e)when(e is IOException or UnauthorizedAccessException or JsonException or OperationCanceledException or InvalidDataException or System.ComponentModel.Win32Exception)
-  { /* Requests and credentials are never logged. */ }
+  {
+   // Request contents and credentials are never logged; only why a connection was refused.
+   if(e is not OperationCanceledException)Program.Log("pipe connection refused",new Exception(e.GetType().Name+": "+e.Message));
+  }
  }
 }
