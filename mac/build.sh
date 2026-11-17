@@ -30,4 +30,5 @@ pkgbuild --analyze --root "$ROOT" "$OUT/components.plist"
 plutil -replace 0.BundleIsRelocatable -bool false "$OUT/components.plist"
 pkgbuild --root "$ROOT" --component-plist "$OUT/components.plist" --scripts mac/packaging/scripts \
   --identifier xin.leyra.pkg --version "$V" --install-location / "$OUT/Leyra-$V.pkg"
+(cd "$OUT" && shasum -a 256 "Leyra-$V.pkg" > "Leyra-$V.sha256")
 echo "built $OUT/Leyra-$V.pkg"

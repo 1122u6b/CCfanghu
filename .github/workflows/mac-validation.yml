@@ -14,6 +14,11 @@ on:
         type: boolean
         required: true
         default: false
+      publish_to_website:
+        description: 'After both Macs pass, publish this package (website download + automatic update)'
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -68,7 +73,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: mac-package
-          path: mac/out/Leyra-*.pkg
+          path: |
+            mac/out/Leyra-*.pkg
+            mac/out/Leyra-*.sha256
           retention-days: 7
   test:
     needs: [build, test-code]
@@ -107,6 +114,37 @@ jobs:
           SOCKS_PORT: ${{ needs.test-code.outputs.socks_port }}
           SOCKS_PASS: ${{ needs.test-code.outputs.socks_pass }}
         run: mac/tests/e2e.sh
+      - name: Fresh install state for the click-through (same Mac may activate again with its code)
+        if: matrix.chip == 'apple-silicon'
+        run: |
+          sudo launchctl bootout system/xin.leyra.agent || true
+          sudo "/Library/Application Support/Leyra/agent/leyra-agent" --recover || true
+          sudo rm -rf "/Library/Application Support/LeyraConnect"
+          sudo "/Library/Application Support/Leyra/agent/leyra-agent" --install $(id -u)
+          sudo launchctl bootstrap system /Library/LaunchDaemons/xin.leyra.agent.plist
+          sleep 5; ls -l /var/run/leyra/agent.sock
+      - uses: actions/setup-node@v4
+        if: matrix.chip == 'apple-silicon'
+        with:
+          node-version: '20'
+      - name: Customer click-through in the real interface (same test as Windows)
+        if: matrix.chip == 'apple-silicon'
+        env:
+          TEST_CODE: ${{ needs.test-code.outputs[matrix.code_key] }}
+          EXIT_LINK_PORT: ${{ needs.test-code.outputs.socks_port }}
+          EXIT_LINK_PASS: ${{ needs.test-code.outputs.socks_pass }}
+          LEYRA_PIPE: /var/run/leyra/agent.sock
+        run: |
+          mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm install --silent playwright@1.48.2 && npx playwright install chromium >/dev/null
+          cd "$GITHUB_WORKSPACE"
+          EXIT_LINK="socks5://ci:${EXIT_LINK_PASS}@127.0.0.1:${EXIT_LINK_PORT}" NODE_PATH=/tmp/pw/node_modules node tests/e2e/customer-ui.mjs ui-shots
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.chip == 'apple-silicon'
+        with:
+          name: mac-ui-shots
+          path: ui-shots
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Service log on failure
         if: failure()
         run: |
@@ -115,6 +153,22 @@ jobs:
       - name: Remove protection rules (always)
         if: always()
         run: sudo "/Library/Application Support/Leyra/agent/leyra-agent" --recover || true
+  publish:
+    # Only after both Macs passed; only when asked ([mac-publish] in the commit message, or the input).
+    needs: test
+    if: ${{ inputs.publish_to_website == true || (github.event_name == 'push' && contains(github.event.head_commit.message, '[mac-publish]')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-package
+          path: release
+      - name: Upload the tested Mac package to the server and publish it
+        env:
+          LEYRA_SSH_KEY: ${{ secrets.LEYRA_SSH_KEY }}
+        run: bash deploy/publish_release.sh release
   revoke-test-code:
     if: ${{ always() && needs.test-code.outputs.code != '' }}
     needs: [test-code, test]
