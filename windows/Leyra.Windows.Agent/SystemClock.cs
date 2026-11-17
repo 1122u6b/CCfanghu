@@ -16,6 +16,16 @@ static class SystemClock
   var value=new SystemTime{Year=(ushort)d.Year,Month=(ushort)d.Month,Day=(ushort)d.Day,DayOfWeek=(ushort)d.DayOfWeek,Hour=(ushort)d.Hour,Minute=(ushort)d.Minute,Second=(ushort)d.Second,Milliseconds=(ushort)d.Millisecond};
   if(!SetSystemTime(in value))throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
  }
+ /// <summary>True when the computer already uses the Windows zone that this IANA zone maps to.
+ /// Several cities share one Windows zone (Asia/Hong_Kong and Asia/Shanghai are both China Standard Time),
+ /// so names are compared through Windows ids, not as text.</summary>
+ public static bool Matches(string iana)
+ {
+  if(iana.Length==0)return false;
+  TimeZoneInfo.ClearCachedData();
+  var wanted=TimeZoneInfo.TryConvertIanaIdToWindowsId(iana,out var w)?w:iana;
+  return string.Equals(TimeZoneInfo.Local.Id,wanted,StringComparison.OrdinalIgnoreCase);
+ }
  public static string CurrentIana()
  {
   TimeZoneInfo.ClearCachedData();var id=TimeZoneInfo.Local.Id;

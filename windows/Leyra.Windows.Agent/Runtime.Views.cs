@@ -13,7 +13,7 @@ sealed partial class Runtime
  {
   var system=SystemClock.CurrentIana();var exit=store.Settings.ExitTimezone;
   var offset=TimeZoneInfo.Local.GetUtcOffset(DateTime.UtcNow);var text="UTC"+(offset<TimeSpan.Zero?"-":"+")+offset.ToString(@"hh\:mm");
-  return new{system,exit,matches=exit.Length>0&&system==exit,can_change=exit.Length>0,dismissed=exit.Length>0&&store.Settings.TimezoneDismissedFor==exit,location=exitGeo is not null&&exitGeoFor==exitIp?exitGeo.Label:"",system_offset=text,original=store.Settings.OriginalTimezone is not null};
+  return new{system,exit,matches=SystemClock.Matches(exit),can_change=exit.Length>0,dismissed=exit.Length>0&&store.Settings.TimezoneDismissedFor==exit,location=exitGeo is not null&&exitGeoFor==exitIp?exitGeo.Label:"",system_offset=text,original=store.Settings.OriginalTimezone is not null};
  }
  async Task<object> Account(CancellationToken stop)
  {
@@ -92,7 +92,7 @@ sealed partial class Runtime
   else Add("L7",guarded?"pass":"skipped",guarded?"电脑没有公网 IPv6 地址":"防护规则未安装，未做 IPv6 实测");
   if(live){lastBypassScan=DateTimeOffset.MinValue;RefreshBypass();var l8=JsonSerializer.SerializeToElement(bypassCheck??ScanBypass());Add("L8",Text(l8,"verdict"),Text(l8,"detail"));}
   else Add("L8","skipped","防护建立后才检查绕开独享线路的程序");
-  var exitZone=store.Settings.ExitTimezone;var zoneMatches=exitZone.Length>0&&SystemClock.CurrentIana()==exitZone;
+  var exitZone=store.Settings.ExitTimezone;var zoneMatches=SystemClock.Matches(exitZone);
   Add("C1",exitZone.Length==0?"info":zoneMatches?"pass":"warn",exitZone.Length==0?"正在查询出口所在地的时区":zoneMatches?"电脑时区已和出口所在地一致（"+exitZone+"）":"电脑时区和出口所在地（"+exitZone+"）不一致");
   Add("S1",profile?.Role=="device"?"pass":"fail","独立设备身份；当前不使用商业激活码");
   Add("S2",configAt>DateTimeOffset.UtcNow.AddHours(-24)?"pass":"warn",configAt==DateTimeOffset.MinValue?"本次启动后还没有取得服务器配置":"线路配置取得于 "+configAt.ToLocalTime().ToString("MM-dd HH:mm"));

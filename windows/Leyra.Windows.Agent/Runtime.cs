@@ -187,12 +187,12 @@ sealed partial class Runtime:IDisposable
  async Task NetworkProbe(CancellationToken stop)
  {
   if(cloud is null)return;
+  var ok=false;
   try
   {
    using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(20));var ct=deadline.Token;
    await cloud.SendAsync("/api/v1/status",cancellation:ct);
-   exitIp=await ObserveExit(ct);exitVerified=true;netFailures=0;nextNetProbe=DateTimeOffset.UtcNow.AddSeconds(30);
-   await RefreshExitGeo(ct);await SampleLines(ct);await AutoTimezone(ct);
+   exitIp=await ObserveExit(ct);exitVerified=true;netFailures=0;nextNetProbe=DateTimeOffset.UtcNow.AddSeconds(30);ok=true;
   }
   catch(Exception e)when(e is not OperationCanceledException||!stop.IsCancellationRequested)
   {
@@ -209,6 +209,14 @@ sealed partial class Runtime:IDisposable
    try{if(state=="protected"&&configured)Block(e);}
    finally{Publish();gate.Release();}
   }
+  if(!ok)return;
+  // Location, timezone and line samples are extras: being slow or failing never counts as the line being down.
+  try
+  {
+   using var extra=CancellationTokenSource.CreateLinkedTokenSource(stop);extra.CancelAfter(TimeSpan.FromSeconds(45));
+   await RefreshExitGeo(extra.Token);await SampleLines(extra.Token);await AutoTimezone(extra.Token);
+  }
+  catch(Exception e)when(e is not OperationCanceledException||!stop.IsCancellationRequested){Program.Log("exit details",e);}
  }
  // Websites read the computer's timezone through the browser; keep it matching the exit's location.
  // The original zone is remembered for 恢复原来的时区 and restored on uninstall.
@@ -216,7 +224,7 @@ sealed partial class Runtime:IDisposable
  async Task AutoTimezone(CancellationToken ct)
  {
   var exit=store.Settings.ExitTimezone;
-  if(exit.Length==0||store.Settings.TimezoneDismissedFor==exit||DateTimeOffset.UtcNow<tzRetryAt||SystemClock.CurrentIana()==exit)return;
+  if(exit.Length==0||store.Settings.TimezoneDismissedFor==exit||DateTimeOffset.UtcNow<tzRetryAt||SystemClock.Matches(exit))return;
   try{store.Settings.OriginalTimezone??=TimeZoneInfo.Local.Id;store.Save();await SystemClock.SetTimezone(exit,ct);Record("timezone",exitGeo is not null&&exitGeoFor==exitIp?exitGeo.Label:exit);}
   catch(Exception e)when(e is not OperationCanceledException){tzRetryAt=DateTimeOffset.UtcNow.AddMinutes(10);Program.Log("automatic timezone",e);}
  }
