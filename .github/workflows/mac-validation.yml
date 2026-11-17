@@ -117,6 +117,9 @@ jobs:
       - name: Fresh install state for the click-through (same Mac may activate again with its code)
         if: matrix.chip == 'apple-silicon'
         run: |
+          # The server remembers this computer's exits and restores them on reactivation (as for a reinstall);
+          # remove them first so the click-through starts like a brand-new customer.
+          python3 mac/tests/ask.py '{"type":"account"}' --full | python3 -c 'import json,sys;[print(e["id"]) for e in json.load(sys.stdin)["value"]["exits"]["list"]]' | while read id; do python3 mac/tests/ask.py "{\"type\":\"delete_exit\",\"id\":$id}"; done || true
           sudo launchctl bootout system/xin.leyra.agent || true
           sudo "/Library/Application Support/Leyra/agent/leyra-agent" --recover || true
           sudo rm -rf "/Library/Application Support/LeyraConnect"
