@@ -153,7 +153,7 @@
   function applyProtection(p) {
     var now = Date.now();
     // 「防护已暂停」的常驻提示只在暂停期间有：恢复了、断网了都收起。
-    if (p.state !== 'paused') S.warnToast = null;
+    if (p.state !== 'paused' || p.off) S.warnToast = null;
     else if (S.status !== 'paused') S.warnToast = '防护已暂停，你访问的网站能看到你的真实 IP';
     switch (p.state) {
       case 'unprotected':
@@ -170,11 +170,13 @@
         // 彻底退出（docs/01 §5.3）：界面刚启动时看到，是上次退出后用户又打开了软件，恢复保护；
         // 界面开着时守护程序才进的（命令行 pause quit），界面跟着退出，不把保护恢复回来。正在退出时不算。
         // 只认「从别的状态变成彻底退出」：恢复保护时还在路上的旧回应也写着彻底退出，不能当成又退了一次。
-        if (p.quit && !quitting && (!seenStatus || !lastQuit)) {
+        // 重新打开软件不再自动恢复：显示「防护未开启」，由客户自己点「开启防护」。
+        if (p.quit && !quitting && seenStatus && !lastQuit) {
           quitting = true;
-          if (!seenStatus) act({ type: 'resume' }, '已恢复保护').then(function () { quitting = false; });
-          else T.core.invoke('quit_app').catch(function () { quitting = false; });
+          T.core.invoke('quit_app').catch(function () { quitting = false; });
         }
+        // 激活后还没点「开启防护」：不是暂停，没有倒计时，不会自动开启。
+        if (p.off) { S.status = 'paused'; S.pause = { left: 0, total: 0, kind: 'off', from: { status: 'ok' }, end: '' }; break; }
         var left = p.remaining_secs || 0;
         var prev = S.status === 'paused' && S.pause ? S.pause : null;
         S.status = 'paused';
@@ -390,6 +392,7 @@
     if (e.kind === 'switch') return '换到' + esc(e.detail);
     if (e.kind === 'exit') return '切换到出口「' + esc(e.detail) + '」';
     if (e.kind === 'paused') return e.detail === 'quit' ? '彻底退出' : /^\d+$/.test(e.detail || '') ? '暂停防护 ' + e.detail + ' 分钟' : '暂停防护';
+    if (e.kind === 'activated') return '已激活';
     if (e.kind === 'bypass') return '有软件绕过保护：' + esc(e.detail);
     if (e.kind === 'protected') return prev && (prev.kind === 'paused' || prev.kind === 'blocked') ? '防护恢复' : '已保护';
     if (e.kind === 'check') return +e.detail ? '安全检查 ' + (+e.detail) + ' 项要处理' : '安全检查一切正常';
@@ -486,7 +489,7 @@
     S.dialog = null; P.render();
     withOwner('暂停防护后你的真实 IP 会暴露。确认是你本人后继续。', '没有暂停，防护照常').then(function (ok) { return ok && act(req); }).then(function () { if (S.status === 'paused') { S.warnToast = '防护已暂停，你访问的网站能看到你的真实 IP'; P.render(); } });
   };
-  A.resume = function () { S.tray = false; act({ type: 'resume' }, '正在恢复防护'); };
+  A.resume = function () { var off = S.pause && S.pause.kind === 'off'; S.tray = false; act({ type: 'resume' }, off ? '正在开启防护' : '正在恢复防护'); };
   // 免费试用到期「退出软件」（docs/01 §4 第 8 步）：和彻底退出一样要电脑密码；守护程序撤掉防护、记下停用（以后开机也不接管网络），
   // 界面再退出。停用以后到期页上的「退出」只退界面。
   A.trialQuitGo = function () {
@@ -984,11 +987,12 @@
     // 激活成功的提示按套餐写（账户信息拿回来才知道）：全套「线路开通中」，单独软件、免费试用「下一步接入你的出口」。
     var done = function (text) {
       S.busy.act = null; S.actErr = {}; S.screen = 'main'; S.page = 'overview'; S.status = 'prep';
-      store('cc.wizard.pending', true);
+      // 激活后直接进概览，不走引导；防护由客户自己点「开启防护」。
+      store('cc.wizard.pending', false);
       poll();
       loadAccount().then(function () {
         var k = suiteKind();
-        P.toast(text || (k === 'soft' || k === 'trial' ? '已激活，下一步接入你的出口' : '已激活，线路开通中'));
+        P.toast(text || '已激活，点「开启防护」开始保护');
       });
     };
     var fail = function (err) {

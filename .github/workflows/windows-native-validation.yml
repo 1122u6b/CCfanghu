@@ -231,10 +231,21 @@ jobs:
           if ((Ask '{"type":"activate","code":"ZZZZ-ZZZZ-ZZZZ-ZZZZ","contact":"ci"}') -eq 0) { $failures += 'wrong code was accepted' }
           Write-Host '3. a real code activates this computer'
           if ((Ask ('{"type":"activate","code":"' + $env:TEST_CODE + '","contact":"automated test"}')) -ne 0) { $failures += 'activation failed' }
+          # 激活后防护不能自己开：应当是「防护未开启」(paused)，客户点「开启防护」(resume) 才开。
+          Start-Sleep 8; $s = Get-Content $stateFile -Raw; Write-Host "   state right after activation: $s"
+          if ($s -notmatch 'paused') { $failures += "protection turned itself on after activation: $s" }
+          $st = Get-Content "C:\LeyraCi\out_$script:n.json" -Raw
+          Ask '{"type":"status"}' | Out-Null
+          if ((Get-Content "C:\LeyraCi\out_$script:n.json" -Raw) -notmatch '"off":true') { $failures += 'status does not report protection as not turned on' }
+          Write-Host '   customer clicks 开启防护'
+          if ((Ask '{"type":"resume"}') -ne 0) { $failures += 'turning protection on failed' }
           $s = WaitFor 'protected' 120; Write-Host "   state: $s"
-          if ($s -notmatch 'protected') { $failures += "not protected after activation: $s" }
-          Write-Host '   account and a full security check while protected'
+          if ($s -notmatch 'protected') { $failures += "not protected after 开启防护: $s" }
+          Write-Host '   the exit list reaches the interface in the shape it reads'
           Ask '{"type":"account"}' | Out-Null
+          $acct = Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json
+          if ($null -eq $acct.reply.value.exits.list -or -not $acct.reply.value.exits.can_add) { $failures += 'account exits are not {list, can_add}' }
+          Write-Host '   full security check while protected'
           Ask '{"type":"doctor"}' | Out-Null; Copy-Item "C:\LeyraCi\out_$script:n.json" doctor.json -ErrorAction SilentlyContinue
           Write-Host '4. network recovery tool, then service start and resume (the 恢复防护 path)'
           & $agent --recover; Write-Host "   recover exit $LASTEXITCODE"

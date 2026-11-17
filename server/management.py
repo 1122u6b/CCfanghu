@@ -309,8 +309,13 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
                 self.put(db,'selected_exit',identity);return {'id':identity,'saved':True}
             if kind=='delete_exit':
                 identity=int(req.get('id',0))
-                if self.get(db,'selected_exit')==identity:raise ManagementError('select another exit first')
-                db.execute('DELETE FROM exits WHERE id=?',(identity,));return {'saved':True}
+                if db.execute('DELETE FROM exits WHERE id=?',(identity,)).rowcount!=1:raise ManagementError('exit not found')
+                current=self.get(db,'selected_exit')
+                if current==identity:
+                    # Deleting the exit in use falls back to the newest remaining one, or the server's own IP.
+                    row=db.execute('SELECT id FROM exits ORDER BY id DESC LIMIT 1').fetchone();current=row[0] if row else None
+                    self.put(db,'selected_exit',current)
+                return {'saved':True,'current':current}
             if kind=='direct_rules':return {'items':self.get(db,'client_direct_rules_v1',[])}
             if kind in ('add_direct_rule','remove_direct_rule','set_direct_note'):
                 rules=self.get(db,'client_direct_rules_v1',[])

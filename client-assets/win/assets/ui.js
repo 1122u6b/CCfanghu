@@ -441,6 +441,10 @@
       g = H.statusGraphic('danger', f); title = '防护没有运行';
       body = '<p>防护组件停了，现在不能确认真实 IP 是否隐藏。</p><p class="hint">点「恢复防护」重新启动，需要确认一次管理员权限；重启电脑也会恢复。</p>' + busy('daemon');
       acts = S.busy.daemon ? '' : btn('primary', '恢复防护', 'daemonStart') + btn('text', '联系售后', 'contact');
+    } else if (st === 'paused' && S.pause && S.pause.kind === 'off') {
+      g = H.statusGraphic('warn', f); title = '防护未开启';
+      body = '<p>点「开启防护」后，所有流量走独享线路，网站看不到你的真实 IP。开启前网站能看到你的真实 IP。</p>';
+      acts = S.busy.resume ? '' : btn('primary', I('shield', 14) + '开启防护', 'resume') + btn('secondary', '导入我的 IP', 'go:routes');
     } else if (st === 'paused') {
       var P = S.pause;
       g = H.statusGraphic('warn', f, { left: P.left, total: P.total, center: '<span class="hx-num-lg" style="color:var(--text);font-size:28px;line-height:36px" data-mmss>' + H.mmss(P.left) + '</span>' });
@@ -648,10 +652,16 @@
       '<p class="p-sub p-exitnote">你自己加的出口好不好用由出口本身决定' + (S.exits === 'old' ? '；我们分配的出口有问题找客服' : '') + '。' +
       (S.exits === 'soft' && !S.trial ? btn('text', '升级到全套', 'upgrade') : '') + '</p></div>';
   }
+  // 还没导入自己的 IP：现在用服务器默认出口，给一个明显的「导入我的 IP」入口。
+  function noExitsSec(b) {
+    return '<div class="p-sec"><div class="p-cardhead"><h2>出口</h2><span class="p-sub">出口决定网站看到的 IP</span></div>' +
+      '<div class="p-exits"><button class="p-exit add" data-act="exitAdd"' + (b ? ' disabled' : '') + '><b>' + I('plus', 16) + '导入我的 IP</b><small>粘贴 SOCKS5、HTTP 代理，或 ss、vmess、vless、trojan 链接、订阅地址</small></button></div>' +
+      '<p class="p-sub p-exitnote">还没导入时，使用服务器默认出口。导入后自动切到你的 IP。</p></div>';
+  }
   function routesPage() {
     var b = !!S.busy.route, sameDesc = ROUTES.every(function (r) { return r.desc === ROUTES[0].desc; }), ex = S.exits ? exitsShown()[S.exit] : null;
     return '<div class="p-pagehead"><div class="t"><h1>线路</h1><span>' + (ex ? ex.city + ' · ' + ex.ip : cityDot() + IP) + '</span></div></div>' +
-      (ex ? exitsSec(b) + '<div class="p-sec p-exitlines"><div class="p-cardhead"><h2>「' + esc(ex.name) + '」的线路</h2></div></div>' : '') +
+      (ex ? exitsSec(b) + '<div class="p-sec p-exitlines"><div class="p-cardhead"><h2>「' + esc(ex.name) + '」的线路</h2></div></div>' : noExitsSec(b)) +
       // 自带出口（01 §5.2）：线路是用户自己的，写明好不好用由他的出口决定；可以更换、升级
       (S.ownExit === 'connected' && !S.exits ? '<div class="p-sec"><div class="hx-alert" role="note" style="align-items:center">' + I('info', 20) + '<span class="msg">自带出口：好不好用由你的出口决定</span>' +
         btn('secondary', '更换出口', 'dialog:ownexit') + (S.trial ? '' : btn('text', '升级到全套', 'upgrade')) + '</div></div>' : '') +
@@ -1179,6 +1189,7 @@
     if (S.status === 'down') card = ['danger', '防护没有运行', '真实 IP 可能暴露', 'shield-off'];
     else if (S.status === 'ok') card = ['ok', '已保护', curExit() ? esc(curExit().name) + ' · 线路 ' + ROUTES[S.route].n : '线路 ' + ROUTES[S.route].n + (typeof ROUTES[S.route].ms === 'number' ? ' · ' + ROUTES[S.route].ms + ' ms' : ''), 'shield'];
     else if (S.status === 'pm') card = ['danger', '已断网', '真实 IP 没有暴露', 'shield-off'];
+    else if (S.status === 'paused' && S.pause && S.pause.kind === 'off') card = ['warn', '防护未开启', '点「开启防护」开始保护', 'pause'];
     else if (S.status === 'paused') card = ['warn', '防护已暂停', '<span data-mmss>' + H.mmss(S.pause.left) + '</span> 后恢复', 'pause'];
     else if (S.status === 'starting') card = ['neutral', '启动中', '正在建立独享线路', 'shield-plain'];
     else card = ['neutral', '准备中', S.ownExit === 'waiting' ? '还没接出口' : '线路开通中', 'shield-plain'];
@@ -1370,6 +1381,7 @@
     var ipLine = cityDot() + IP, line = (curExit() ? esc(curExit().name) + ' · ' : '') + routeName(S.route) + (ROUTES[S.route].ms == null ? '' : ' · ' + ROUTES[S.route].ms + ' ms');
     function mi(label, act, sub) { return '<button class="mi" role="menuitem" data-act="' + act + '">' + label + (sub ? '<span class="sub" aria-hidden="true">▸</span>' : '') + '</button>'; }
     if (st === 'ok') { hd = ['ok', '已保护' + (TZN.city ? ' · ' + TZN.city : ''), line]; acts = [mi('暂停防护（会暴露真实 IP）', 'pause', true), mi('切换线路', 'go:routes', true), mi('刷新连接', 'trayRefresh'), mi('安全检查…', 'runCheck')]; }
+    else if (st === 'paused' && S.pause && S.pause.kind === 'off') { hd = ['warn', '防护未开启', '你访问的网站能看到你的真实 IP']; acts = [mi('开启防护', 'resume')]; }
     else if (st === 'paused') { hd = ['warn', '防护已暂停 · <span data-mmss>' + H.mmss(S.pause.left) + '</span> 后恢复', '你访问的网站能看到你的真实 IP']; acts = [mi('恢复防护', 'resume')]; }
     else if (st === 'pm') {
       hd = ['danger', '已断网 · ' + PM[S.reason].short, '真实 IP 没有暴露'];
@@ -2059,7 +2071,7 @@
 
   /* 定时器：倒计时、启动超时、检查进度、时钟 */
   setInterval(function () {
-    if (S.status === 'paused' && S.pause && !S.busy.resume) {
+    if (S.status === 'paused' && S.pause && S.pause.kind !== 'off' && !S.busy.resume) {
       S.pause.left = Math.max(0, S.pause.left - 1); patchCountdown();
       if (S.pause.left === 0) resume(true);
     }
