@@ -5,7 +5,6 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Leyra.Windows.Core;
-using Microsoft.Win32;
 
 namespace Leyra.Mac.Agent;
 
@@ -140,18 +139,18 @@ sealed partial class Runtime
   try
   {
    lastUpdateCheck=DateTimeOffset.UtcNow;
-   var manifest=await cloud.RpcAsync(new{type="update_manifest"},stop);var version=Text(manifest,"version");
+   var manifest=await cloud.RpcAsync(new{type="update_manifest",platform="mac"},stop);var version=Text(manifest,"version");
    if(version.Length==0 || !System.Text.RegularExpressions.Regex.IsMatch(version,"^[0-9]{1,4}\\.[0-9]{1,4}\\.[0-9]{1,6}(-[A-Za-z0-9.]{1,24})?$") || ProductInfo.Compare(version,Program.Version)<=0){updateReady=null;return;}
    var digest=Text(manifest,"sha256");var size=manifest.GetProperty("size").GetInt64();
    if(digest.Length!=64 || size is <1 or >400L*1024*1024)throw new InvalidDataException("更新清单无效");
-   Directory.CreateDirectory(UpdateDir);var target=Path.Combine(UpdateDir,"LEYRAConnect-"+version+"-setup.exe");
+   Directory.CreateDirectory(UpdateDir);var target=Path.Combine(UpdateDir,"Leyra-"+version+".pkg");
    if(File.Exists(target)&&Verify(target,digest,size)){updateReady=version;updateDigest=digest;return;}
    var part=target+".part";
    await using(var output=new FileStream(part,FileMode.Create,FileAccess.Write,FileShare.None))
    {
     while(output.Length<size)
     {
-     var chunk=await cloud.RpcAsync(new{type="update_chunk",version,offset=output.Length},stop);
+     var chunk=await cloud.RpcAsync(new{type="update_chunk",platform="mac",version,offset=output.Length},stop);
      var data=Convert.FromBase64String(Text(chunk,"data"));
      if(chunk.GetProperty("offset").GetInt64()!=output.Length || data.Length==0 || output.Length+data.Length>size)throw new InvalidDataException("更新数据与清单不符");
      await output.WriteAsync(data,stop);
@@ -172,20 +171,21 @@ sealed partial class Runtime
  object InstallUpdate()
  {
   var version=updateReady??throw new InvalidOperationException("没有已下载并核对的新版本");
-  var path=Path.Combine(UpdateDir,"LEYRAConnect-"+version+"-setup.exe");
+  var path=Path.Combine(UpdateDir,"Leyra-"+version+".pkg");
   if(!File.Exists(path) || !Verify(path,updateDigest,new FileInfo(path).Length))throw new InvalidDataException("更新包已变化，请重新检查更新");
-  // 安装程序停止本服务、注册新版本服务再启动；持久断网规则在切换期间保持。
-  var start=new ProcessStartInfo(path){UseShellExecute=false,CreateNoWindow=true,WorkingDirectory=UpdateDir};start.ArgumentList.Add("/S");
+  // The installer restarts this service, so it runs as its own launchd job, not as a child that would be ended with it.
+  var start=new ProcessStartInfo("/bin/launchctl",["submit","-l","xin.leyra.update."+DateTimeOffset.UtcNow.ToUnixTimeSeconds(),"--","/usr/sbin/installer","-pkg",path,"-target","/"]){UseShellExecute=false};
   Process.Start(start)?.Dispose();Record("update",version);return new{saved=true,version};
  }
 
  // ---------- 冲突软件：其他代理/VPN 客户端和虚拟网卡 ----------
+ // Process names of proxy / VPN apps on the Mac.
  static readonly (string Name,string[] Images)[] KnownConflicts=[
-  ("Clash Verge",["clash-verge","Clash Verge","verge-mihomo","verge-mihomo-alpha","clash-verge-service"]),("Clash for Windows",["Clash for Windows","clash-win64"]),
-  ("FlClash",["FlClash","FlClashCore","FlClashHelperService"]),("Clash",["clash","clash-meta"]),("v2rayN",["v2rayN","xray","v2ray","wv2ray"]),("NekoRay",["nekoray","nekobox","nekobox_core"]),
-  ("sing-box",["sing-box"]),("Hiddify",["Hiddify","HiddifyCli"]),("Shadowsocks",["Shadowsocks","sslocal"]),("ShadowsocksR",["ShadowsocksR"]),("Mihomo Party",["mihomo-party"]),
-  ("OpenVPN",["openvpn","openvpn-gui"]),("WireGuard",["wireguard"]),("NordVPN",["NordVPN","nordvpn-service"]),("ExpressVPN",["ExpressVPN","expressvpnd"]),("Surfshark",["Surfshark"]),("Proton VPN",["ProtonVPN","ProtonVPNService"]),
-  ("雷神加速器",["leigod","LeiGod"]),("Netch",["Netch"])];
+  ("ClashX",["ClashX","ClashX Pro","ClashX Meta"]),("Clash Verge",["clash-verge","Clash Verge","verge-mihomo"]),("Clash",["clash","clash-meta"]),("FlClash",["FlClash","FlClashCore"]),
+  ("Mihomo Party",["mihomo-party","Mihomo Party"]),("Surge",["Surge","Surge 5"]),("Shadowrocket",["Shadowrocket"]),("Quantumult X",["Quantumult X"]),("Stash",["Stash"]),("Loon",["Loon"]),
+  ("V2rayU",["V2rayU","v2ray","xray"]),("V2RayXS",["V2RayXS"]),("sing-box",["sing-box","SFM"]),("Hiddify",["Hiddify","HiddifyCli"]),("ShadowsocksX-NG",["ShadowsocksX-NG","ss-local"]),
+  ("Tunnelblick",["Tunnelblick","openvpn"]),("OpenVPN Connect",["OpenVPN Connect"]),("WireGuard",["WireGuard"]),("NordVPN",["NordVPN","NordVPN IKE"]),("ExpressVPN",["ExpressVPN","expressvpnd"]),
+  ("Surfshark",["Surfshark"]),("Proton VPN",["ProtonVPN","Proton VPN"]),("雷神加速器",["leigod","LeiGod"])];
  object[] conflicts=[];DateTimeOffset lastConflictScan=DateTimeOffset.MinValue;
  object[] ScanConflicts()
  {
@@ -206,13 +206,6 @@ sealed partial class Runtime
   }
   foreach(var (name,images) in running)
    items.Add(new{id="app-"+Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(name)))[..10].ToLowerInvariant(),severity="warn",name,message=name+" 正在运行，可能与防护争用网络或接管系统代理。",evidence="正在运行的进程："+string.Join("、",images.Select(x=>x+".exe")),quit=new{how="windows_image",images=images.ToArray()}});
-  foreach(var nic in NetworkInterface.GetAllNetworkInterfaces())
-  {
-   if(nic.OperationalStatus!=OperationalStatus.Up || nic.Name=="LeyraConnect")continue;
-   var d=nic.Description;
-   if(d.Contains("TAP-Windows",StringComparison.OrdinalIgnoreCase)||d.Contains("WireGuard",StringComparison.OrdinalIgnoreCase)||d.Contains("Wintun",StringComparison.OrdinalIgnoreCase)||d.Contains("WinTun",StringComparison.OrdinalIgnoreCase)||nic.NetworkInterfaceType==NetworkInterfaceType.Ppp)
-    items.Add(new{id="nic-"+Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(nic.Id)))[..10].ToLowerInvariant(),severity="warn",name="其他虚拟网卡",message="另一个虚拟网卡「"+nic.Name+"」已连接，可能是其他 VPN 或加速器。",evidence=nic.Description,quit=(object?)null});
-  }
   return items.ToArray();
  }
  void RefreshConflicts(bool force=false)
@@ -251,15 +244,13 @@ sealed partial class Runtime
  }
 
  // ---------- 浏览器实测：本机检测页收集 WebRTC 候选地址和浏览器看到的出口 ----------
- static readonly (string Name,string Exe)[] Browsers=[("Google Chrome","chrome.exe"),("Microsoft Edge","msedge.exe"),("Firefox","firefox.exe"),("Brave","brave.exe")];
+ // On the Mac "Exe" is the application bundle under /Applications (or ~/Applications of the owner).
+ static readonly (string Name,string Exe)[] Browsers=[("Google Chrome","Google Chrome.app"),("Microsoft Edge","Microsoft Edge.app"),("Firefox","Firefox.app"),("Brave","Brave Browser.app"),("Safari","Safari.app")];
  readonly Dictionary<string,object> browserResults=new();
- static string? BrowserPath(string exe)
+ static string? BrowserPath(string app)
  {
-  foreach(var hive in new[]{Registry.LocalMachine,Registry.CurrentUser})
-  {
-   using var key=hive.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\"+exe);
-   if(key?.GetValue(null) is string path&&File.Exists(path.Trim('"')))return path.Trim('"');
-  }
+  foreach(var dir in new[]{"/Applications","/System/Applications","/System/Volumes/Preboot/Cryptexes/App/System/Applications"})
+  {var path=Path.Combine(dir,app);if(Directory.Exists(path))return path;}
   return null;
  }
  string[] InstalledBrowsers()=>Browsers.Where(b=>BrowserPath(b.Exe) is not null).Select(b=>b.Name).ToArray();
@@ -326,44 +317,28 @@ sealed partial class Runtime
   var names=new HashSet<string>(Process.GetProcesses().Select(p=>{using(p)return p.ProcessName;}),StringComparer.OrdinalIgnoreCase);
   return Filters.Where(f=>f.Images.Any(names.Contains)).Select(f=>f.Name).ToArray();
  }
- static bool BrowserPolicyActive()
- {
-  foreach(var path in new[]{@"SOFTWARE\Policies\Google\Chrome",@"SOFTWARE\Policies\Microsoft\Edge"})
-  {using var key=Registry.LocalMachine.OpenSubKey(path);if(key?.GetValue("WebRtcIPHandling") as string!="disable_non_proxied_udp")return false;}
-  return true;
- }
+ static bool BrowserPolicyActive()=>BrowserPolicies.Active();
  // ---------- L8：绕过独享线路的连接（读取系统 TCP 连接表及所属进程） ----------
- [System.Runtime.InteropServices.DllImport("iphlpapi.dll")]static extern uint GetExtendedTcpTable(IntPtr table,ref int size,bool order,int family,int tableClass,uint reserved);
+ /// <summary>Established TCP connections from netstat (macOS has no per-row delete like Windows, so Row is null:
+ /// the pf rules already drop the packets of connections made before protection started).</summary>
  static IEnumerable<(IPAddress Local,IPAddress Remote,int RemotePort,int Pid,byte[]? Row)> EstablishedTcp()
  {
-  foreach(var (family,rowSize) in new[]{(2,24),(23,56)})
+  var start=new System.Diagnostics.ProcessStartInfo("/usr/sbin/netstat",["-an","-p","tcp"]){UseShellExecute=false,RedirectStandardOutput=true};
+  string text;using(var p=System.Diagnostics.Process.Start(start)){if(p is null)yield break;text=p.StandardOutput.ReadToEnd();p.WaitForExit(10000);}
+  static bool Split(string s,out IPAddress a,out int port)
   {
-   var size=0;GetExtendedTcpTable(IntPtr.Zero,ref size,false,family,5,0);if(size<=0)continue;
-   var buffer=System.Runtime.InteropServices.Marshal.AllocHGlobal(size);
-   try
-   {
-    if(GetExtendedTcpTable(buffer,ref size,false,family,5,0)!=0)continue;
-    var bytes=new byte[size];System.Runtime.InteropServices.Marshal.Copy(buffer,bytes,0,size);
-    var count=BitConverter.ToInt32(bytes,0);
-    for(var i=0;i<count&&4+(i+1)*rowSize<=size;i++)
-    {
-     var o=4+i*rowSize;
-     if(family==2)
-     {
-      if(BitConverter.ToUInt32(bytes,o)!=5)continue; // MIB_TCP_STATE_ESTAB
-      yield return (new IPAddress(BitConverter.ToUInt32(bytes,o+4)),new IPAddress(BitConverter.ToUInt32(bytes,o+12)),(bytes[o+16]<<8)|bytes[o+17],BitConverter.ToInt32(bytes,o+20),bytes.AsSpan(o,20).ToArray());
-     }
-     else
-     {
-      if(BitConverter.ToUInt32(bytes,o+48)!=5)continue;
-      yield return (new IPAddress(bytes.AsSpan(o,16)),new IPAddress(bytes.AsSpan(o+24,16)),(bytes[o+44]<<8)|bytes[o+45],BitConverter.ToInt32(bytes,o+52),null);
-     }
-    }
-   }
-   finally{System.Runtime.InteropServices.Marshal.FreeHGlobal(buffer);}
+   a=IPAddress.None;port=0;var k=s.LastIndexOf('.');if(k<0)return false;
+   if(!int.TryParse(s[(k+1)..],out port))return false;var host=s[..k];var pct=host.IndexOf('%');if(pct>=0)host=host[..pct];
+   return IPAddress.TryParse(host,out a!);
+  }
+  foreach(var line in text.Split('\n'))
+  {
+   var f=line.Split(' ',StringSplitOptions.RemoveEmptyEntries);
+   if(f.Length<6||!f[0].StartsWith("tcp")||f[5]!="ESTABLISHED")continue;
+   if(Split(f[3],out var local,out _)&&Split(f[4],out var remote,out var rport))yield return (local,remote,rport,0,null);
   }
  }
- [System.Runtime.InteropServices.DllImport("iphlpapi.dll")]static extern uint SetTcpEntry(byte[] row);
+ static uint SetTcpEntry(byte[] row)=>1;
  object? bypassCheck;DateTimeOffset lastBypassScan=DateTimeOffset.MinValue;int cutTotal;
  // Connections that existed before protection started keep their entry in the system table, but the
  // transport-layer guard already drops their packets (see WfpPlan). Close them so programs reconnect

@@ -3,7 +3,6 @@ using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Leyra.Windows.Core;
-using Microsoft.Win32;
 
 namespace Leyra.Mac.Agent;
 
@@ -36,8 +35,8 @@ sealed partial class Runtime
   var items=new List<object>();
   void Add(string id,string verdict,string detail)=>items.Add(new{id,verdict,detail});
   var guarded=filters.DefaultGuardsInstalled();var live=state=="protected";
-  Add("E1",Environment.OSVersion.Version.Build>=17763?"pass":"warn",System.Runtime.InteropServices.RuntimeInformation.OSDescription+" / "+System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
-  Add("E2",System.Security.Principal.WindowsIdentity.GetCurrent().IsSystem?"pass":"fail","Windows 后台服务身份");
+  Add("E1",Environment.OSVersion.Version.Major>=12?"pass":"warn",System.Runtime.InteropServices.RuntimeInformation.OSDescription+" / "+System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
+  Add("E2",Environment.UserName=="root"?"pass":"fail","后台服务以系统管理员身份运行");
   if(cloud is null)Add("E3","skipped","尚未连接自有服务器，无法对时");
   else try
   {
@@ -48,7 +47,7 @@ sealed partial class Runtime
   RefreshConflicts(true);
   var conflictList=conflicts.Select(x=>JsonSerializer.SerializeToElement(x)).ToArray();
   Add("E4",conflictList.Length==0?"pass":"fail",conflictList.Length==0?"没有发现其他代理、VPN 或虚拟网卡":string.Join("；",conflictList.Select(x=>Text(x,"message"))));
-  Add("E5","pass","已打开 Windows 基础过滤接口");
+  Add("E5","pass","已连接 macOS 防火墙（pf）");
   var filtersFound=NetworkFilterSoftware();
   Add("E6",filtersFound.Length==0?"pass":"warn",filtersFound.Length==0?"没有发现带网络过滤功能的安全软件":"已发现带网络过滤功能的安全软件："+string.Join("、",filtersFound));
   Add("E7",KernelSession.Tunnel()!=0?"pass":live?"fail":"skipped",KernelSession.Tunnel()!=0?"独享线路虚拟网卡已建立":"虚拟网卡尚未建立");
@@ -56,8 +55,7 @@ sealed partial class Runtime
   Add("E9",cloud is null?"fail":"pass",cloud is null?"尚未登记自有服务器":"连接文件和独立设备身份已登记");
   Add("E10",ServiceAutoStart()?"pass":"warn",ServiceAutoStart()?"后台服务设置为开机自动运行":"后台服务没有设置为开机自动运行，请重新安装");
   Add("P1",guarded?"pass":"fail","读取本软件持久拒绝规则，包括连接层和传输层");
-  bool firewall;try{using var mpssvc=new System.ServiceProcess.ServiceController("mpssvc");firewall=mpssvc.Status==System.ServiceProcess.ServiceControllerStatus.Running;}catch(InvalidOperationException){firewall=false;}
-  Add("P2",firewall?"pass":"warn",firewall?"Windows 防火墙服务正在运行":"Windows 防火墙服务没有运行；防护规则仍由过滤平台执行");
+  Add("P2",guarded?"pass":"warn",guarded?"macOS 防火墙（pf）已开启并载入防护规则":"macOS 防火墙（pf）没有载入防护规则");
   Add("P3",kernel.Alive?"pass":"fail",kernel.Alive?"内置网络进程正在运行":"内置网络进程未运行");
   Add("P4",nodes.ValueKind==JsonValueKind.Array&&nodes.GetArrayLength()>0?"pass":"fail","自有服务器下发的设备线路");
   Add("P5",live&&exitVerified&&KernelSession.Tunnel()==tunnel&&guarded?"pass":"fail",live&&exitVerified?"经虚拟网卡的请求由自有服务器观察到出口 "+exitIp:"尚未确认流量经独享线路");

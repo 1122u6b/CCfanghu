@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+[assembly:System.Runtime.Versioning.SupportedOSPlatform("macos")]
 namespace Leyra.Mac.Agent;
 
 static class Program

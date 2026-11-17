@@ -328,13 +328,7 @@ sealed partial class Runtime:IDisposable
  {
   var type=Text(request,"type");
   if(type=="status")return Status();
-  if(type=="owner_auth")
-  {
-   var encoded=Text(request,"buffer");if(encoded.Length>90000)throw new InvalidDataException("账户验证数据过大");
-   var packed=Convert.FromBase64String(encoded);
-   if(!NativeCredentials.Verify(packed,store.Owner))throw new UnauthorizedAccessException("无法验证当前 Windows 账户密码");
-   return new{proof=ownerProof.Grant()};
-  }
+  if(type=="owner_auth")throw new InvalidOperationException("Mac 版暂不支持用系统密码确认，请在设置里关闭「需要系统密码」后再操作");
   if(type=="history"){object[] recent;lock(events)recent=events.AsEnumerable().Reverse().ToArray();return new{lines=HistoryLines(),events=recent};}
   if(type=="check_history"){lock(checkHistory)return new{items=checkHistory.ToArray()};}
   if(type=="timezone")return Zone();
