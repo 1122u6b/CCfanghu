@@ -134,7 +134,7 @@ sealed partial class Runtime:IDisposable
   await kernel.Start(MihomoConfiguration.Build(nodes,kernel.Secret,true,dns,store.Settings.DirectRules,mux,store.Settings.ProxyOnlyListed?store.Settings.ProxyDomains:null),ct);
   for(var i=0;i<40;i++){tunnel=KernelSession.Tunnel();if(tunnel!=0)break;await Task.Delay(200,ct);}
   if(tunnel==0)throw new InvalidOperationException("没有找到已启动的本机 TUN 接口");
-  ApplyGuard(tunnel);await VerifyDns(ct);
+  ApplyGuard(tunnel);MacDns.Apply();await VerifyDns(ct);
   for(var attempt=1;;attempt++)
   {
    try{exitIp=await ObserveExit(ct);exitVerified=true;break;}

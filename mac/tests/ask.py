@@ -13,5 +13,6 @@ def exact(n):
         out += chunk
     return out
 reply = json.loads(exact(struct.unpack('<I', exact(4))[0]))
-print(json.dumps(reply, ensure_ascii=False)[:600])
+out = json.dumps(reply, ensure_ascii=False)
+print(out if '--full' in sys.argv else out[:600])
 sys.exit(0 if reply.get('ok') else 1)

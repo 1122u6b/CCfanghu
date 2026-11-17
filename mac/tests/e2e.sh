@@ -4,7 +4,7 @@ set -uo pipefail
 cd "$(dirname "$0")"
 FAIL=(); fail(){ echo "FAIL: $1"; FAIL+=("$1"); }
 ask(){ python3 ask.py "$1"; }
-state(){ python3 ask.py '{"type":"status"}' 2>/dev/null | python3 -c 'import json,sys;d=json.loads(sys.stdin.read() or "{}");p=d.get("value",{}).get("protection",{});print(p.get("state",""),p.get("reason",""))' 2>/dev/null; }
+state(){ python3 ask.py '{"type":"status"}' --full 2>/dev/null | python3 -c 'import json,sys;d=json.loads(sys.stdin.read() or "{}");p=d.get("value",{}).get("protection",{});print(p.get("state",""),p.get("reason",""))' 2>/dev/null; }
 wait_for(){ local end=$((SECONDS+$2)); while [ $SECONDS -lt $end ]; do s=$(state); [[ "$s" =~ $1 ]] && { echo "$s"; return 0; }; sleep 2; done; echo "$(state)"; return 1; }
 ip(){ for k in 1 2 3; do r=$(curl -s --max-time 20 https://api.ipify.org) && [[ "$r" =~ ^[0-9.]+$ ]] && { echo "$r"; return; }; sleep 3; done; echo "error"; }
 PHYS=$(cat /tmp/leyra-physical-if); REAL=$(cat /tmp/leyra-real-ip)
