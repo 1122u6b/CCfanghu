@@ -315,7 +315,7 @@ class Gateway:
             await asyncio.sleep(5)
 
     async def handle(self,r,w):
-        if self.active>=int(self.config.get('max_connections',8000)):w.close();return
+        if self.active>=int(self.config.get('max_connections',20000)):w.close();return
         self.active+=1;upwriter=None;device=None;counted_device=False
         try:
             first=await exact(r,1)
@@ -330,7 +330,7 @@ class Gateway:
                 try:device=self.devices.authenticate(user.decode('ascii')+'.'+password.decode('ascii'))
                 except UnicodeError:device=None
             valid=bool(owner_valid or device is not None)
-            if device and self.device_active.get(device.id,0)>=int(self.config.get('max_connections_per_device',1000)):valid=False
+            if device and self.device_active.get(device.id,0)>=int(self.config.get('max_connections_per_device',10000)):valid=False
             w.write(b'\x01\x00' if valid else b'\x01\x01');await w.drain()
             if not valid:return
             if device:
