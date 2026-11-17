@@ -79,7 +79,9 @@ sealed partial class Runtime
   else
   {
    var real=tested.Where(x=>Text(x,"exposure")=="real").Select(x=>Text(x,"browser")).ToArray();var lan=tested.Where(x=>Text(x,"exposure")=="lan").Select(x=>Text(x,"browser")).ToArray();
-   Add("L5",real.Length==0?"pass":"fail",real.Length==0?"已测浏览器看到的都是出口地址":"这些浏览器看到了真实地址："+string.Join("、",real));
+   // Each browser with the address websites actually get from it, compared with the customer's exit.
+   var perBrowser=string.Join("；",tested.Select(x=>Text(x,"browser")+"："+(Text(x,"seen_ip").Length==0?"没取到出口 IP":Text(x,"seen_ip")+(x.TryGetProperty("match",out var m)&&m.ValueKind==JsonValueKind.True?"（和你的出口 IP 一致）":"（和你的出口 IP 不一致）"))));
+   Add("L5",real.Length==0?"pass":"fail",(real.Length==0?"浏览器出口都是你的出口 IP。":"这些浏览器用了不是出口的 IP："+string.Join("、",real)+"。")+perBrowser);
    Add("L6",real.Length>0?"fail":lan.Length>0?"warn":"pass",lan.Length>0?"这些浏览器暴露了局域网地址："+string.Join("、",lan):"已测浏览器的 WebRTC 没有绕开独享线路");
   }
   if(guarded&&HasGlobalIpv6())

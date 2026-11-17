@@ -208,8 +208,8 @@ jobs:
             $script:n++; $i = $script:n
             Set-Content "C:\LeyraCi\req_$i.json" $json -Encoding utf8NoBOM
             runas /trustlevel:0x20000 "C:\LeyraCi\run.cmd $i" | Out-Null
-            $end = (Get-Date).AddSeconds(150)
-            while (-not (Test-Path "C:\LeyraCi\out_$i.json") -and (Get-Date) -lt $end) { Start-Sleep 1 }
+            $end = [DateTime]::UtcNow.AddSeconds(150)
+            while (-not (Test-Path "C:\LeyraCi\out_$i.json") -and [DateTime]::UtcNow -lt $end) { Start-Sleep 1 }
             if (-not (Test-Path "C:\LeyraCi\out_$i.json")) { Write-Host '  -> no answer (limited request did not finish)'; return 9 }
             $o = Get-Content "C:\LeyraCi\out_$i.json" -Raw | ConvertFrom-Json
             if ($o.admin) { $script:adminSeen = $true }
@@ -218,8 +218,8 @@ jobs:
             return [int]$o.exit
           }
           function WaitFor($pattern, $seconds) {
-            $end = (Get-Date).AddSeconds($seconds)
-            while ((Get-Date) -lt $end) { $s = if (Test-Path $stateFile) { Get-Content $stateFile -Raw } else { '' }; if ($s -match $pattern) { return $s }; Start-Sleep 2 }
+            $end = [DateTime]::UtcNow.AddSeconds($seconds)
+            while ([DateTime]::UtcNow -lt $end) { $s = if (Test-Path $stateFile) { Get-Content $stateFile -Raw } else { '' }; if ($s -match $pattern) { return $s }; Start-Sleep 2 }
             return (Get-Content $stateFile -Raw -ErrorAction SilentlyContinue)
           }
           # The service only answers the desktop user recorded at install time. On this hosted machine that
@@ -256,13 +256,13 @@ jobs:
           $s = WaitFor 'protected' 120; Write-Host "   state: $s"
           if ($s -notmatch 'protected') { $failures += "not protected after connecting the own exit: $s" }
           Write-Host '   stays protected for 90 seconds without dropping (no on/off flapping)'
-          $drops = 0; $end = (Get-Date).AddSeconds(90)
-          while ((Get-Date) -lt $end) { $x = Get-Content $stateFile -Raw; if ($x -notmatch 'protected') { $drops++; Write-Host "   dropped: $x" }; Start-Sleep 3 }
+          $drops = 0; $end = [DateTime]::UtcNow.AddSeconds(90)
+          while ([DateTime]::UtcNow -lt $end) { $x = Get-Content $stateFile -Raw; if ($x -notmatch 'protected') { $drops++; Write-Host "   dropped: $x" }; Start-Sleep 3 }
           if ($drops) { $failures += "protection dropped $drops times within 90 seconds" } else { Write-Host '   stayed protected the whole time' }
           Write-Host '   busy computer: 60 connections open at once for 75 seconds, protection must not drop'
           $hold = Start-Job -ScriptBlock { param($t) dotnet $t --hold 60 75 2>&1; "exit=$LASTEXITCODE" } -ArgumentList $tool
-          $busyDrops = 0; $end = (Get-Date).AddSeconds(85)
-          while ((Get-Date) -lt $end) { $x = Get-Content $stateFile -Raw; if ($x -notmatch 'protected') { $busyDrops++; Write-Host "   dropped: $x" }; Start-Sleep 3 }
+          $busyDrops = 0; $end = [DateTime]::UtcNow.AddSeconds(85)
+          while ([DateTime]::UtcNow -lt $end) { $x = Get-Content $stateFile -Raw; if ($x -notmatch 'protected') { $busyDrops++; Write-Host "   dropped: $x" }; Start-Sleep 3 }
           $held = Receive-Job $hold -Wait -AutoRemoveJob; $held | Select-Object -Last 3 | ForEach-Object { Write-Host "   $_" }
           if ($held -notcontains 'exit=0') { $failures += 'could not keep 60 connections open through the line' }
           if ($busyDrops) { $failures += "protection dropped $busyDrops times while 60 connections were open" } else { Write-Host '   stayed protected with 60 connections open' }
@@ -276,9 +276,9 @@ jobs:
           dotnet $tool --pipe-stress 200 | Select-Object -Last 3 | ForEach-Object { Write-Host "   $_" }
           if ($LASTEXITCODE -ne 0) { $failures += 'service stopped answering after dropped connections (protected)' }
           Write-Host '   彻底退出 while protected takes effect within 10 seconds'
-          $t0 = Get-Date
+          $t0 = [DateTime]::UtcNow
           if ((Ask '{"type":"pause","minutes":10,"reason":"quit"}') -ne 0) { $failures += '彻底退出 request failed' }
-          $took = ((Get-Date) - $t0).TotalSeconds; Write-Host ("   彻底退出 answered in {0:N1} s" -f $took)
+          $took = ([DateTime]::UtcNow - $t0).TotalSeconds; Write-Host ("   彻底退出 answered in {0:N1} s" -f $took)
           if ($took -gt 10) { $failures += "彻底退出 took $took seconds" }
           $s = WaitFor 'paused' 10; if ($s -notmatch 'paused') { $failures += "not stopped after 彻底退出: $s" }
           Write-Host '4. network recovery tool, then service start and resume (the 恢复防护 path)'
@@ -291,7 +291,7 @@ jobs:
           schtasks /Delete /TN LeyraCiRecover /F | Out-Null
           if (Test-Path "$env:ProgramData\LeyraConnect\agent-error.log") { Write-Host '--- agent-error.log ---'; Get-Content "$env:ProgramData\LeyraConnect\agent-error.log" }
           if ($script:adminSeen) { $failures += 'requests ran with administrator rights; the limited-user path was not tested' }
-          if (Test-Path doctor.json) { Write-Host '--- security check verdicts ---'; (Get-Content doctor.json -Raw | ConvertFrom-Json).reply.value.items | ForEach-Object { Write-Host "$($_.id) $($_.verdict) $($_.detail)"; if ($_.id -eq 'L8' -and $_.verdict -eq 'fail') { $failures += "false leak alarm: $($_.detail)" } } }
+          if (Test-Path doctor.json) { Write-Host '--- security check verdicts ---'; (Get-Content doctor.json -Raw | ConvertFrom-Json).reply.value.items | ForEach-Object { Write-Host "$($_.id) $($_.verdict) $($_.detail)"; if ($_.id -eq 'L8' -and $_.verdict -eq 'fail') { $failures += "false leak alarm: $($_.detail)" }; if ($_.id -eq 'P7' -and $_.verdict -ne 'pass') { $failures += "browser WebRTC protection not set automatically: $($_.detail)" } } }
           if ($failures.Count) { $failures | ForEach-Object { Write-Host "FAIL: $_" }; throw 'Customer flow failed' }
           Write-Host 'LEYRA_CUSTOMER_FLOW=PASS'
       - name: Silent uninstall and verify cleanup
@@ -306,6 +306,8 @@ jobs:
           if (Get-Service LeyraConnect -ErrorAction SilentlyContinue) { throw 'Service still registered after uninstall' }
           if (Test-Path "$root\versions") { throw 'Program files left after uninstall' }
           if (Test-Path "$env:ProgramData\LeyraConnect") { throw 'Activation data left after uninstall' }
+          $tz = (Get-TimeZone).Id; Write-Host "timezone after uninstall: $tz"
+          if ($tz -ne 'UTC') { throw "Timezone not restored after uninstall: $tz" }
           Write-Host 'LEYRA_UNINSTALL_CHECK=PASS'
       - name: Upload installer for download
         uses: actions/upload-artifact@v4

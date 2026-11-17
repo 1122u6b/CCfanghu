@@ -230,16 +230,21 @@ sealed partial class Runtime
   if(state!="protected")throw new InvalidOperationException("请先恢复防护再检查浏览器");
   return new{launch=path,url=probe.Begin(browser)};
  }
- void BrowserReport(string browser,string? seenIp,IReadOnlyList<(string Ip,string Type)> candidates)
+ object BrowserReport(string browser,string? seenIp,IReadOnlyList<(string Ip,string Type)> candidates)
  {
   string exposure="clean";var detail=new List<string>();
   var leaked=candidates.Where(c=>c.Type is "srflx" or "prflx" or "relay"&&AddressPolicy.IsPublic(c.Ip)&&c.Ip!=exitIp).Select(c=>c.Ip).Distinct().ToList();
   if(seenIp is not null&&AddressPolicy.IsPublic(seenIp)&&seenIp!=exitIp)leaked.Add(seenIp);
   if(leaked.Count>0){exposure="real";detail.Add("看到了非出口的公网地址："+string.Join("、",leaked.Distinct()));}
   else if(candidates.Any(c=>AddressPolicy.IsLiteral(c.Ip)&&!AddressPolicy.IsPublic(c.Ip)&&!IPAddress.IsLoopback(IPAddress.Parse(c.Ip)))){exposure="lan";detail.Add("WebRTC 暴露了局域网地址");}
-  else detail.Add(seenIp is null?"WebRTC 没有暴露其他地址":"浏览器看到的出口为 "+seenIp);
-  lock(browserResults)browserResults[browser]=new{browser,at=DateTimeOffset.UtcNow.ToUnixTimeSeconds(),exposure,detail=string.Join("；",detail),seen_ip=seenIp};
+  else detail.Add("WebRTC 没有暴露其他地址");
+  // What the customer wants to see: the address websites get from this browser, and whether it is their exit.
+  var match=seenIp is not null&&exitIp.Length>0&&seenIp==exitIp;
+  var ipLine=seenIp is null?"没能取得浏览器的出口 IP":"浏览器出口 IP "+seenIp+(exitIp.Length==0?"":match?"，和你的出口 IP 一致":"，和你的出口 IP "+exitIp+" 不一致");
+  detail.Insert(0,ipLine);
+  lock(browserResults)browserResults[browser]=new{browser,at=DateTimeOffset.UtcNow.ToUnixTimeSeconds(),exposure,detail=string.Join("；",detail),seen_ip=seenIp,exit_ip=exitIp,match};
   Record("check",exposure=="clean"?"0":"1");
+  return new{exposure,seen_ip=seenIp,exit_ip=exitIp,match,detail=string.Join("；",detail)};
  }
 
  // ---------- 安全检查里有实际探测的项目 ----------

@@ -393,6 +393,7 @@
     if (e.kind === 'exit') return '切换到出口「' + esc(e.detail) + '」';
     if (e.kind === 'paused') return e.detail === 'quit' ? '彻底退出' : /^\d+$/.test(e.detail || '') ? '暂停防护 ' + e.detail + ' 分钟' : '暂停防护';
     if (e.kind === 'activated') return '已激活';
+    if (e.kind === 'timezone') return '电脑时区已自动改成出口所在地（' + esc(e.detail) + '），可在设置里恢复';
     if (e.kind === 'bypass') return '有软件绕过保护：' + esc(e.detail);
     if (e.kind === 'protected') return prev && (prev.kind === 'paused' || prev.kind === 'blocked') ? '防护恢复' : '已保护';
     if (e.kind === 'check') return +e.detail ? '安全检查 ' + (+e.detail) + ' 项要处理' : '安全检查一切正常';

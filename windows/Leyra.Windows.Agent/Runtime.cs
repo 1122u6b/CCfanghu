@@ -157,7 +157,7 @@ sealed partial class Runtime:IDisposable
    using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(20));var ct=deadline.Token;
    await cloud.SendAsync("/api/v1/status",cancellation:ct);
    exitIp=await ObserveExit(ct);exitVerified=true;netFailures=0;nextNetProbe=DateTimeOffset.UtcNow.AddSeconds(30);
-   await RefreshExitGeo(ct);await SampleLines(ct);
+   await RefreshExitGeo(ct);await SampleLines(ct);await AutoTimezone(ct);
   }
   catch(Exception e)when(e is not OperationCanceledException||!stop.IsCancellationRequested)
   {
@@ -169,6 +169,16 @@ sealed partial class Runtime:IDisposable
    try{if(state=="protected"&&configured)Block(e);}
    finally{Publish();gate.Release();}
   }
+ }
+ // Websites read the computer's timezone through the browser; keep it matching the exit's location.
+ // The original zone is remembered for 恢复原来的时区 and restored on uninstall.
+ DateTimeOffset tzRetryAt=DateTimeOffset.MinValue;
+ async Task AutoTimezone(CancellationToken ct)
+ {
+  var exit=store.Settings.ExitTimezone;
+  if(exit.Length==0||store.Settings.TimezoneDismissedFor==exit||DateTimeOffset.UtcNow<tzRetryAt||SystemClock.CurrentIana()==exit)return;
+  try{store.Settings.OriginalTimezone??=TimeZoneInfo.Local.Id;store.Save();await SystemClock.SetTimezone(exit,ct);Record("timezone",exitGeo is not null&&exitGeoFor==exitIp?exitGeo.Label:exit);}
+  catch(Exception e)when(e is not OperationCanceledException){tzRetryAt=DateTimeOffset.UtcNow.AddMinutes(10);Program.Log("automatic timezone",e);}
  }
  // Every 5 s, local only and fast: the kernel, the TUN interface and the blocking rules are in place.
  async Task Health(CancellationToken stop)
@@ -293,9 +303,10 @@ sealed partial class Runtime:IDisposable
      var old=store.Settings.DirectRules[at];DirectRule.Parse(old.Cidr,Text(request,"note"),old.Public);var edited=await Remote(request,stop);ReadRules(edited);return new{saved=true};
     case "set_timezone":
      if(store.Settings.ExitTimezone.Length==0)throw new InvalidOperationException("还没有取得出口所在时区，请在防护建立后再试");
-     store.Settings.OriginalTimezone??=TimeZoneInfo.Local.Id;store.Save();await SystemClock.SetTimezone(store.Settings.ExitTimezone,stop);return Zone();
+     store.Settings.OriginalTimezone??=TimeZoneInfo.Local.Id;store.Settings.TimezoneDismissedFor="";store.Save();await SystemClock.SetTimezone(store.Settings.ExitTimezone,stop);return Zone();
     case "restore_timezone":
-     if(store.Settings.OriginalTimezone is string original){await SystemClock.SetTimezone(original,stop);store.Settings.OriginalTimezone=null;store.Save();}return Zone();
+     if(store.Settings.OriginalTimezone is string original){await SystemClock.SetTimezone(original,stop);store.Settings.OriginalTimezone=null;}
+     store.Settings.TimezoneDismissedFor=store.Settings.ExitTimezone;store.Save();return Zone();
     case "dismiss_timezone":store.Settings.TimezoneDismissedFor=store.Settings.ExitTimezone;store.Save();return new{saved=true};
     case "sync_time":
      var clock=await Remote(new{type="server_time"},stop);if(!Bool(clock,"synchronized"))throw new InvalidOperationException("服务器时间尚未完成同步");

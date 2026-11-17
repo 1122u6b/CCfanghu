@@ -141,7 +141,11 @@ static class Installation
  }
  public static void RemoveService()
  {
-  Admin();Stop();BrowserPolicies.Restore();if(Exists()&&Sc("delete",ServiceName)!=0)throw new InvalidOperationException("无法卸载后台服务");
+  Admin();Stop();BrowserPolicies.Restore();
+  // Give the customer back the timezone they had before Leyra matched it to the exit.
+  try{if(File.Exists(Path.Combine(AgentStore.Root,"owner.sid"))&&new AgentStore().Settings.OriginalTimezone is string zone)SystemClock.SetTimezone(zone,CancellationToken.None).GetAwaiter().GetResult();}
+  catch(Exception e){Program.Log("restore timezone on uninstall",e);}
+  if(Exists()&&Sc("delete",ServiceName)!=0)throw new InvalidOperationException("无法卸载后台服务");
   // Uninstalling forgets this computer's activation; reinstalling with the same code restores it.
   try{ClearData();}catch(Exception e)when(e is IOException or UnauthorizedAccessException){}
  }

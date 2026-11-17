@@ -11,7 +11,7 @@ namespace Leyra.Windows.Agent;
 /// gathers WebRTC ICE candidates and the address the browser reaches the internet from,
 /// then posts them back here. Nothing else is served.
 /// </summary>
-sealed class BrowserProbe(Action<string,string?,IReadOnlyList<(string Ip,string Type)>> report):IDisposable
+sealed class BrowserProbe(Func<string,string?,IReadOnlyList<(string Ip,string Type)>,object> report):IDisposable
 {
  public const int Port=17892;
  readonly Dictionary<string,(string Browser,DateTimeOffset Expires)> pending=new();
@@ -71,8 +71,8 @@ sealed class BrowserProbe(Action<string,string?,IReadOnlyList<(string Ip,string 
      if(IPAddress.TryParse(ip,out _)&&type is "host" or "srflx" or "prflx" or "relay")candidates.Add((ip,type));
     }
    lock(pending)pending.Remove(parts[1]);
-   report(browser,seen,candidates);
-   await Reply(stream,200,"application/json","{\"saved\":true}",deadline.Token);return;
+   var verdict=report(browser,seen,candidates);
+   await Reply(stream,200,"application/json",JsonSerializer.Serialize(verdict),deadline.Token);return;
   }
   await Reply(stream,405,"text/plain","method not allowed",deadline.Token);
  }
@@ -95,7 +95,12 @@ sealed class BrowserProbe(Action<string,string?,IReadOnlyList<(string Ip,string 
  function send(){
   if(sent)return;sent=true;
   fetch('/probe/'+nonce+'/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seen_ip:seen,candidates:cands})})
-   .then(function(){document.getElementById('s').innerHTML='<b class="ok">检查完成</b>，请回到 Leyra 查看结果。这个页面可以关掉了。';})
+   .then(function(r){return r.json();}).then(function(v){
+    var el=document.getElementById('s');
+    var ip=v.seen_ip?'<div style="font-size:22px;margin:12px 0"><b>浏览器出口 IP：'+v.seen_ip+'</b></div>':'<div>没能取得浏览器的出口 IP。</div>';
+    var cmp=!v.seen_ip?'':v.match?'<div class="ok"><b>✓ 和你在 Leyra 里的出口 IP 一致</b>，网站看到的就是这个 IP。</div>':'<div style="color:#c5221f"><b>✗ 和你的出口 IP（'+(v.exit_ip||'未知')+'）不一致</b>，请回到 Leyra 查看处理办法。</div>';
+    var rtc=v.exposure==='real'?'<div style="color:#c5221f">WebRTC 暴露了不是出口的地址。</div>':v.exposure==='lan'?'<div style="color:#b06000">WebRTC 暴露了局域网地址。</div>':'<div class="ok">WebRTC 没有暴露其他地址。</div>';
+    el.innerHTML='<b class="ok">检查完成</b>，结果已经交回 Leyra。'+ip+cmp+rtc+'<p class="muted">这个页面可以关掉了。</p>';})
    .catch(function(){document.getElementById('s').textContent='没能把结果交回 Leyra，请回到 Leyra 再查一次。';});
  }
  var ipDone=fetch('https://api64.ipify.org?format=json').then(function(r){return r.json();}).then(function(j){seen=j.ip;}).catch(function(){});
