@@ -19,6 +19,23 @@ sealed partial class Runtime:IDisposable
  sealed record Snapshot(JsonElement Data,DateTimeOffset Heartbeat,bool Protected);
  volatile Snapshot snapshot=new(JsonSerializer.SerializeToElement(new{version=Program.Version,protection=new{state="starting"}}),DateTimeOffset.MinValue,false);
  DateTimeOffset retryAt=DateTimeOffset.MinValue;int failures;
+ long? licenseExpiresAt; // unix seconds; null = bought out (never expires) or not known yet
+ DateTimeOffset expiryCheckAt=DateTimeOffset.MinValue;
+ // This computer's clock says the code has run out: the server decides (a clock set ahead must not cut
+ // protection). Server says expired (403) -> stop now; server still serves this device -> check again in a minute.
+ async Task ConfirmExpiry(CancellationToken stop)
+ {
+  expiryCheckAt=DateTimeOffset.UtcNow.AddMinutes(1);
+  if(cloud is null)return;
+  using var limit=CancellationTokenSource.CreateLinkedTokenSource(stop);limit.CancelAfter(TimeSpan.FromSeconds(10));
+  try{NoteExpiry(await cloud.RpcAsync(new{type="account"},limit.Token));}
+  catch(HttpRequestException e)when(e.StatusCode==HttpStatusCode.Forbidden){throw new LicenseExpiredException();}
+  catch(Exception e)when(e is HttpRequestException or OperationCanceledException or InvalidDataException or JsonException&&!stop.IsCancellationRequested){/* 网络问题：下次再确认 */}
+ }
+ void NoteExpiry(JsonElement account)
+ {
+  licenseExpiresAt=account.TryGetProperty("expires_at",out var ex)&&ex.ValueKind==JsonValueKind.Number&&ex.GetInt64()<253402300799L?ex.GetInt64():null;
+ }
  readonly List<object> events=[];readonly List<object> checkHistory=[];
  readonly BrowserProbe probe;DateTimeOffset configAt=DateTimeOffset.MinValue;
  public Runtime(AgentStore store)
@@ -64,7 +81,11 @@ sealed partial class Runtime:IDisposable
     else if(await OwnExitMissing(stop)){kernel.Stop();if(filters.DefaultGuardsInstalled())filters.RemoveOwned();configured=false;state="provisioning";reason="own_exit";}
     else if(!store.Settings.Enabled || store.Settings.PausedUntil>DateTimeOffset.UtcNow.ToUnixTimeSeconds()){kernel.Stop();if(filters.DefaultGuardsInstalled())filters.RemoveOwned();configured=false;state="paused";}
     else if(!kernel.Alive || !configured){if(DateTimeOffset.UtcNow>=retryAt)await StartProtected(stop);}
-    else if(DateTimeOffset.UtcNow-lastHealth>TimeSpan.FromSeconds(5))await Health(stop);
+    else
+    {
+     if(licenseExpiresAt is long until&&DateTimeOffset.UtcNow.ToUnixTimeSeconds()>=until&&DateTimeOffset.UtcNow>=expiryCheckAt)await ConfirmExpiry(stop);
+     if(DateTimeOffset.UtcNow-lastHealth>TimeSpan.FromSeconds(5))await Health(stop);
+    }
    }
    catch(OperationCanceledException)when(stop.IsCancellationRequested){break;}
    catch(OperationCanceledException)when(startInterrupted){startInterrupted=false;kernel.Stop();configured=false;}
@@ -106,6 +127,7 @@ sealed partial class Runtime:IDisposable
   var config=await cloud.SendAsync("/api/v1/config",cancellation:ct);nodes=config.GetProperty("proxies").Clone();configAt=DateTimeOffset.UtcNow;
   if(!config.TryGetProperty("identity",out var identity)||Text(identity,"role")!="device"||Text(identity,"id")!=profile.DeviceId)throw new InvalidDataException("服务器没有返回当前设备的独立身份");
   MihomoConfiguration.ValidateNodes(nodes);
+  try{NoteExpiry(await cloud.RpcAsync(new{type="account"},ct));}catch(Exception e)when(e is not OperationCanceledException){Program.Log("reading the authorization expiry",e);}
   var remoteRules=await Remote(new{type="direct_rules"},ct);ReadRules(remoteRules);
   var dns=PrivateDns.Parse(await cloud.RpcAsync(new{type="dns_config"},ct),profile);
   // The gateway accepts multiplexed connections: new connections then cost one round trip to Hong Kong.
@@ -171,11 +193,14 @@ sealed partial class Runtime:IDisposable
  void Block(Exception e)
  {
   lastError=e.Message;configured=false;dnsVerified=false;exitVerified=false;netFailures=0;kernel.Stop();
-  var fatal=e is HttpRequestException hr&&hr.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+  // The authorization code ran out: protection stops at once, the blocking rules stay (the real IP is not
+  // exposed) and the window asks to renew. Not a line fault, so no switching and no fast retries.
+  var expired=e is LicenseExpiredException;
+  var fatal=expired||e is HttpRequestException hr&&hr.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
   // Another of the customer's own exits not tried yet: switch to it instead of cutting the network.
   // The blocking rules stay on while switching, so the real IP is never used.
   var switching=!fatal&&exitCount is int count&&count>1&&triedExits.Count<count&&DateTimeOffset.UtcNow>=failoverPausedUntil;
-  try{ApplyGuard(0);state=switching?"starting":"blocked";reason=e is HttpRequestException h?h.StatusCode switch{HttpStatusCode.Forbidden=>"software_expired",HttpStatusCode.Unauthorized=>"device_unbound",_=>"all_lines_down"}:"all_lines_down";}
+  try{ApplyGuard(0);state=switching?"starting":"blocked";reason=expired?"software_expired":e is HttpRequestException h?h.StatusCode switch{HttpStatusCode.Forbidden=>"software_expired",HttpStatusCode.Unauthorized=>"device_unbound",_=>"all_lines_down"}:"all_lines_down";}
   catch{state="unprotected";reason="guard_failed";switching=false;}
   if(switching){reason="switching_exit";failoverRequested=true;retryAt=DateTimeOffset.UtcNow;Program.Log("exit down, switching to the next exit",e);return;}
   retryAt=DateTimeOffset.UtcNow.AddSeconds(Math.Min(60,5*Math.Pow(2,Math.Min(failures++,4))));
@@ -459,4 +484,4 @@ sealed partial class Runtime:IDisposable
  }
  public void Dispose(){probe.Dispose();kernel.Dispose();cloud?.Dispose();filters.Dispose();gate.Dispose();}
 }
-
+sealed class LicenseExpiredException():Exception("授权已到期，续费后自动恢复防护");

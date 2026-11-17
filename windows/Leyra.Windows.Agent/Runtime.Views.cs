@@ -23,6 +23,7 @@ sealed partial class Runtime
   var channels=help.TryGetProperty("channels",out var ch)&&ch.ValueKind==JsonValueKind.Array?ch.Clone():JsonSerializer.SerializeToElement(Array.Empty<object>());
   // Code-activated computers expire; computers set up by the owner with a connection file do not.
   long? expires=account.TryGetProperty("expires_at",out var ex)&&ex.ValueKind==JsonValueKind.Number&&ex.GetInt64()<253402300799L?ex.GetInt64():null; // bought-out codes never expire
+  licenseExpiresAt=expires;
   var daysLeft=expires is long e?(int?)Math.Max(0,(int)Math.Ceiling((e-DateTimeOffset.UtcNow.ToUnixTimeSeconds())/86400.0)):null;
   var aiversion=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(ai.GetRawText())))[..16];
   int? selectedExit=exits.GetProperty("selected").ValueKind==JsonValueKind.Number?exits.GetProperty("selected").GetInt32():null;

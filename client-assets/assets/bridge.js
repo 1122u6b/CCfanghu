@@ -1074,7 +1074,8 @@
   };
 
   /* ---------- 工单 ---------- */
-  var TST = { pending: 'open', waiting_user: 'wait', resolved: 'done', closed: 'closed' };
+  // 服务器状态：open 待处理（客户刚提交/追问）、replied 已回复、resolved 已处理（后台标记，等客户确认）、closed 已关闭。
+  var TST = { open: 'open', pending: 'open', replied: 'wait', waiting_user: 'wait', resolved: 'done', closed: 'closed' };
   var seen = store('cc.tickets.seen') || {};
   S.ticketImages = false;   // 工单列表拿回来才知道能不能发图（图床配好了没有）
   var rated = {};
@@ -2012,6 +2013,12 @@
   setInterval(function () { if (account && account.renewal && account.renewal !== 'done') loadAccount(); }, 5000);
   loadZone(); loadRules();
   setInterval(function () { if (account && account.activated) { loadZone(); loadRules(); } }, 30000);
-  setInterval(function () { if (account && account.activated) loadTickets(); }, 60000);
+  // 工单近乎实时：开着工单页每 5 秒取一次，其他时候每 30 秒（客服一回复就弹通知）。
+var ticketsAt = 0;
+setInterval(function () {
+  if (!(account && account.activated)) return;
+  var every = S.page === 'tickets' ? 5000 : 30000;
+  if (Date.now() - ticketsAt >= every) { ticketsAt = Date.now(); loadTickets(); }
+}, 1000);
 })();
 

@@ -436,6 +436,28 @@ class Gateway:
                 if writer:
                     writer.close()
                     with contextlib.suppress(Exception):await writer.wait_closed()
+    def remind_expiry(self,now=None):
+        """Renewal reminders in each computer's messages: 3 days before, 1 day before and when it has run out.
+        Each is sent once per expiry date (renewing gives a new date, so the next period is reminded again)."""
+        now=now or time.time();sent=0
+        for row in self.devices.list()['items']:
+            if not row['enabled']:continue
+            at=self.devices.licenses.expires_at(row['id'])
+            if at is None or at>=253402300799:continue
+            left=at-now;renew={'kind':'renewal'}
+            if left<=0:tag,title,body='expired','授权已到期，防护已停止','你的授权码已经到期，防护已停止，网络保持阻断以免暴露真实 IP。续费后自动恢复防护；想先用自己的网络，可以在设置里点「撤掉防护」（会暴露真实 IP）。'
+            elif left<=86400:tag,title,body='1d','授权明天到期','你的授权码明天到期，到期后防护会立即停止。请及时续费，续费后时间自动顺延。'
+            elif left<=3*86400:tag,title,body='3d','授权还有 3 天到期','你的授权码还有 3 天到期，到期后防护会立即停止。请及时续费，续费后时间自动顺延。'
+            else:continue
+            try:
+                if Management(Path(self.devices.root)/row['id']).notify_once('expire:%s:%d'%(tag,int(at)),title,body,renew):sent+=1
+            except Exception as e:print('expiry reminder skipped: '+type(e).__name__,flush=True)
+        return sent
+    async def expiry_reminders(self):
+        while True:
+            try:await asyncio.to_thread(self.remind_expiry)
+            except Exception as e:print('expiry reminders failed: '+type(e).__name__,flush=True)
+            await asyncio.sleep(600)
     def mux_enabled(self):return self.config.get('mux',True) is not False
     async def mux_session(self,r,w,device):
         """Many connections from one computer inside this one (see mux.py). Same device checks: every
@@ -462,6 +484,7 @@ class Gateway:
     async def start(self):
         context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.minimum_version=ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(self.config['cert'],self.config['key'])
+        asyncio.get_running_loop().create_task(self.expiry_reminders())
         async def preload():
             try:await self.kernel.preload(self.kernel_exits())
             except Exception as e:print('kernel preload skipped: '+type(e).__name__,flush=True)

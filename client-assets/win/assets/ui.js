@@ -969,7 +969,7 @@
   function showPopup(p) { if (S.popup) { if (S.popQueue.length < 3) S.popQueue.push(p); return; } S.popup = p; render(); }
 
   /* ---------------- 页面：工单 ---------------- */
-  var ST_TAG = { wait: ['warn', '等你回复'], done: ['ok', '已解决'], open: ['neutral', '待处理'], closed: ['neutral', '已关闭'] };
+  var ST_TAG = { wait: ['warn', '已回复'], done: ['ok', '已处理'], open: ['neutral', '待处理'], closed: ['neutral', '已关闭'] };
   /* 诊断信息（01 §5.13）：默认附上，可以不附；「看看里面有什么」逐项列出 */
   function diagBox() {
     var on = !S.newTicket || S.newTicket.diag !== false;
@@ -977,7 +977,7 @@
       '<div class="row2"><span>日志、状态、最近的检查结果，不含密钥、密码和你访问的网站</span>' + btn('text', '看看里面有什么', 'dialog:diag') + '</div></div>';
   }
   /* 工单（01 §5.9「页面」）：先是整页列表，顶上按状态筛选，有新回复的排最前；点一张进整页对话，新建也整页 */
-  var TFILTERS = [['all', '全部'], ['open', '待处理'], ['wait', '等你回复'], ['done', '已解决'], ['closed', '已关闭']];
+  var TFILTERS = [['all', '全部'], ['open', '待处理'], ['wait', '已回复'], ['done', '已处理'], ['closed', '已关闭']];
   function ticketListPage() {
     var F = S.tFilter || 'all';
     var n = function (k) { return S.tickets.filter(function (t) { return k === 'all' || t.st === k; }).length; };

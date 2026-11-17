@@ -51,6 +51,11 @@ CREATE TABLE IF NOT EXISTS uploads(id TEXT PRIMARY KEY,data BLOB NOT NULL,at INT
 CREATE TABLE IF NOT EXISTS attachments(id TEXT PRIMARY KEY,ticket INTEGER NOT NULL,data BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS direct_rules(cidr TEXT PRIMARY KEY,note TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL,secret TEXT NOT NULL);''')
+            # Messages can carry a link (e.g. to renew) and a tag so automatic reminders are sent only once.
+            cols={r[1] for r in db.execute('PRAGMA table_info(messages)')}
+            if 'link' not in cols:db.execute('ALTER TABLE messages ADD COLUMN link TEXT')
+            if 'tag' not in cols:db.execute('ALTER TABLE messages ADD COLUMN tag TEXT')
+            db.execute('CREATE UNIQUE INDEX IF NOT EXISTS messages_tag ON messages(tag)')
             self.set_default(db,'account',{'id':secrets.randbelow(900000)+100000,'contact':'','created_at':int(time.time())})
             self.set_default(db,'help',{'faq':[],'guides':[]})
             # One-time wording fix for FAQ answers copied from older clients; answers the owner edited are left alone.
@@ -178,6 +183,12 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
         with self.db() as db:return self.get(db,'dns',{})
     def configure_dns(self,value):
         with self.db() as db:self.put(db,'dns',value)
+    def notify_once(self,tag,title,body,link=None,important=True):
+        """An automatic message (e.g. renewal reminder) sent at most once per tag. True when it was new."""
+        with self.db() as db:
+            cur=db.execute('INSERT OR IGNORE INTO messages(title,body,level,created_at,link,tag) VALUES (?,?,?,?,?,?)',
+                           (title,body,'action' if important else 'normal',int(time.time()),json.dumps(link) if link else None,tag))
+            return cur.rowcount==1
     def rpc(self,req):
         if not isinstance(req,dict):raise ManagementError('object required')
         kind=req.get('type');now=int(time.time())
@@ -228,7 +239,10 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
             if kind=='set_contact':
                 account=self.get(db,'account');account['contact']=text(req.get('contact'),200);self.put(db,'account',account);return account
             if kind=='messages':
-                rows=[dict(r) for r in db.execute('SELECT * FROM messages ORDER BY id DESC LIMIT 100')];return {'items':rows,'unread':sum(not r['read_at'] for r in rows)}
+                rows=[dict(r) for r in db.execute('SELECT * FROM messages ORDER BY id DESC LIMIT 100')]
+                for r in rows:
+                    r.pop('tag',None);r['link']=json.loads(r['link']) if r.get('link') else None
+                return {'items':rows,'unread':sum(not r['read_at'] for r in rows)}
             if kind=='mark_read':
                 if req.get('all') is True:db.execute('UPDATE messages SET read_at=? WHERE read_at IS NULL',(now,))
                 else:
@@ -244,6 +258,14 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
                 self.add_reply(db,identity,text(req.get('body'),20000,True),req.get('attachments',[]));return self.ticket(db,identity)
             if kind in ('ticket_reply','admin_ticket_reply'):
                 identity=int(req.get('id',0));self.ticket(db,identity);self.add_reply(db,identity,text(req.get('body'),20000,True),req.get('attachments',[]),kind=='admin_ticket_reply');return self.ticket(db,identity)
+            if kind=='admin_ticket_state':
+                # Owner marks a ticket handled or closed; a short note from support goes with it, so the
+                # customer's app gets the usual "new reply" notice and shows the new state.
+                identity=int(req.get('id',0));self.ticket(db,identity);state=req.get('state')
+                notes={'resolved':'客服已把这个工单标记为「已处理」。问题解决了请点「已解决」，没解决可以直接回复。','closed':'客服已关闭这个工单。还有问题可以直接回复，或新建工单。'}
+                if state not in notes:raise ManagementError('state must be resolved or closed')
+                self.add_reply(db,identity,notes[state],[],True)
+                db.execute('UPDATE tickets SET state=?,updated_at=? WHERE id=?',(state,now,identity));return self.ticket(db,identity)
             if kind=='ticket_rate':
                 identity=int(req.get('id',0));self.ticket(db,identity)
                 if not isinstance(req.get('solved'),bool):raise ManagementError('solved must be boolean')

@@ -197,7 +197,7 @@ R.tickets = function () {
   return Promise.all([devices(), rpc({ type: 'all_tickets' })]).then(function (x) {
     var items = x[1].items;
     $('main').innerHTML = '<div class="card"><h2>工单</h2>' + (items.length ? '<table><tr><th>客户</th><th>标题</th><th>状态</th><th>更新</th><th></th></tr>' + items.map(function (t) {
-      return '<tr><td>' + esc(t.device_name) + '</td><td>#' + t.id + ' ' + esc(t.title) + '</td><td>' + (t.waiting_for_admin ? '<span class="tag w">待回复</span>' : '<span class="tag">' + esc(t.state) + '</span>') + '</td><td>' + when(t.updated_at) + '</td><td><button class="b" onclick="openTicket(\'' + t.device + '\',' + t.id + ')">查看</button></td></tr>';
+      return '<tr><td>' + esc(t.device_name) + '</td><td>#' + t.id + ' ' + esc(t.title) + '</td><td>' + (t.waiting_for_admin ? '<span class="tag w">待回复</span>' : '<span class="tag">' + esc(TSTATE[t.state] || t.state) + '</span>') + '</td><td>' + when(t.updated_at) + '</td><td><button class="b" onclick="openTicket(\'' + t.device + '\',' + t.id + ')">查看</button></td></tr>';
     }).join('') + '</table>' : '<p class="muted">还没有工单</p>') + '</div><div id="tdetail"></div>';
   });
 };
@@ -206,7 +206,7 @@ function openTicket(d, id) {
     var t = r.items.filter(function (x) { return x.id === id; })[0]; if (!t) return;
     $('tdetail').innerHTML = '<div class="card"><h2>' + esc(devName(d)) + ' · #' + t.id + ' ' + esc(t.title) + '</h2>' + t.messages.map(function (m) {
       return '<div class="msg ' + (m.from_admin ? 'admin' : '') + '"><span class="muted">' + (m.from_admin ? '客服' : '客户') + ' · ' + when(m.at) + '</span>\n' + esc(m.body) + '<div>' + m.images.map(function (i) { return '<img data-d="' + d + '" data-t="' + t.id + '" data-i="' + esc(i) + '" alt="图片">'; }).join('') + '</div></div>';
-    }).join('') + '<textarea id="reply" placeholder="回复客户"></textarea><div class="row"><span></span><button class="b p" onclick="reply(\'' + d + '\',' + t.id + ')">发送回复</button></div></div>';
+    }).join('') + '<textarea id="reply" placeholder="回复客户"></textarea><div class="row"><span><button class="b" onclick="setTicket(\'' + d + '\',' + t.id + ',\'resolved\')">标记处理完成</button> <button class="b" onclick="setTicket(\'' + d + '\',' + t.id + ',\'closed\')">关闭工单</button></span><button class="b p" onclick="reply(\'' + d + '\',' + t.id + ')">发送回复</button></div></div>';
     Array.prototype.forEach.call(document.querySelectorAll('#tdetail img'), loadImage);
     $('tdetail').scrollIntoView({ behavior: 'smooth' });
   }).catch(fail);
@@ -221,6 +221,8 @@ function loadImage(img) {
     }).catch(function () { img.alt = '图片加载失败'; });
   })(0);
 }
+var TSTATE = { open: '待处理', replied: '已回复', resolved: '已处理', closed: '已关闭' };
+function setTicket(d, id, state) { dev(d, { type: 'admin_ticket_state', id: id, state: state }).then(function () { toast(state === 'resolved' ? '已标记处理完成，客户会收到通知' : '已关闭，客户会收到通知'); openTicket(d, id); }).catch(function (e) { toast(e.message || '操作失败'); }); }
 function reply(d, id) { var body = $('reply').value.trim(); if (!body) return; dev(d, { type: 'admin_ticket_reply', id: id, body: body, attachments: [] }).then(function () { toast('已回复'); openTicket(d, id); }).catch(fail); }
 R.messages = function () {
   return devices().then(function (ds) {
