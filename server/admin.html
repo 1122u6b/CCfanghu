@@ -104,7 +104,10 @@ R.home = function () {
 };
 R.licenses = function () {
   return rpc({ type: 'licenses' }).then(function (r) {
-    var items = r.items, unused = items.filter(function (x) { return x.status === 'unused'; }).length;
+    // 自动测试每次会生成两个 1 天的码（备注 automated …），默认不显示，免得混进你的授权码里被误作废。
+    var isTest = function (x) { return /^automated /.test(x.note || ''); };
+    var tests = r.items.filter(isTest).length;
+    var items = SHOW_TEST_CODES ? r.items : r.items.filter(function (x) { return !isTest(x); }), unused = items.filter(function (x) { return x.status === 'unused'; }).length;
     var st = function (x) {
       if (x.status === 'revoked') return '<span class="tag x">已作废</span>';
       if (x.status === 'unused') return '<span class="tag">未使用</span>';
@@ -120,13 +123,14 @@ R.licenses = function () {
     var term = function (x) { return x.kind === 'trial' ? '<span class="tag w">试用 1 天</span>' : x.days === 0 ? '永久' : x.days + ' 天'; };
     $('main').innerHTML = '<div class="card"><h2>生成授权码</h2><p class="muted">客户在售后群下单后，复制一个「未使用」的授权码发给他。客户在 Leyra 里填授权码就能激活。<b>一个授权码只能用于一台电脑。</b></p>' +
       '<div class="row"><input id="lc" type="number" min="1" max="200" value="1" style="max-width:120px" title="数量"><select id="ld" style="max-width:180px"><option value="0">永久（买断）</option><option value="1">1 天（试用）</option></select><input id="ln" placeholder="备注（可选，比如客户名字、订单号）"><button class="b p" onclick="newCodes()">生成</button></div><div id="newcodes"></div></div>' +
-      '<div class="card"><h2>全部授权码（' + items.length + '，未使用 ' + unused + '）</h2>' + (items.length ? '<table><tr><th>授权码</th><th>期限</th><th>状态</th><th>客户联系方式 / 订单号</th><th>激活时间</th><th>到期时间</th><th>备注</th><th></th></tr>' + items.map(function (x) {
+      '<div class="card"><h2>全部授权码（' + items.length + '，未使用 ' + unused + '）</h2>' + (tests ? '<p class="muted"><label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" style="width:auto"' + (SHOW_TEST_CODES ? ' checked' : '') + ' onchange="SHOW_TEST_CODES=this.checked;go(\'licenses\')"> 显示自动测试生成的码（' + tests + ' 个，测试结束后会自动作废，不用手动处理）</label></p>' : '') + (items.length ? '<table><tr><th>授权码</th><th>期限</th><th>状态</th><th>客户联系方式 / 订单号</th><th>激活时间</th><th>到期时间</th><th>备注</th><th></th></tr>' + items.map(function (x) {
         return '<tr><td><code>' + esc(x.code) + '</code> <button class="b" onclick="copyText(\'' + esc(x.code) + '\')">复制</button></td><td>' + term(x) + '</td><td>' + st(x) + '</td><td>' + esc(x.contact || '-') + (x.order_no ? '<br><span class="muted">' + esc(x.order_no) + '</span>' : '') + '</td><td>' + when(x.activated_at) + '</td>' + '<td>' + expiry(x) + '</td><td>' + esc(x.note || '') + '</td><td>' +
           (x.status === 'active' && x.bound ? '<button class="b" onclick="unbindCode(\'' + esc(x.code) + '\')">解绑（换电脑）</button> ' : '') +
           (x.status !== 'revoked' ? '<button class="b d" onclick="revokeCode(\'' + esc(x.code) + '\')">作废</button>' : '') + '</td></tr>';
       }).join('') + '</table>' : '<p class="muted">还没有授权码，在上面生成。</p>') + '</div>';
   });
 };
+var SHOW_TEST_CODES = false;
 function copyText(t) { (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { toast('已复制'); }, function () { prompt('复制下面的内容', t); }); }
 function newCodes() {
   rpc({ type: 'license_create', count: parseInt($('lc').value, 10) || 1, days: parseInt($('ld').value, 10), note: $('ln').value.trim() }).then(function (r) {
