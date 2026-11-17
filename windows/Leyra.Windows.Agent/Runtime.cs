@@ -142,7 +142,7 @@ sealed partial class Runtime:IDisposable
   retryAt=DateTimeOffset.UtcNow.AddSeconds(Math.Min(60,5*Math.Pow(2,Math.Min(failures++,4))));
   Record("blocked",reason);Program.Log("protection blocked",e);
  }
- int netFailures;DateTimeOffset nextNetProbe=DateTimeOffset.MinValue;
+ int netFailures;DateTimeOffset nextNetProbe=DateTimeOffset.MinValue;DateTimeOffset lastTraffic=DateTimeOffset.MinValue;
  // Pause and quit interrupt a line that is still being built instead of waiting up to a minute.
  CancellationTokenSource startCancel=new();bool startInterrupted;
  // Every 30 s: server reachable and traffic really leaves through the customer's exit.
@@ -163,7 +163,12 @@ sealed partial class Runtime:IDisposable
   {
    var fatal=e is HttpRequestException h&&h.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
    netFailures++;nextNetProbe=DateTimeOffset.UtcNow.AddSeconds(10);
-   Program.Log("line check failed ("+netFailures+"/3)",e);
+   // Pages are still loading: everything has to go through the customer's exit (direct traffic is
+   // blocked), so data flowing means the exit works and only the check was refused, as busy
+   // residential exits do. Keep the customer online; only a check failing with nothing flowing cuts off.
+   var flowing=DateTimeOffset.UtcNow-lastTraffic<TimeSpan.FromSeconds(30);
+   Program.Log("line check failed ("+netFailures+"/3"+(flowing?", traffic still flowing":"")+")",e);
+   if(!fatal&&flowing){netFailures=Math.Min(netFailures,2);return;}
    if(!fatal&&netFailures<3)return;
    await gate.WaitAsync(stop);
    try{if(state=="protected"&&configured)Block(e);}
@@ -188,7 +193,7 @@ sealed partial class Runtime:IDisposable
   using(var local=CancellationTokenSource.CreateLinkedTokenSource(stop))
   {
    local.CancelAfter(TimeSpan.FromSeconds(4));
-   try{var traffic=await kernel.Rates(local.Token);up=traffic.Up;down=traffic.Down;var proxies=await kernel.Get("proxies/"+Uri.EscapeDataString("出口"),local.Token);selected=Text(proxies,"now");}
+   try{var traffic=await kernel.Rates(local.Token);up=traffic.Up;down=traffic.Down;if(down>=2048)lastTraffic=DateTimeOffset.UtcNow;var proxies=await kernel.Get("proxies/"+Uri.EscapeDataString("出口"),local.Token);selected=Text(proxies,"now");}
    catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidDataException or JsonException){/* 读流量只是显示用，下次再读 */}
   }
   heartbeat=DateTimeOffset.UtcNow;lastHealth=heartbeat;

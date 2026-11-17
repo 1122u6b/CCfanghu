@@ -92,11 +92,16 @@ async def connect_any(nodes,target):
     """Try each upstream of the selected exit in order; the first that completes CONNECT wins."""
     last=None
     for node in nodes:
-        try:return await upstream_connect(node,target)
-        except (OSError,ValueError,asyncio.TimeoutError,asyncio.IncompleteReadError,asyncio.LimitOverrunError) as e:
-            last=e
+        for attempt in (1,2):
+            try:return await upstream_connect(node,target)
+            except (OSError,ValueError,asyncio.TimeoutError,asyncio.IncompleteReadError,asyncio.LimitOverrunError) as e:
+                last=e
+                # Residential exits often hang up a handshake when busy; a fresh connection usually works.
+                if attempt==1 and isinstance(e,(asyncio.IncompleteReadError,ConnectionResetError,ConnectionAbortedError)):
+                    await asyncio.sleep(0.3);continue
+                break
             # Only the exit's own address and the reason; never credentials or the site being visited.
-            print('upstream failed: %s:%s %s %s'%(node.get('server','?'),node.get('port','?'),type(e).__name__,str(e)[:120].replace('\n',' ')),flush=True)
+        print('upstream failed: %s:%s %s %s'%(node.get('server','?'),node.get('port','?'),type(last).__name__,str(last)[:120].replace('\n',' ')),flush=True)
     raise last or ValueError('no upstream configured')
 
 class Gateway:
