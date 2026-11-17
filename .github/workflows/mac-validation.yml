@@ -2,6 +2,11 @@ name: Mac validation (explicit compute opt-in)
 # Builds the Mac package (Apple silicon + Intel in one .pkg), installs it on a real Mac of each kind and runs the
 # customer flow. Separate from the Windows workflow; nothing here touches the Windows client.
 on:
+  # A new workflow can only be started by hand once it is on the default branch; until then a push to the
+  # development branch whose commit message contains [mac-ci] starts it (other pushes do not).
+  push:
+    branches: [claude/dazzling-maxwell-irb2ju]
+    paths: ['mac/**', '.github/workflows/mac-validation.yml']
   workflow_dispatch:
     inputs:
       allow_hosted_compute:
@@ -16,7 +21,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   test-code:
-    if: ${{ inputs.allow_hosted_compute == true }}
+    if: ${{ inputs.allow_hosted_compute == true || (github.event_name == 'push' && contains(github.event.head_commit.message, '[mac-ci]')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     outputs:
@@ -50,7 +55,7 @@ jobs:
           # GitHub refuses to pass on a URL containing user:password@, so hand over the parts.
           echo "socks_port=$port" >> "$GITHUB_OUTPUT"; echo "socks_pass=$pass" >> "$GITHUB_OUTPUT"
   build:
-    if: ${{ inputs.allow_hosted_compute == true }}
+    if: ${{ inputs.allow_hosted_compute == true || (github.event_name == 'push' && contains(github.event.head_commit.message, '[mac-ci]')) }}
     runs-on: macos-15
     timeout-minutes: 30
     steps:
