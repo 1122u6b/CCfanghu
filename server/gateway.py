@@ -57,8 +57,72 @@ def validate_node(o):
         try:return validate_kernel_node(o)
         except LinkError as e:raise ValueError(str(e)) from None
     return validate_upstream(o)
+# ---- Warm SOCKS5 connections to the customer's exit ----
+# A new connection to a distant residential exit costs TCP plus greeting and authentication
+# (about 3 round trips, ~450 ms from Hong Kong to the US). Keep WARM_SIZE connections per exit that
+# are already authenticated, so a new request only sends CONNECT. Only for exits used in the last
+# minute, each kept at most WARM_MAX_AGE seconds idle; a pooled one that turns out closed is retried
+# fresh by connect_any. Small on purpose: some providers cap simultaneous connections.
+WARM_SIZE=2;WARM_MAX_AGE=20;WARM_IDLE_STOP=60
+_warm={}  # key -> {'conns':[(t,r,w)], 'used':t, 'task':Task|None}
+def _warm_key(o):return (o['server'],o['port'],o.get('username') or '')
+async def _socks_greet(o):
+    r,w=await asyncio.wait_for(asyncio.open_connection(o['server'],o['port']),12)
+    try:
+        if 'username' in o:
+            w.write(b'\x05\x01\x02');await w.drain()
+            if await asyncio.wait_for(exact(r,2),12)!=b'\x05\x02':raise ValueError('upstream did not accept password authentication')
+            u=o['username'].encode();p=o['password'].encode()
+            w.write(b'\x01'+bytes([len(u)])+u+bytes([len(p)])+p);await w.drain()
+            if await asyncio.wait_for(exact(r,2),12)!=b'\x01\x00':raise ValueError('upstream authentication rejected')
+        else:
+            w.write(b'\x05\x01\x00');await w.drain()
+            if await asyncio.wait_for(exact(r,2),12)!=b'\x05\x00':raise ValueError('upstream requires authentication')
+        return r,w
+    except BaseException:
+        w.close()
+        with contextlib.suppress(Exception):await w.wait_closed()
+        raise
+def _warm_close(item):
+    with contextlib.suppress(Exception):item[2].close()
+async def _warm_keeper(key,o):
+    entry=_warm[key]
+    try:
+        while time.monotonic()-entry['used']<WARM_IDLE_STOP:
+            now=time.monotonic()
+            for item in [c for c in entry['conns'] if now-c[0]>WARM_MAX_AGE or c[1].at_eof()]:
+                entry['conns'].remove(item);_warm_close(item)
+            if len(entry['conns'])<WARM_SIZE:
+                try:r,w=await _socks_greet(o);entry['conns'].append((time.monotonic(),r,w))
+                except Exception:await asyncio.sleep(5)
+                continue
+            await asyncio.sleep(2)
+    finally:
+        for item in entry['conns']:_warm_close(item)
+        entry['conns'].clear();entry['task']=None
+def _warm_take(o):
+    key=_warm_key(o);entry=_warm.setdefault(key,{'conns':[],'used':0,'task':None})
+    entry['used']=time.monotonic()
+    if entry['task'] is None:entry['task']=asyncio.get_running_loop().create_task(_warm_keeper(key,dict(o)))
+    now=time.monotonic()
+    while entry['conns']:
+        t,r,w=entry['conns'].pop(0)
+        if now-t<=WARM_MAX_AGE and not r.at_eof():return r,w
+        _warm_close((t,r,w))
+    return None
 async def upstream_connect(o,target):
     o=validate_upstream(o)
+    if o['type']=='socks5' and (warm:=_warm_take(o)) is not None:
+        r,w=warm
+        try:
+            w.write(b'\x05\x01\x00'+pack_address(*target));await w.drain()
+            head=await asyncio.wait_for(exact(r,4),15)
+            if head[:2]!=b'\x05\x00':raise ValueError('upstream CONNECT rejected: '+str(head[1]))
+            await address(r,head[3]);return r,w
+        except BaseException:
+            w.close()
+            with contextlib.suppress(Exception):await w.wait_closed()
+            raise
     r,w=await asyncio.wait_for(asyncio.open_connection(o['server'],o['port']),12)
     try:
         if o['type']=='http':

@@ -449,7 +449,7 @@
       acts = S.busy.resume ? '' : btn('primary', I('shield', 14) + '开启防护', 'resume');
     } else if (st === 'paused') {
       var P = S.pause;
-      g = H.statusGraphic('warn', f, { left: P.left, total: P.total, center: '<span class="hx-num-lg" style="color:var(--text);font-size:28px;line-height:36px" data-mmss>' + H.mmss(P.left) + '</span>' });
+      g = H.statusGraphic('warn', f, { left: P.left, total: P.total, center: '<span class="hx-num-lg" style="color:var(--text);font-size: 28px;line-height: 36px" data-mmss>' + H.mmss(P.left) + '</span>' });
       title = '防护已暂停';
       body = '<p>暂停期间不走独享线路，你访问的网站能看到你的真实 IP。到 ' + P.end + ' 自动恢复，也可以随时点「恢复防护」。' + (P.kind === 'wifi' ? '线路连上后自动恢复防护。' : '') + '</p>';
       acts = S.busy.resume ? '' : btn('primary', '恢复防护', 'resume');
@@ -1157,11 +1157,11 @@
       bd = '<div class="content" style="align-items:center;text-align:center"><div class="hx-status">' + H.statusGraphic(okNow ? 'ok' : 'neutral', fam()).replace('class="hx-sg ', 'class="hx-sg' + fx('wsg', okNow) + ' ') + '<div class="txt"><h2>' + (okNow ? '已保护' : byo() ? '出口已接上' : '线路已开通') + '</h2>' + (okNow ? '<p>真实 IP 已隐藏，所有流量经' + (byo() ? '你的出口' : '独享线路') + '传输。</p>' : inline(S.starting && S.starting.stage === 1 ? '正在校验线路完整性' : '正在建立独享线路')) + '</div></div></div>';
       if (okNow) ft = btn('primary', '下一步', 'wizNext');
     } else if (W.step === 1) {
-      bd = stepper(1) + '<div class="content"><p class="p-sub" style="font-size:14px;line-height:22px">境外网站可能通过电脑时区判断你所在的地区，建议和出口保持一致。</p>' +
+      bd = stepper(1) + '<div class="content"><p class="p-sub" style="font-size: 14px;line-height: 22px">境外网站可能通过电脑时区判断你所在的地区，建议和出口保持一致。</p>' +
         (!TZN.exit ? '<div class="hx-alert info" role="note">' + I('info', 20) + '<span class="msg">还不知道出口所在的时区，知道后会再提醒你比对。先跳过这一步。</span></div>'
         : '<div class="p-cmp">' +
-        '<div class="hx-card hx-data"><div class="lab">' + I('globe', 16) + '出口位置</div><div class="val txt" style="font-size:16px;line-height:24px">' + (TZN.city || TZN.exit) + '</div><div class="sub">' + (TZN.city ? TZN.exit : '出口时区') + '</div></div>' +
-        '<div class="hx-card hx-data"><div class="lab">' + I('clock', 16) + '电脑时区</div><div class="val txt" style="font-size:16px;line-height:24px">' + (W.tz === 'changed' ? TZN.exit : TZN.sys) + '</div><div class="sub" style="display:flex;gap:4px;align-items:center">' + (W.tz === 'changed' ? I('check', 16, 'c-ok') + '和出口一致' : I('warning', 16, 'c-warn') + '和出口不一致') + '</div></div></div>' +
+        '<div class="hx-card hx-data"><div class="lab">' + I('globe', 16) + '出口位置</div><div class="val txt" style="font-size: 16px;line-height: 24px">' + (TZN.city || TZN.exit) + '</div><div class="sub">' + (TZN.city ? TZN.exit : '出口时区') + '</div></div>' +
+        '<div class="hx-card hx-data"><div class="lab">' + I('clock', 16) + '电脑时区</div><div class="val txt" style="font-size: 16px;line-height: 24px">' + (W.tz === 'changed' ? TZN.exit : TZN.sys) + '</div><div class="sub" style="display:flex;gap:4px;align-items:center">' + (W.tz === 'changed' ? I('check', 16, 'c-ok') + '和出口一致' : I('warning', 16, 'c-warn') + '和出口不一致') + '</div></div></div>' +
         '<div class="hx-row">' + (W.tz === 'changed' ? btn('text', '恢复原来的时区', 'wizTzRestore') : btn('secondary', '更换时区', 'dialog:tz')) + '</div>') + '</div>';
       ft = btn('primary', '下一步', 'wizNext');
     } else if (W.step === 2) {
