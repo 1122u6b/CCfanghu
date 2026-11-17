@@ -297,7 +297,13 @@ jobs:
           if (-not $switched) { $failures += 'the automatic exit switch was not recorded in recent activity' }
           if ($badExit) { Ask ('{"type":"delete_exit","id":' + $badExit + '}') | Out-Null }
           Write-Host '   only listed sites go through the exit, the rest connects directly (and back to everything through the exit)'
-          function SeenIp { try { (Invoke-WebRequest https://api.ipify.org -UseBasicParsing -TimeoutSec 25).Content.Trim() } catch { 'error ' + $_.Exception.Message } }
+          function SeenIp {
+            for ($k = 1; $k -le 3; $k++) {
+              try { return (Invoke-WebRequest https://api.ipify.org -UseBasicParsing -TimeoutSec 25).Content.Trim() } catch { $last = 'error ' + $_.Exception.Message; Start-Sleep 3 }
+            }
+            return $last
+          }
+          WaitFor 'protected' 150 | Out-Null; Start-Sleep 5   # the previous step just switched exits; let the line settle
           function Route($json) { Ask $json | Out-Null; Start-Sleep 4; return (WaitFor 'protected' 150) }
           $ipAll = SeenIp; Write-Host "   everything through the exit: sites see $ipAll"
           $s = Route '{"type":"set_route_mode","listed":true,"domains":["ipify.org"]}'
