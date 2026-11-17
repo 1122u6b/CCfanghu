@@ -133,17 +133,42 @@ sealed partial class Runtime
   store.Settings.Enabled=true;store.Settings.PausedUntil=0;store.Settings.QuitPause=false;store.Save();retryAt=DateTimeOffset.MinValue;
   return new{id=result.GetProperty("id").GetInt32(),lines=result.GetProperty("lines").GetInt32(),skipped=result.GetProperty("skipped").EnumerateArray().Select(x=>x.GetString()??"").ToArray()};
  }
- async Task<object> MeasureSpeed(CancellationToken stop)
+ // Speed test runs in the background: the request answers at once, the status shows speed_testing
+ // while it runs, then the line's speed or speed_error. Throughput is what arrived within 10 s, so a
+ // slow exit still gets a figure instead of failing for not finishing a fixed size.
+ bool speedTesting;string speedError="";
+ object MeasureSpeed(CancellationToken stop)
  {
   if(state!="protected")throw new InvalidOperationException("请先建立已验证的线路");
-  using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(20));
-  using var handler=new HttpClientHandler{UseProxy=true,Proxy=new WebProxy("http://127.0.0.1:17890"),AllowAutoRedirect=false};using var http=new HttpClient(handler);
-  var started=Stopwatch.StartNew();using var response=await http.GetAsync("https://speed.cloudflare.com/__down?bytes=1048576",HttpCompletionOption.ResponseHeadersRead,deadline.Token);response.EnsureSuccessStatusCode();
-  using var input=await response.Content.ReadAsStreamAsync(deadline.Token);var bytes=new byte[32768];long count=0;int n;
-  while((n=await input.ReadAsync(bytes,deadline.Token))>0){count+=n;if(count>1048576)throw new InvalidDataException("测速响应超过上限");}
-  if(count==0)throw new InvalidDataException("测速没有收到数据");
-  lastSpeed=((long)(count/Math.Max(.001,started.Elapsed.TotalSeconds)),DateTimeOffset.UtcNow);
-  return new{down_bps=(long)(count/Math.Max(.001,started.Elapsed.TotalSeconds)),measured=true,ago_secs=0};
+  if(speedTesting)return new{started=true};
+  speedTesting=true;speedError="";
+  _=Task.Run(async()=>
+  {
+   try
+   {
+    string? last=null;
+    foreach(var url in new[]{"https://speed.cloudflare.com/__down?bytes=25000000","https://proof.ovh.net/files/10Mb.dat"})
+    {
+     try
+     {
+      using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(15));
+      using var handler=new HttpClientHandler{UseProxy=true,Proxy=new WebProxy("http://127.0.0.1:17890"),AllowAutoRedirect=false};using var http=new HttpClient(handler){Timeout=Timeout.InfiniteTimeSpan};
+      using var response=await http.GetAsync(url,HttpCompletionOption.ResponseHeadersRead,deadline.Token);response.EnsureSuccessStatusCode();
+      using var input=await response.Content.ReadAsStreamAsync(deadline.Token);var buffer=new byte[65536];long count=0;int n;
+      var started=Stopwatch.StartNew();
+      try{while(started.Elapsed<TimeSpan.FromSeconds(10)&&(n=await input.ReadAsync(buffer,deadline.Token))>0)count+=n;}
+      catch(OperationCanceledException)when(!stop.IsCancellationRequested&&count>0){}
+      if(count<16384)throw new InvalidDataException("10 秒内几乎没有收到数据");
+      lastSpeed=((long)(count/Math.Max(.5,started.Elapsed.TotalSeconds)),DateTimeOffset.UtcNow);Record("speed",(lastSpeed.Value.Down*8/1_000_000.0).ToString("0.0")+" Mbps");
+      return;
+     }
+     catch(Exception e)when(e is HttpRequestException or TaskCanceledException or IOException or InvalidDataException){last=e.Message;Program.Log("speed test "+url,e);}
+    }
+    speedError="测速失败："+(last??"没有收到数据")+"。可能是你的出口限速或拒绝了测速网站，可以稍后再试。";
+   }
+   finally{speedTesting=false;Publish();}
+  },CancellationToken.None);
+  return new{started=true};
  }
  string? aiSession;int? aiIdentity;
  async Task<object> ShellAction(JsonElement request,CancellationToken stop)

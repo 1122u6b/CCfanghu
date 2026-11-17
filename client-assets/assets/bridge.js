@@ -152,6 +152,9 @@
 
   function applyProtection(p) {
     var now = Date.now();
+    // 已激活（任何不是「未激活」的状态）：还停在激活页就进主界面。激活后的头一秒守护程序可能还报「未激活」
+    // 把界面拉回激活页，之后的「正在连接」「已保护」都要能把它带回来。
+    if (p.state && p.state !== 'not_activated' && S.screen === 'activate' && !S.busy.act) { S.screen = 'main'; S.page = 'overview'; }
     // 「防护已暂停」的常驻提示只在暂停期间有：恢复了、断网了都收起。
     if (p.state !== 'paused' || p.off) S.warnToast = null;
     else if (S.status !== 'paused') S.warnToast = '防护已暂停，你访问的网站能看到你的真实 IP';
@@ -233,7 +236,14 @@
   function apply(st) {
     applyLines(st);
     S.rate = st.rate ? { up: st.rate.up_bps, down: st.rate.down_bps } : null;
-    S.speedTesting = !!st.speed_testing;
+    // 测速在守护程序后台进行：测着时 speed_testing，测完给速度或 speed_error。
+    if (speedWatch && !S.busy.speed && !st.speed_testing) {
+      speedWatch = false;
+      var cur = (st.lines || []).filter(function (l) { return l.speed && l.speed.measured; })[0];
+      if (st.speed_error) P.toast(st.speed_error, 'info');
+      else if (cur) P.toast('测速完成：下载 ' + (cur.speed.down_bps * 8 / 1e6).toFixed(1) + ' Mbps');
+    }
+    S.speedTesting = !!st.speed_testing || (speedWatch && !!S.busy.speed);
     // 最近一次检查（docs/03 §4）：安全检查页一打开就显示。
     var lc = st.last_check;
     // 防护记录（docs/01 §5.3）：时长按现在的时间算，每次刷新状态跟着走。
@@ -394,6 +404,7 @@
     if (e.kind === 'exit') return '切换到出口「' + esc(e.detail) + '」';
     if (e.kind === 'paused') return e.detail === 'quit' ? '彻底退出' : /^\d+$/.test(e.detail || '') ? '暂停防护 ' + e.detail + ' 分钟' : '暂停防护';
     if (e.kind === 'activated') return '已激活';
+    if (e.kind === 'speed') return '测速：下载 ' + esc(e.detail);
     if (e.kind === 'exit_failover') return '出口连不上，已自动切换：' + esc(e.detail);
     if (e.kind === 'timezone') return '电脑时区已自动改成出口所在地（' + esc(e.detail) + '），可在设置里恢复';
     if (e.kind === 'bypass') return '有软件绕过保护：' + esc(e.detail);
@@ -526,12 +537,13 @@
   };
   A.routeRefresh = A.pmRefresh = A.trayRefresh = function () { act({ type: 'refresh' }, '线路已重新测过'); };
   // 测速（docs/01 §5.2）：只测当前线路；冷却、正在大量下载时守护程序回一句人话，照说。进度看状态里的 speed_testing。
+  var speedWatch = false;
   A.speedTest = function () {
     if (S.speedTesting || S.busy.speed) return;
-    S.busy.speed = true;
+    S.busy.speed = true; S.speedTesting = true; speedWatch = true; P.render();
     call({ type: 'speed_test' }).then(function () {
-      S.busy.speed = false; S.speedTesting = true; P.render();
-    }).catch(function (e) { S.busy.speed = false; P.render(); P.toast(msg(e), 'info'); });
+      S.busy.speed = false; P.render();
+    }).catch(function (e) { S.busy.speed = false; S.speedTesting = false; speedWatch = false; P.render(); P.toast(msg(e), 'info'); });
   };
   A.refreshAny = function () { A.go(S.status === 'pm' ? 'overview' : 'routes'); A.routeRefresh(); };
   A.routeBad = A.pmSwitch = function () { act({ type: 'report_bad_line' }, '已换一条线路'); };
@@ -556,6 +568,16 @@
   var pending = false;
   window.CC_CHECK_PENDING = function () { return pending; };
 
+  // 浏览器检查完成后，取一份新的检查结果，把报告里「浏览器看到的 IP」等项更新掉（不重新显示检查进度）。
+  function refreshCheckResults(name) {
+    call({ type: 'doctor' }).then(function (r) {
+      if (r.id) P.set({ checkId: r.id });
+      (r.items || []).forEach(function (it) { results[it.id] = it; });
+      P.render(); loadCheckHist();
+      var l5 = (r.items || []).filter(function (it) { return it.id === 'L5'; })[0];
+      P.toast(name + ' 检查完成' + (l5 && l5.detail ? '：' + l5.detail : ''));
+    }).catch(function () {});
+  }
   function startDoctor(deep) {
     results = {};
     pending = true;
@@ -602,7 +624,7 @@
     T.core.invoke('test_browser', { browser: b.n }).then(function () {
       (function poll() {
         loadBrowsers().then(function () {
-          if (!browserTesting[b.n]) return;
+          if (!browserTesting[b.n]) { refreshCheckResults(b.n); return; }
           // 两分钟没回：测试页已经关了，算这次没查成。
           if (++tries > 60) { delete browserTesting[b.n]; loadBrowsers(); P.toast(b.n + ' 没查完，可以再查一次', 'info'); return; }
           setTimeout(poll, 2000);

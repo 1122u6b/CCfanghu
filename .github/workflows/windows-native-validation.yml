@@ -94,6 +94,7 @@ jobs:
     timeout-minutes: 3
     outputs:
       code: ${{ steps.issue.outputs.code }}
+      ui_code: ${{ steps.issue.outputs.ui_code }}
       socks_port: ${{ steps.issue.outputs.socks_port }}
       socks_pass: ${{ steps.issue.outputs.socks_pass }}
     steps:
@@ -111,6 +112,10 @@ jobs:
             'release=$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 "${release}admin.py" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-new --days 1 --note "automated Windows test"')
           [[ "$code" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]
           echo "code=$code" >> "$GITHUB_OUTPUT"
+          ui=$(ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
+            'release=$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 "${release}admin.py" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-new --days 1 --note "automated UI click-through"')
+          [[ "$ui" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]
+          echo "ui_code=$ui" >> "$GITHUB_OUTPUT"
           # A temporary SOCKS5 proxy on the server stands in for the customer's own IP (loopback only, 40 minutes).
           port=$((20000 + RANDOM % 20000)); pass=$(openssl rand -hex 12)
           ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
@@ -121,7 +126,7 @@ jobs:
     if: ${{ inputs.allow_hosted_compute == true && inputs.publish_tested_run == '' }}
     needs: test-code
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -327,6 +332,53 @@ jobs:
           if (Test-Path doctor.json) { Write-Host '--- security check verdicts ---'; (Get-Content doctor.json -Raw | ConvertFrom-Json).reply.value.items | ForEach-Object { Write-Host "$($_.id) $($_.verdict) $($_.detail)"; if ($_.id -eq 'L8' -and $_.verdict -eq 'fail') { $failures += "false leak alarm: $($_.detail)" }; if ($_.id -eq 'P7' -and $_.verdict -ne 'pass') { $failures += "browser WebRTC protection not set automatically: $($_.detail)" }; if ($_.id -eq 'C1' -and $_.verdict -ne 'pass') { $failures += "timezone not matched to the exit automatically: $($_.detail)" } } }
           if ($failures.Count) { $failures | ForEach-Object { Write-Host "FAIL: $_" }; throw 'Customer flow failed' }
           Write-Host 'LEYRA_CUSTOMER_FLOW=PASS'
+      - name: Fresh reinstall for the customer click-through
+        shell: pwsh
+        run: |
+          $root = 'C:\Apps\Leyra'
+          $p = Start-Process -FilePath "$root\Uninstall.exe" -ArgumentList '/S',"_?=$root" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Uninstaller exit code $($p.ExitCode)" }
+          Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' ProxyEnable 0 -ErrorAction SilentlyContinue
+          $setup = Get-ChildItem artifacts/Leyra-*-setup.exe | Select-Object -First 1
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S','/D=C:\Apps\Leyra' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Installer exit code $($p.ExitCode)" }
+          # The service answers only the desktop user recorded at install; on this machine that is this account.
+          Stop-Service LeyraConnect
+          [IO.File]::WriteAllText("$env:ProgramData\LeyraConnect\owner.sid", [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+          Start-Service LeyraConnect; Start-Sleep 5
+          Write-Host "reinstalled; state: $(Get-Content "$env:ProgramData\LeyraConnect\agent-state.txt" -Raw -ErrorAction SilentlyContinue)"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Customer click-through in the real interface (activate, own exit, speed test, security check, browser check, timezone, quit)
+        shell: pwsh
+        env:
+          UI_CODE: ${{ needs.test-code.outputs.ui_code }}
+          SOCKS_PORT: ${{ needs.test-code.outputs.socks_port }}
+          SOCKS_PASS: ${{ needs.test-code.outputs.socks_pass }}
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.49.1 | Out-Null
+          npx playwright install chromium | Out-Null
+          $agent = (Get-ChildItem 'C:\Apps\Leyra\versions\*\Leyra.Agent.exe' | Select-Object -First 1).FullName
+          # Safety net: whatever happens, give this machine its network back.
+          $at = (Get-Date).AddMinutes(15).ToString('HH:mm')
+          schtasks /Create /TN LeyraCiRecoverUi /SC ONCE /ST $at /RU SYSTEM /TR "`"$agent`" --recover" /F | Out-Null
+          $env:TEST_CODE = $env:UI_CODE
+          $env:EXIT_LINK = "socks5://ci:$($env:SOCKS_PASS)@127.0.0.1:$($env:SOCKS_PORT)"
+          node tests/e2e/customer-ui.mjs ui-shots
+          $code = $LASTEXITCODE
+          & $agent --recover | Out-Null
+          schtasks /Delete /TN LeyraCiRecoverUi /F | Out-Null
+          if (Test-Path "$env:ProgramData\LeyraConnect\agent-error.log") { Write-Host '--- agent-error.log (last 30 lines) ---'; Get-Content "$env:ProgramData\LeyraConnect\agent-error.log" | Select-Object -Last 30 }
+          if ($code -ne 0) { throw 'Customer click-through failed' }
+      - name: Upload click-through screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-shots
+          path: ui-shots
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Silent uninstall and verify cleanup
         if: always()
         shell: pwsh
@@ -398,11 +450,13 @@ jobs:
         env:
           LEYRA_SSH_KEY: ${{ secrets.LEYRA_SSH_KEY }}
           TEST_CODE: ${{ needs.test-code.outputs.code }}
+          UI_CODE: ${{ needs.test-code.outputs.ui_code }}
         shell: bash
         run: |
           set -euo pipefail
           [[ "$TEST_CODE" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]
+          [[ -z "$UI_CODE" || "$UI_CODE" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]
           key_file="$RUNNER_TEMP/leyra-key"; trap 'rm -f "$key_file"' EXIT; umask 077
           printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
           ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
-            "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $TEST_CODE; pkill -f '[l]eyra-ci-socks.py' || true"
+            "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $TEST_CODE; [ -n '$UI_CODE' ] && sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $UI_CODE; pkill -f '[l]eyra-ci-socks.py' || true"

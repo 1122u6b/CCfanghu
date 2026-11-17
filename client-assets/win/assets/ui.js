@@ -449,7 +449,7 @@
       var P = S.pause;
       g = H.statusGraphic('warn', f, { left: P.left, total: P.total, center: '<span class="hx-num-lg" style="color:var(--text);font-size:28px;line-height:36px" data-mmss>' + H.mmss(P.left) + '</span>' });
       title = '防护已暂停';
-      body = '<p>暂停期间不走独享线路，你访问的网站能看到你的真实 IP。到 ' + P.end + ' 自动恢复，重启电脑也会恢复。' + (P.kind === 'wifi' ? '线路连上后自动恢复防护。' : '') + '</p>';
+      body = '<p>暂停期间不走独享线路，你访问的网站能看到你的真实 IP。到 ' + P.end + ' 自动恢复，也可以随时点「恢复防护」。' + (P.kind === 'wifi' ? '线路连上后自动恢复防护。' : '') + '</p>';
       acts = S.busy.resume ? '' : btn('primary', '恢复防护', 'resume');
     } else if (S.ownExit === 'waiting') {
       // 自带出口还没接：不用等开通，贴上卖家给的链接或订阅地址就能用（01 §4 第 4 步）
@@ -1118,7 +1118,7 @@
         '</div>') +
       setGroup('危险操作', '会撤掉防护、暴露真实 IP，只在完全上不了网或不用了时用', '<div class="hx-card p-setcard">' +
         '<div class="hx-setrow"><div class="l"><span>网络恢复工具</span><small>完全上不了网时用：撤掉防护规则、恢复系统网络设置</small></div>' + btn('danger', '打开', 'rescueOpen') + '</div>' +
-        '<div class="hx-setrow"><div class="l"><span>彻底退出</span><small>撤掉防护、关掉软件，会暴露真实 IP；再打开软件或重启电脑时恢复</small></div>' + btn('danger', I('lock', 14) + '彻底退出', 'dialog:quitAll') + '</div>' +
+        '<div class="hx-setrow"><div class="l"><span>彻底退出</span><small>撤掉防护、关掉软件，会暴露真实 IP；下次打开软件后点「开启防护」即可恢复</small></div>' + btn('danger', I('lock', 14) + '彻底退出', 'dialog:quitAll') + '</div>' +
         '</div>', ' p-dangerzone');
   }
 

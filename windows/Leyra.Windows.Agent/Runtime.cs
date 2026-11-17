@@ -143,6 +143,14 @@ sealed partial class Runtime:IDisposable
   using var probe=new PrivateServerClient(profile,TimeSpan.FromSeconds(8),throughLocalProxy:true);
   var result=await probe.SendAsync("/api/v1/egress-probe",cancellation:stop);var observed=Text(result,"observed_source");
   if(!AddressPolicy.IsLiteral(observed)||!AddressPolicy.IsPublic(observed))throw new InvalidDataException("自有服务器没有观察到有效公网出口");
+  // The server sends the exit's location and timezone along with the address it saw.
+  if(result.TryGetProperty("geo",out var g)&&g.ValueKind==JsonValueKind.Object&&Text(g,"ip")==observed&&Text(g,"country").Length is >0 and <=3)
+  {
+   var info=new GeoInfo(observed,Text(g,"country"),Text(g,"region"),Text(g,"city"),Text(g,"timezone"),Text(g,"org"));
+   lock(geoCache)geoCache[observed]=(info,DateTimeOffset.UtcNow);
+   exitGeo=info;exitGeoFor=observed;
+   if(info.Timezone.Length>0&&TimeZoneInfo.TryConvertIanaIdToWindowsId(info.Timezone,out _)&&store.Settings.ExitTimezone!=info.Timezone){store.Settings.ExitTimezone=info.Timezone;store.Save();Record("exit",info.Label);}
+  }
   return observed;
  }
  void Block(Exception e)
@@ -254,7 +262,7 @@ sealed partial class Runtime:IDisposable
   var lastCheck=last is null?(JsonElement?)null:JsonSerializer.SerializeToElement(last);
   var index=nodes.ValueKind==JsonValueKind.Array?nodes.EnumerateArray().Select((x,i)=>(Name:Text(x,"name"),Index:i+1)).FirstOrDefault(x=>x.Name==selected).Index:0;
   var remaining=Math.Max(0,store.Settings.PausedUntil-DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-  return new{version=Program.Version,consent_version=store.Settings.ConsentVersion,protection=new{state=visible,reason,remaining_secs=remaining,auto_resume_on_node=false,quit=store.Settings.QuitPause,off=visible=="paused"&&!store.Settings.Enabled,blocked=visible=="blocked",since_secs=0},lines,current_line=index==0?"1":index.ToString(),line_mode=new{mode},rate=visible=="protected"?new{up_bps=up,down_bps=down}:null,guard=visible=="protected"?new{since=guardSince.ToUnixTimeSeconds(),blocked=(int?)null}:null,checks=bypassCheck is not null&&visible=="protected"&&JsonSerializer.SerializeToElement(bypassCheck).GetProperty("verdict").GetString()=="fail"?new[]{bypassCheck}:Array.Empty<object>(),conflicts,proxy_undo=proxy.UndoAvailable,last_error=lastError,update=updateReady,last_check=lastCheck is JsonElement lc?new{at=lc.GetProperty("at").GetInt64(),kind=Text(lc,"kind"),problems=lc.GetProperty("problems").GetInt32()}:null};
+  return new{version=Program.Version,consent_version=store.Settings.ConsentVersion,protection=new{state=visible,reason,remaining_secs=remaining,auto_resume_on_node=false,quit=store.Settings.QuitPause,off=visible=="paused"&&!store.Settings.Enabled,blocked=visible=="blocked",since_secs=0},lines,current_line=index==0?"1":index.ToString(),line_mode=new{mode},rate=visible=="protected"?new{up_bps=up,down_bps=down}:null,guard=visible=="protected"?new{since=guardSince.ToUnixTimeSeconds(),blocked=(int?)null}:null,checks=bypassCheck is not null&&visible=="protected"&&JsonSerializer.SerializeToElement(bypassCheck).GetProperty("verdict").GetString()=="fail"?new[]{bypassCheck}:Array.Empty<object>(),conflicts,proxy_undo=proxy.UndoAvailable,last_error=lastError,speed_testing=speedTesting,speed_error=speedError,update=updateReady,last_check=lastCheck is JsonElement lc?new{at=lc.GetProperty("at").GetInt64(),kind=Text(lc,"kind"),problems=lc.GetProperty("problems").GetInt32()}:null};
  }
  string writtenState="";
  void Publish()
@@ -298,7 +306,7 @@ sealed partial class Runtime:IDisposable
    case "tickets":var tickets=await Remote(request,stop);return new{items=tickets.GetProperty("items").Clone(),images=true};
    case "new_ticket":case "ticket_reply":case "ticket_rate":case "upload_chunk":case "ticket_image":case "messages":case "mark_read":case "set_contact":case "help":case "ai_accounts":case "ai_report":return await Remote(request,stop);
    case "report_bad_line":return await Remote(new{type="new_ticket",kind=1,title="线路问题",body="客户反馈当前线路不可用，请检查服务端出口。"},stop);
-   case "speed_test":return await MeasureSpeed(stop);
+   case "speed_test":return MeasureSpeed(stop);
   }
   if(type is "pause" or "trial_quit"){startInterrupted=true;startCancel.Cancel();}
   await gate.WaitAsync(stop);
@@ -317,7 +325,9 @@ sealed partial class Runtime:IDisposable
      // Like the original: after activation the overview asks for the customer's own exit (IP);
      // protection starts by itself once one is connected.
      await PairWith(issued,stop);
-     if(watch.Elapsed>TimeSpan.FromSeconds(10))Program.Log("slow activation",new TimeoutException($"code check {redeemed.TotalSeconds:N1} s, registering this computer {(watch.Elapsed-redeemed).TotalSeconds:N1} s"));exitCount=null;exitAskAt=DateTimeOffset.MinValue;Record("activated");return new{saved=true};
+     if(watch.Elapsed>TimeSpan.FromSeconds(10))Program.Log("slow activation",new TimeoutException($"code check {redeemed.TotalSeconds:N1} s, registering this computer {(watch.Elapsed-redeemed).TotalSeconds:N1} s"));exitCount=null;exitAskAt=DateTimeOffset.MinValue;Record("activated");
+     // Report activated straight away; the protection loop works out provisioning / starting next.
+     state="starting";reason="route";return new{saved=true};
     case "switch_code":
      var renewed=await Remote(new{type="license_renew",code=Text(request,"code"),machine=MachineId.Get()},stop);
      retryAt=DateTimeOffset.MinValue;configured=false;state="starting";return new{saved=true,suite=false,expires_at=renewed.GetProperty("expires_at").GetInt64()};
@@ -373,7 +383,7 @@ sealed partial class Runtime:IDisposable
     case "block_before_ready":
      if(!Bool(request,"on"))NeedOwner(request);
      if(Bool(request,"on")){ApplyGuard(0);state="blocked";}else{filters.RemoveOwned();state="unprotected";}return new{saved=true};
-    case "speed_test":return await MeasureSpeed(stop);
+    case "speed_test":return MeasureSpeed(stop);
     default:throw new InvalidOperationException("此后台功能尚未接入："+type);
    }
   }
