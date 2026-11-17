@@ -12,6 +12,11 @@ on:
         type: boolean
         required: false
         default: false
+      exit_latency:
+        description: 'Measure where the time goes: server → customer SOCKS5 exit → website (timings only, read-only)'
+        type: boolean
+        required: false
+        default: false
       gateway_log:
         description: 'Show the last 3 hours of gateway connection problems (exit failures, blocked requests)'
         type: boolean
@@ -50,6 +55,21 @@ jobs:
           printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
           ssh-keygen -y -f "$key_file" > /dev/null
           ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 'sudo -n python3 -' < deploy/inspect_existing_server.py
+  exit-latency:
+    if: ${{ inputs.allow_hosted_compute == true && inputs.exit_latency == true }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Server → customer exit → website timings
+        env:
+          LEYRA_SSH_KEY: ${{ secrets.LEYRA_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          key_file="$RUNNER_TEMP/leyra-key"; trap 'rm -f "$key_file"' EXIT; umask 077
+          printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
+          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 'sudo -n python3 -' < deploy/measure_exit_latency.py
   gateway-log:
     if: ${{ inputs.allow_hosted_compute == true && inputs.gateway_log == true }}
     runs-on: ubuntu-24.04
