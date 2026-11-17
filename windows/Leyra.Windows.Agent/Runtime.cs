@@ -102,7 +102,7 @@ sealed partial class Runtime:IDisposable
   if(profile is null || cloud is null)return;
   state="starting";dnsVerified=false;exitVerified=false;Publish();ApplyGuard(0);
   if(startCancel.IsCancellationRequested){startCancel.Dispose();startCancel=new();}
-  using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop,startCancel.Token);deadline.CancelAfter(TimeSpan.FromSeconds(60));var ct=deadline.Token;
+  using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop,startCancel.Token);deadline.CancelAfter(TimeSpan.FromSeconds(90));var ct=deadline.Token;
   var config=await cloud.SendAsync("/api/v1/config",cancellation:ct);nodes=config.GetProperty("proxies").Clone();configAt=DateTimeOffset.UtcNow;
   if(!config.TryGetProperty("identity",out var identity)||Text(identity,"role")!="device"||Text(identity,"id")!=profile.DeviceId)throw new InvalidDataException("服务器没有返回当前设备的独立身份");
   MihomoConfiguration.ValidateNodes(nodes);
@@ -123,17 +123,35 @@ sealed partial class Runtime:IDisposable
   try{if(!BrowserPolicyActive())BrowserPolicies.Install();}catch(Exception e)when(e is UnauthorizedAccessException or IOException or System.Security.SecurityException){Program.Log("browser policy",e);}
   await Health(ct);
  }
+ // Right after the kernel starts, the first lookup through the private resolver (over the exit and
+ // the server) is often slow. Up to 3 tries of 12 s, each with a fresh probe name. Never skipped,
+ // never reported as passed without the server's receipt; each failure names the stage (no secrets).
  async Task VerifyDns(CancellationToken stop)
  {
   if(cloud is null)throw new InvalidOperationException("尚未连接服务器");
-  var probe=await cloud.RpcAsync(new{type="dns_probe_begin"},stop);
-  using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(7));
-  var addresses=await Dns.GetHostAddressesAsync(probe.GetProperty("name").GetString()!,deadline.Token);
-  var expected=Text(probe,"answer");
-  if(!IPAddress.TryParse(expected,out var wanted)||!addresses.Any(x=>x.Equals(wanted)))throw new InvalidDataException("系统 DNS 检测没有返回预期答案");
-  var result=await cloud.RpcAsync(new{type="dns_probe_result",nonce=Text(probe,"nonce")},deadline.Token);
-  if(!Bool(result,"matched"))throw new InvalidDataException("私有 DNS 检测回执与预期解析来源不符");
-  dnsVerified=true;
+  for(var attempt=1;;attempt++)
+  {
+   var stage="begin";
+   try
+   {
+    using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(12));
+    var probe=await cloud.RpcAsync(new{type="dns_probe_begin"},deadline.Token);
+    stage="system lookup";
+    var addresses=await Dns.GetHostAddressesAsync(probe.GetProperty("name").GetString()!,deadline.Token);
+    var expected=Text(probe,"answer");
+    if(!IPAddress.TryParse(expected,out var wanted)||!addresses.Any(x=>x.Equals(wanted)))throw new InvalidDataException("系统 DNS 检测没有返回预期答案");
+    stage="server receipt";
+    var result=await cloud.RpcAsync(new{type="dns_probe_result",nonce=Text(probe,"nonce")},deadline.Token);
+    if(!Bool(result,"matched"))throw new InvalidDataException("私有 DNS 检测回执与预期解析来源不符");
+    dnsVerified=true;return;
+   }
+   catch(Exception e)when(!stop.IsCancellationRequested&&e is OperationCanceledException or System.Net.Sockets.SocketException or HttpRequestException or InvalidDataException or IOException)
+   {
+    Program.Log("dns check attempt "+attempt+"/3 failed at "+stage,e);
+    if(attempt>=3)throw new InvalidOperationException("系统 DNS 检测 3 次都没有通过（最后卡在："+stage+"）",e);
+    await Task.Delay(1000,stop);
+   }
+  }
  }
  async Task<string> ObserveExit(CancellationToken stop)
  {

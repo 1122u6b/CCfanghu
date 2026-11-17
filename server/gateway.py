@@ -206,17 +206,7 @@ class Gateway:
             import ipaddress
             observed=ipaddress.ip_address(peer[0])
             if getattr(observed,'ipv4_mapped',None):observed=observed.ipv4_mapped
-            # The exit's location and timezone come back with the address the server saw, so the app
-            # never needs a separate lookup through a slow exit. Looked up once, cached for 6 hours.
-            from devices import ip_geo,_geo_cache
-            geo=None
-            if observed.is_global:
-                hit=_geo_cache.get(str(observed))
-                if hit and time.time()-hit[0]<6*3600:geo=hit[1]
-                else:
-                    try:geo=await asyncio.wait_for(asyncio.to_thread(ip_geo,str(observed)),5)
-                    except Exception as e:print('exit location lookup failed: '+type(e).__name__+' '+str(e)[:100],flush=True)
-            return await self.response(w,200,{'observed_source':str(observed),'scope':'this authenticated TLS connection only','geo':geo})
+            return await self.response(w,200,{'observed_source':str(observed),'scope':'this authenticated TLS connection only'})
         if method=='GET' and path=='/api/v1/config':return await self.response(w,200,{'proxies':[self.node(device)],'license_required':False,'identity':{'role':'owner' if is_admin else 'device','id':None if is_admin else device.id}})
         if method=='POST' and path=='/api/v1/rpc':
             n=int(h.get('content-length','0'))
