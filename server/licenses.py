@@ -77,7 +77,12 @@ CREATE TABLE IF NOT EXISTS trial_machines(machine TEXT PRIMARY KEY,code TEXT NOT
     def status(self, code):
         with self.db() as db:
             row = db.execute('SELECT l.status,l.kind,e.expires_at FROM licenses l LEFT JOIN device_expiry e ON e.device_id=l.device_id WHERE l.code=?', (code,)).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        info = dict(row)
+        if info['status'] == 'active' and info['expires_at'] is not None and info['expires_at'] <= time.time():
+            info['status'] = 'expired'
+        return info
 
     def kind_of(self, device_id):
         with self.db() as db:
@@ -103,8 +108,11 @@ CREATE TABLE IF NOT EXISTS trial_machines(machine TEXT PRIMARY KEY,code TEXT NOT
         with self.db() as db:
             rows = [dict(r) for r in db.execute('''SELECT l.code,l.days,l.note,l.created_at,l.status,l.kind,l.device_id,l.contact,l.order_no,l.activated_at,e.expires_at
                 FROM licenses l LEFT JOIN device_expiry e ON e.device_id=l.device_id ORDER BY l.created_at DESC,l.code LIMIT 2000''')]
+        now = time.time()
         for r in rows:
             r['bound'] = r.pop('device_id') is not None
+            if r['status'] == 'active' and r['expires_at'] is not None and r['expires_at'] <= now:
+                r['status'] = 'expired'
         return {'items': rows}
 
     def revoke(self, code, devices):

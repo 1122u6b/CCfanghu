@@ -216,7 +216,17 @@ class Gateway:
                     if t=='license_revoke':return await self.response(w,200,L.revoke(request.get('code'),self.devices))
                     return await self.response(w,200,L.unbind(request.get('code'),self.devices))
                 if is_admin and isinstance(request,dict) and request.get('type')=='customers':
-                    return await self.response(w,200,self.site.customers.admin_list())
+                    return await self.response(w,200,self.site.customers.admin_list(self.devices.licenses))
+                if is_admin and isinstance(request,dict) and request.get('type') in ('mail_info','mail_set','mail_test'):
+                    from mailer import MailError
+                    M=self.site.mailer;t=request['type']
+                    try:
+                        if t=='mail_info':return await self.response(w,200,M.info())
+                        if t=='mail_set':return await self.response(w,200,M.save(request.get('host'),request.get('port'),request.get('user'),request.get('password'),request.get('sender_name')))
+                        to=str(request.get('to') or M.info()['user'])
+                        await asyncio.to_thread(M.send,to,'Leyra 测试邮件','这是一封测试邮件。收到它说明网站可以正常发送注册验证码了。\n\nLeyra')
+                        return await self.response(w,200,{'sent':True,'to':to})
+                    except MailError as e:raise ManagementError(str(e)) from None
                 if is_admin and isinstance(request,dict) and request.get('type')=='customer_update':
                     from customers import CustomerError
                     try:return await self.response(w,200,self.site.customers.admin_update(request.get('id',0),self.devices,request.get('status'),request.get('max_devices'),request.get('note')))

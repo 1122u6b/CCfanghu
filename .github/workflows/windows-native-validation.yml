@@ -94,7 +94,8 @@ jobs:
     timeout-minutes: 3
     outputs:
       code: ${{ steps.issue.outputs.code }}
-      exit_link: ${{ steps.issue.outputs.exit_link }}
+      socks_port: ${{ steps.issue.outputs.socks_port }}
+      socks_pass: ${{ steps.issue.outputs.socks_pass }}
     steps:
       - uses: actions/checkout@v4
       - name: Issue a one-day authorization code for the end-to-end test
@@ -114,7 +115,8 @@ jobs:
           port=$((20000 + RANDOM % 20000)); pass=$(openssl rand -hex 12)
           ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
             "cat > /tmp/leyra-ci-socks.py && (setsid nohup python3 /tmp/leyra-ci-socks.py $port ci $pass 2400 >/dev/null 2>&1 &) && sleep 1 && ss -ltn | grep -q ':$port '" < deploy/ci_socks5.py
-          echo "exit_link=socks5://ci:$pass@127.0.0.1:$port" >> "$GITHUB_OUTPUT"
+          # GitHub refuses to pass on a URL containing user:password@, so hand over the parts.
+          echo "socks_port=$port" >> "$GITHUB_OUTPUT"; echo "socks_pass=$pass" >> "$GITHUB_OUTPUT"
   installer:
     if: ${{ inputs.allow_hosted_compute == true && inputs.publish_tested_run == '' }}
     needs: test-code
@@ -189,7 +191,8 @@ jobs:
         shell: pwsh
         env:
           TEST_CODE: ${{ needs.test-code.outputs.code }}
-          EXIT_LINK: ${{ needs.test-code.outputs.exit_link }}
+          SOCKS_PORT: ${{ needs.test-code.outputs.socks_port }}
+          SOCKS_PASS: ${{ needs.test-code.outputs.socks_pass }}
         run: |
           $tool = (Resolve-Path 'windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll').Path
           $agent = (Get-ChildItem 'C:\Apps\Leyra\versions\*\Leyra.Agent.exe' | Select-Object -First 1).FullName
@@ -244,7 +247,9 @@ jobs:
           Ask '{"type":"account"}' | Out-Null
           if ((Get-Content "C:\LeyraCi\out_$script:n.json" -Raw) -notmatch '"own_exit":"waiting"') { $failures += 'account does not ask for the own exit' }
           Write-Host '   customer pastes their own IP in 接入你的出口'
-          if ((Ask ('{"type":"own_exit","links":"' + $env:EXIT_LINK + '"}')) -ne 0) { $failures += 'importing the own exit failed' }
+          if (-not $env:SOCKS_PORT -or -not $env:SOCKS_PASS) { $failures += 'test setup: the temporary proxy details did not arrive' }
+          $link = "socks5://ci:$($env:SOCKS_PASS)@127.0.0.1:$($env:SOCKS_PORT)"
+          if ((Ask ('{"type":"own_exit","links":"' + $link + '"}')) -ne 0) { $failures += 'importing the own exit failed' }
           $s = WaitFor 'protected' 120; Write-Host "   state: $s"
           if ($s -notmatch 'protected') { $failures += "not protected after connecting the own exit: $s" }
           Write-Host '   the exit list reaches the interface in the shape it reads'

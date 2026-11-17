@@ -94,7 +94,7 @@ R.home = function () {
     $('main').innerHTML = '<div class="card"><div class="stats">' +
       '<div class="stat"><span class="muted">设备（启用 / 全部）</span><b>' + ds.filter(function (d) { return d.enabled; }).length + ' / ' + ds.length + '</b></div>' +
       '<div class="stat"><span class="muted">待回复工单</span><b>' + waiting + '</b></div>' +
-      '<div class="stat"><span class="muted">等待开通的客户</span><b>' + x[4].items.filter(function (c) { return c.status === 'pending'; }).length + '</b></div>' +
+      '<div class="stat"><span class="muted">注册的客户</span><b>' + x[4].items.length + '</b></div>' +
       '<div class="stat"><span class="muted">当前连接</span><b>' + s.active_connections + '</b></div>' +
       '<div class="stat"><span class="muted">服务已运行</span><b>' + Math.floor(s.uptime_seconds / 3600) + ' 小时</b></div>' +
       '<div class="stat"><span class="muted">已发布客户端</span><b>' + esc(x[3].version || '无') + '</b></div></div></div>' +
@@ -107,6 +107,7 @@ R.licenses = function () {
     var st = function (x) {
       if (x.status === 'revoked') return '<span class="tag x">已作废</span>';
       if (x.status === 'unused') return '<span class="tag">未使用</span>';
+      if (x.status === 'expired') return '<span class="tag x">已到期</span>';
       if (x.expires_at && x.expires_at < 253402300799 && x.expires_at * 1000 < Date.now()) return '<span class="tag x">已到期</span>';
       return x.bound ? '<span class="tag ok">已激活</span>' : '<span class="tag w">已解绑，可换电脑</span>';
     };
@@ -131,14 +132,20 @@ function unbindCode(c) { if (confirm('解绑后，原来那台电脑会立即停
 function revokeCode(c) { if (confirm('作废后这个授权码不能再用，已激活的电脑会立即停用。确定吗？')) rpc({ type: 'license_revoke', code: c }).then(function () { toast('已作废'); go('licenses'); }).catch(fail); }
 R.customers = function () {
   return rpc({ type: 'customers' }).then(function (r) {
-    var items = r.items, pending = items.filter(function (c) { return c.status === 'pending'; }).length;
-    var label = { pending: '<span class="tag w">等待开通</span>', active: '<span class="tag ok">已开通</span>', disabled: '<span class="tag x">已停用</span>' };
-    $('main').innerHTML = '<div class="card"><h2>网站注册的客户（' + items.length + '，其中 ' + pending + ' 个等待开通）</h2>' +
+    var items = r.items;
+    var trial = function (c) {
+      if (c.status === 'disabled') return '<span class="tag x">账号已停用</span>';
+      if (!c.trial_code) return '<span class="muted">没有试用码</span>';
+      if (c.trial_status === 'expired') return '<span class="tag x">已到期</span>';
+      if (c.trial_status === 'revoked') return '<span class="tag x">已作废</span>';
+      if (c.trial_status === 'active') return '<span class="tag ok">使用中</span>' + (c.trial_expires_at ? '<br><span class="muted">' + when(c.trial_expires_at) + ' 到期</span>' : '');
+      return '<span class="tag">未使用</span>';
+    };
+    $('main').innerHTML = '<div class="card"><h2>网站注册的客户（' + items.length + '）</h2>' +
       '<p class="muted">客户在 leyra.xin 注册后显示在这里，系统自动送一个 1 天试用码（每台电脑只能试用一次，试用码是否用过可在「授权码」页查看）。</p>' +
-      (items.length ? '<table><tr><th>账号</th><th>联系方式</th><th>试用码</th><th>状态</th><th>电脑数</th><th>注册时间</th><th></th></tr>' + items.map(function (c) {
-        return '<tr><td>' + esc(c.login) + '</td><td>' + esc(c.contact) + '</td><td><code>' + esc(c.trial_code || '-') + '</code></td><td>' + label[c.status] + '</td><td>' + c.devices.length + ' / <input type="number" min="0" max="50" value="' + c.max_devices + '" style="width:64px" onchange="setMax(' + c.id + ',this.value)"></td><td>' + when(c.created_at) + '</td><td>' +
-          (c.status !== 'active' ? '<button class="b p" onclick="setStatus(' + c.id + ',\'active\')">开通</button> ' : '') +
-          (c.status !== 'disabled' ? '<button class="b d" onclick="setStatus(' + c.id + ',\'disabled\')">停用</button>' : '') + '</td></tr>';
+      (items.length ? '<table><tr><th>账号</th><th>联系方式</th><th>试用码</th><th>试用码状态</th><th>注册时间</th><th></th></tr>' + items.map(function (c) {
+        return '<tr><td>' + esc(c.login) + '</td><td>' + esc(c.contact) + '</td><td><code>' + esc(c.trial_code || '-') + '</code></td><td>' + trial(c) + '</td><td>' + when(c.created_at) + '</td><td>' +
+          (c.status !== 'disabled' ? '<button class="b d" onclick="setStatus(' + c.id + ',\'disabled\')">停用账号</button>' : '<button class="b" onclick="setStatus(' + c.id + ',\'active\')">恢复账号</button>') + '</td></tr>';
       }).join('') + '</table>' : '<p class="muted">还没有客户注册。把 https://leyra.xin 发给客户，让他们注册即可。</p>') + '</div>';
   });
 };
@@ -282,14 +289,28 @@ function publish() {
 }
 function withdraw() { if (confirm('撤回后客户端不会再提示这个版本，确定吗？')) rpc({ type: 'admin_update_withdraw' }).then(function () { go('updates'); }).catch(fail); }
 R.security = function () {
-  return rpc({ type: 'admin_password_info' }).then(function (info) {
-    $('main').innerHTML = '<div class="card"><h2>管理员账号密码</h2><p class="muted">' + (info.set ? '当前账号：<b>' + esc(info.username) + '</b>。可以在下面修改。' : '还没有设置。设置后，以后直接打开 <b>https://leyra.xin/admin</b> 用账号密码登录，不用再去 GitHub。') + '</p>' +
+  return Promise.all([rpc({ type: 'admin_password_info' }), rpc({ type: 'mail_info' })]).then(function (x) {
+    var info = x[0], mail = x[1];
+    $('main').innerHTML = '<div class="card"><h2>注册验证码 · 发件邮箱 ' + (mail.configured ? '<span class="tag ok">已设置</span>' : '<span class="tag w">未设置</span>') + '</h2>' +
+      '<p class="muted">设置后，客户在网站注册必须用邮箱，并填写邮件里的 6 位验证码。' + (mail.configured ? '' : '<b>现在还没设置，注册不需要验证码。</b>') + '<br>用 QQ 邮箱：网页版 QQ 邮箱 → 设置 → 账号 → 开启「POP3/SMTP 服务」，按提示发短信后会得到一串<b>授权码</b>，填到下面（不是 QQ 密码）。</p>' +
+      '<div class="row"><input id="mu" placeholder="发件邮箱，例如 12345@qq.com" value="' + esc(mail.user || '') + '"><input id="mp" type="password" placeholder="' + (mail.configured ? 'SMTP 授权码（不改就留空）' : 'SMTP 授权码') + '" autocomplete="off"></div>' +
+      '<div class="row"><input id="mh" placeholder="发件服务器" value="' + esc(mail.host || 'smtp.qq.com') + '" style="max-width:220px"><input id="mo" type="number" placeholder="端口" value="' + esc(String(mail.port || 465)) + '" style="max-width:120px"><input id="mn" placeholder="发件人名字" value="' + esc(mail.sender_name || 'Leyra') + '" style="max-width:180px"></div>' +
+      '<div class="row"><span></span><button class="b" onclick="mailTest()"' + (mail.configured ? '' : ' disabled') + '>给发件邮箱发一封测试邮件</button><button class="b p" onclick="mailSave()">保存</button></div></div>' +
+      '<div class="card"><h2>管理员账号密码</h2><p class="muted">' + (info.set ? '当前账号：<b>' + esc(info.username) + '</b>。可以在下面修改。' : '还没有设置。设置后，以后直接打开 <b>https://leyra.xin/admin</b> 用账号密码登录，不用再去 GitHub。') + '</p>' +
       '<div class="row"><input id="su" placeholder="管理员账号（3 到 40 位字母或数字）" value="' + esc(info.username || '') + '" autocomplete="username"></div>' +
       '<div class="row"><input id="sp" type="password" placeholder="新密码（至少 10 位）" autocomplete="new-password"><input id="sp2" type="password" placeholder="再输一次新密码" autocomplete="new-password"></div>' +
       '<div class="row"><span></span><button class="b p" onclick="setPassword()">保存账号密码</button></div></div>' +
       '<div class="card"><h2>退出所有地方的登录</h2><p class="muted">怀疑密码或登录链接泄露时用：所有已登录的电脑（包括你当前这台）都会立即退出。退出后用账号密码重新登录。</p><button class="b d" onclick="revoke()">退出所有登录</button></div>';
   });
 };
+function mailSave() {
+  rpc({ type: 'mail_set', host: $('mh').value.trim(), port: +$('mo').value, user: $('mu').value.trim(), password: $('mp').value, sender_name: $('mn').value.trim() })
+    .then(function () { toast('已保存，点「发一封测试邮件」确认能发出去'); go('security'); }).catch(fail);
+}
+function mailTest() {
+  toast('正在发送…');
+  rpc({ type: 'mail_test' }).then(function (r) { toast('测试邮件已发到 ' + r.to + '，去邮箱看看（也看看垃圾邮件）'); }).catch(fail);
+}
 function setPassword() {
   if ($('sp').value !== $('sp2').value) { toast('两次输入的密码不一样'); return; }
   rpc({ type: 'admin_set_password', username: $('su').value.trim(), password: $('sp').value }).then(function () { toast('已保存。以后打开 https://leyra.xin/admin 用这个账号密码登录'); go('security'); }).catch(fail);

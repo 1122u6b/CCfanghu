@@ -13,6 +13,12 @@ class CustomerError(ValueError):
     pass
 
 
+class _CommitThen(Exception):
+    """Keep the wrong-attempt count even though the registration is refused."""
+    def __init__(self, error):
+        self.error = error
+
+
 LOGIN_RE = re.compile(r'^[A-Za-z0-9_.@+\-]{3,64}$')
 SESSION_DAYS = 30
 
@@ -38,6 +44,8 @@ CREATE TABLE IF NOT EXISTS customers(id INTEGER PRIMARY KEY,login TEXT NOT NULL 
   status TEXT NOT NULL,max_devices INTEGER NOT NULL,note TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL,last_login INTEGER);
 CREATE TABLE IF NOT EXISTS customer_devices(device_id TEXT PRIMARY KEY,customer_id INTEGER NOT NULL REFERENCES customers(id),name TEXT NOT NULL,created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS customer_sessions(hash TEXT PRIMARY KEY,customer_id INTEGER NOT NULL REFERENCES customers(id),expires INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS email_codes(email TEXT PRIMARY KEY COLLATE NOCASE,code_hash TEXT NOT NULL,expires INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,sent_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS email_sends(email TEXT NOT NULL COLLATE NOCASE,at INTEGER NOT NULL);
 ''')
             if 'trial_code' not in [r[1] for r in db.execute('PRAGMA table_info(customers)')]:
                 db.execute('ALTER TABLE customers ADD COLUMN trial_code TEXT')
@@ -54,18 +62,75 @@ CREATE TABLE IF NOT EXISTS customer_sessions(hash TEXT PRIMARY KEY,customer_id I
         finally:
             conn.close()
 
+    # ---------- email verification ----------
+    CODE_MINUTES = 10
+
+    @staticmethod
+    def _code_hash(email, code):
+        return hashlib.sha256(('leyra-email-code|' + email.lower() + '|' + code).encode()).hexdigest()
+
+    def send_code(self, email, mailer):
+        """Email a 6-digit registration code. Rate limited per address and for the whole site."""
+        from mailer import EMAIL_RE
+        email = str(email or '').strip()
+        if not EMAIL_RE.match(email):
+            raise CustomerError('请填写正确的邮箱地址')
+        if not mailer.configured():
+            raise CustomerError('网站暂时不能发验证码，请在售后 QQ 群联系客服')
+        now = int(time.time())
+        with self.db() as db:
+            if db.execute('SELECT 1 FROM customers WHERE login=?', (email,)).fetchone():
+                raise CustomerError('这个邮箱已经注册过了，请直接登录')
+            last = db.execute('SELECT sent_at FROM email_codes WHERE email=?', (email,)).fetchone()
+            if last and now - last['sent_at'] < 60:
+                raise CustomerError('验证码已发送，%d 秒后可以重新获取' % (60 - (now - last['sent_at'])))
+            db.execute('DELETE FROM email_sends WHERE at<?', (now - 86400,))
+            if db.execute('SELECT COUNT(*) FROM email_sends WHERE email=?', (email,)).fetchone()[0] >= 5:
+                raise CustomerError('这个邮箱今天获取验证码的次数太多了，请明天再试')
+            if db.execute('SELECT COUNT(*) FROM email_sends').fetchone()[0] >= 300:
+                raise CustomerError('今天注册的人太多了，请明天再试')
+            code = '%06d' % secrets.randbelow(1000000)
+            db.execute('INSERT OR REPLACE INTO email_codes VALUES(?,?,?,0,?)', (email, self._code_hash(email, code), now + self.CODE_MINUTES * 60, now))
+            db.execute('INSERT INTO email_sends VALUES(?,?)', (email, now))
+        mailer.send(email, 'Leyra 注册验证码：' + code,
+                    '你好，\n\n你正在注册 Leyra 账号，验证码是：\n\n    %s\n\n%d 分钟内有效。如果不是你本人操作，请忽略这封邮件。\n\nLeyra' % (code, self.CODE_MINUTES))
+        return {'sent': True, 'minutes': self.CODE_MINUTES}
+
+    def _check_code(self, db, email, code):
+        row = db.execute('SELECT code_hash,expires,attempts FROM email_codes WHERE email=?', (email,)).fetchone()
+        if not row or row['expires'] < time.time():
+            raise CustomerError('验证码已过期，请重新获取')
+        if row['attempts'] >= 5:
+            raise CustomerError('验证码输错次数太多，请重新获取')
+        if not isinstance(code, str) or not hmac.compare_digest(row['code_hash'], self._code_hash(email, code.strip())):
+            db.execute('UPDATE email_codes SET attempts=attempts+1 WHERE email=?', (email,))
+            raise _CommitThen(CustomerError('验证码不对，请检查邮件里的 6 位数字'))
+        db.execute('DELETE FROM email_codes WHERE email=?', (email,))
+
     # ---------- public side ----------
-    def register(self, login, password, contact, licenses=None):
+    def register(self, login, password, contact, licenses=None, code=None, mailer=None):
         if not isinstance(login, str) or not LOGIN_RE.match(login.strip()):
             raise CustomerError('账号需要 3 到 64 位，可用字母、数字、手机号或邮箱')
         if not isinstance(password, str) or not 8 <= len(password) <= 128:
             raise CustomerError('密码至少 8 位')
         if not isinstance(contact, str) or not 2 <= len(contact.strip()) <= 120 or any(ord(c) < 32 for c in contact):
             raise CustomerError('请留下联系方式（微信、QQ 或邮箱），方便开通后通知你')
+        verify = mailer is not None and mailer.configured()
+        if verify:
+            from mailer import EMAIL_RE
+            if not EMAIL_RE.match(login.strip()):
+                raise CustomerError('请用邮箱注册')
         now = int(time.time())
         with self.db() as db:
             if db.execute('SELECT COUNT(*) FROM customers WHERE created_at>?', (now - 3600,)).fetchone()[0] >= 30:
                 raise CustomerError('注册的人太多了，请稍后再试')
+            if db.execute('SELECT 1 FROM customers WHERE login=?', (login.strip(),)).fetchone():
+                raise CustomerError('这个账号已经被注册了')
+            if verify:
+                try:
+                    self._check_code(db, login.strip(), code)
+                except _CommitThen as e:
+                    db.commit(); raise e.error from None
             try:
                 cur = db.execute('INSERT INTO customers(login,password,contact,status,max_devices,created_at) VALUES(?,?,?,?,?,?)',
                                  (login.strip(), _hash_password(password), contact.strip(), 'pending', 1, now))
@@ -133,11 +198,15 @@ CREATE TABLE IF NOT EXISTS customer_sessions(hash TEXT PRIMARY KEY,customer_id I
             return db.execute('SELECT 1 FROM customer_devices WHERE customer_id=? AND device_id=?', (customer['id'], device_id)).fetchone() is not None
 
     # ---------- owner side ----------
-    def admin_list(self):
+    def admin_list(self, licenses=None):
         with self.db() as db:
             rows = [dict(r) for r in db.execute('SELECT id,login,contact,status,max_devices,note,created_at,last_login,trial_code FROM customers ORDER BY id DESC')]
             for r in rows:
                 r['devices'] = [x[0] for x in db.execute('SELECT device_id FROM customer_devices WHERE customer_id=?', (r['id'],))]
+        for r in rows:
+            info = licenses.status(r['trial_code']) if licenses is not None and r.get('trial_code') else None
+            r['trial_status'] = (info or {}).get('status', 'unused') if r.get('trial_code') else None
+            r['trial_expires_at'] = (info or {}).get('expires_at')
         return {'items': rows}
 
     def admin_update(self, identity, devices, status=None, max_devices=None, note=None):

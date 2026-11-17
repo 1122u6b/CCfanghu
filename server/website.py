@@ -17,6 +17,8 @@ class Site:
     def __init__(self, gateway):
         self.gateway = gateway
         self.customers = Customers(gateway.management.root)
+        from mailer import Mailer
+        self.mailer = Mailer(gateway.management.root)
         self.root = Path(__file__).with_name('site')
         self.hits = defaultdict(deque)
 
@@ -87,10 +89,19 @@ class Site:
             return await self.send(w, 200, self.info())
         if method != 'POST' and action != 'me':
             return await self.send(w, 405, {'error': '不支持的请求'})
+        if action == 'send_code':
+            if self.limited('code:' + ip, 10, 3600):
+                return await self.send(w, 429, {'error': '获取验证码太频繁，请一小时后再试'})
+            from mailer import MailError
+            try:
+                # Sending mail can take a few seconds; keep the server responsive meanwhile.
+                return await self.send(w, 200, await asyncio.to_thread(self.customers.send_code, body.get('email'), self.mailer))
+            except MailError as e:
+                raise CustomerError(str(e)) from None
         if action == 'register':
             if self.limited('reg:' + ip, 5, 3600):
                 return await self.send(w, 429, {'error': '注册太频繁，请一小时后再试'})
-            self.customers.register(body.get('login'), body.get('password'), body.get('contact'), self.gateway.devices.licenses)
+            self.customers.register(body.get('login'), body.get('password'), body.get('contact'), self.gateway.devices.licenses, body.get('code'), self.mailer)
             return await self.send(w, 200, {'saved': True})
         if action == 'login':
             if self.limited('login:' + ip, 10, 600):
@@ -122,7 +133,7 @@ class Site:
         manifest = self.gateway.management.update_manifest() or {}
         help_content = self.gateway.management.rpc({'type': 'help'})
         group = next((c for c in help_content.get('channels', []) if c.get('kind') == 'qqgroup'), {})
-        return {'product': 'Leyra', 'price': help_content.get('price', ''), 'qq_group': group.get('value', ''), 'qq_group_name': group.get('label', ''), 'version': manifest.get('version'), 'size': manifest.get('size'), 'published_at': manifest.get('published_at'),
+        return {'product': 'Leyra', 'email_code': self.mailer.configured(), 'price': help_content.get('price', ''), 'qq_group': group.get('value', ''), 'qq_group_name': group.get('label', ''), 'version': manifest.get('version'), 'size': manifest.get('size'), 'published_at': manifest.get('published_at'),
                 'notes': manifest.get('notes', ''), 'download': '/download/windows' if manifest.get('version') else None,
                 'faq': help_content.get('faq', []), 'guides': [g for g in help_content.get('guides', []) if str(g.get('url', '')).startswith('https://')]}
 

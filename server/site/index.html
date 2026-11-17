@@ -255,29 +255,52 @@ var DEFAULT_FAQ = [
   ['一个授权码能用几台电脑？', '一个授权码只能用于一台电脑。多台电脑需要多个授权码。'],
   ['重装了系统或软件怎么办？', '在同一台电脑上重新安装 Leyra，填原来的授权码点「激活」，会自动恢复。'],
   ['换电脑了怎么办？', '在售后 QQ 群联系客服解绑，之后用原来的授权码在新电脑上激活即可，旧电脑会停用。'],
-  ['怎么暂停或退出？', '在 Leyra 里点「暂停防护」或「彻底退出」，为了安全会先要求输入电脑开机密码。']];
+  ['怎么暂停或退出？', '在 Leyra 里点「暂停防护」选 10、30 或 60 分钟，到点自动恢复；点「彻底退出」会撤掉防护、关掉软件，下次打开后点「开启防护」即可。']];
 P.help = function () {
   var faq = INFO && INFO.faq && INFO.faq.length ? INFO.faq.map(function (f) { return [f.q, f.a]; }) : DEFAULT_FAQ;
   return '<div class="wrap page"><div class="eyebrow">FAQ</div><h2>常见问题</h2><p class="sub">没找到答案？登录后在 Leyra 软件里提交工单。</p>' + faq.map(function (f) { return '<details><summary>' + esc(f[0]) + '</summary><p>' + esc(f[1]) + '</p></details>'; }).join('') + '</div>';
 };
 P.login = function () {
-  return '<div class="wrap"><div class="form panel"><h2>登录</h2><p class="sub">欢迎回来</p><label>账号</label><input id="lg" autocomplete="username"><label>密码</label><input id="pw" type="password" autocomplete="current-password" onkeydown="if(event.key===\'Enter\')doLogin()">' +
+  return '<div class="wrap"><div class="form panel"><h2>登录</h2><p class="sub">欢迎回来</p><label>邮箱或账号</label><input id="lg" autocomplete="username"><label>密码</label><input id="pw" type="password" autocomplete="current-password" onkeydown="if(event.key===\'Enter\')doLogin()">' +
     '<div class="err" id="err"></div><button class="btn p big" style="width:100%" onclick="doLogin()">登录</button><p class="mini" style="margin-top:14px">还没有账号？<a href="#/register">注册</a></p></div></div>';
 };
 P.register = function () {
-  return '<div class="wrap"><div class="form panel"><h2>注册</h2><p class="sub">注册就送 1 天免费试用授权码，在 Leyra 里填入即可使用。每台电脑只能试用一次。</p><label>账号（手机号、邮箱或字母数字，3 到 64 位）</label><input id="lg" autocomplete="username"><label>密码（至少 8 位）</label><input id="pw" type="password" autocomplete="new-password">' +
-    '<label>再输一次密码</label><input id="pw2" type="password" autocomplete="new-password"><label>联系方式（微信 / QQ / 邮箱，开通后通知你）</label><input id="ct">' +
+  var mail = INFO && INFO.email_code;
+  var account = mail
+    ? '<label>邮箱</label><input id="lg" type="email" autocomplete="email" placeholder="例如 12345@qq.com">' +
+      '<label>邮箱验证码</label><div style="display:flex;gap:10px"><input id="vc" inputmode="numeric" maxlength="6" placeholder="6 位数字" style="flex:1"><button class="btn" id="vcb" type="button" onclick="sendCode()" style="white-space:nowrap">获取验证码</button></div>'
+    : '<label>账号（手机号、邮箱或字母数字，3 到 64 位）</label><input id="lg" autocomplete="username">';
+  return '<div class="wrap"><div class="form panel"><h2>注册</h2><p class="sub">注册就送 1 天免费试用授权码，在 Leyra 里填入即可使用。每台电脑只能试用一次。</p>' + account + '<label>密码（至少 8 位）</label><input id="pw" type="password" autocomplete="new-password">' +
+    '<label>再输一次密码</label><input id="pw2" type="password" autocomplete="new-password"><label>联系方式（微信或 QQ，方便售后联系你）</label><input id="ct">' +
     '<div class="err" id="err"></div><button class="btn p big" style="width:100%" onclick="doRegister()">注册，领取 1 天试用</button><p class="mini" style="margin-top:14px">已有账号？<a href="#/login">登录</a></p></div></div>';
 };
 function doLogin() {
   $('err').textContent = '';
   api('login', { login: $('lg').value.trim(), password: $('pw').value }).then(function (r) { setToken(r.token); location.hash = '#/me'; }).catch(function (e) { $('err').textContent = e.message; });
 }
+var codeTimer = null;
+function sendCode() {
+  $('err').textContent = '';
+  var email = $('lg').value.trim(), b = $('vcb');
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { $('err').textContent = '请先填写正确的邮箱'; return; }
+  b.disabled = true; b.textContent = '发送中…';
+  api('send_code', { email: email }).then(function () {
+    toast('验证码已发到 ' + email + '，请查收（也看看垃圾邮件）');
+    var left = 60; clearInterval(codeTimer);
+    codeTimer = setInterval(function () {
+      var x = $('vcb'); if (!x) { clearInterval(codeTimer); return; }
+      left--; x.textContent = left > 0 ? left + ' 秒后重新获取' : '重新获取';
+      if (left <= 0) { x.disabled = false; clearInterval(codeTimer); }
+    }, 1000);
+    b.textContent = '60 秒后重新获取'; if ($('vc')) $('vc').focus();
+  }).catch(function (e) { b.disabled = false; b.textContent = '获取验证码'; $('err').textContent = e.message; });
+}
 function doRegister() {
   $('err').textContent = '';
   if ($('pw').value !== $('pw2').value) { $('err').textContent = '两次输入的密码不一样'; return; }
+  if ($('vc') && !/^\d{6}$/.test($('vc').value.trim())) { $('err').textContent = '请填写邮件里的 6 位验证码'; return; }
   var login = $('lg').value.trim(), pw = $('pw').value;
-  api('register', { login: login, password: pw, contact: $('ct').value.trim() })
+  api('register', { login: login, password: pw, contact: $('ct').value.trim(), code: $('vc') ? $('vc').value.trim() : undefined })
     .then(function () { return api('login', { login: login, password: pw }); })
     .then(function (r) { setToken(r.token); location.hash = '#/me'; toast('注册成功'); }).catch(function (e) { $('err').textContent = e.message; });
 }
@@ -288,7 +311,7 @@ P.me = function () {
     var st = m.status === 'active' ? '<span class="badge on">已开通</span>' : m.status === 'pending' ? '<span class="badge on">已注册</span>' : '<span class="badge off">已停用</span>';
     var html = '<div class="wrap me"><div class="panel"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><div class="eyebrow">MY ACCOUNT</div><h2 style="margin:6px 0 2px;font-size:28px">' + esc(m.login) + ' ' + st + '</h2><div class="mini">联系方式：' + esc(m.contact) + '</div></div><button class="btn" onclick="doLogout()">退出登录</button></div></div>';
     if (m.trial) {
-      var t = m.trial, now = Date.now() / 1000, tst = t.status === 'unused' ? '还没使用' : t.status === 'revoked' ? '已作废' : (t.expires_at && t.expires_at < now ? '已到期' : '使用中' + (t.expires_at ? '，' + new Date(t.expires_at * 1000).toLocaleString() + ' 到期' : ''));
+      var t = m.trial, now = Date.now() / 1000, tst = t.status === 'unused' ? '还没使用' : t.status === 'revoked' ? '已作废' : t.status === 'expired' ? '已到期，请在售后 QQ 群购买正式授权码' : (t.expires_at && t.expires_at < now ? '已到期' : '使用中' + (t.expires_at ? '，' + new Date(t.expires_at * 1000).toLocaleString() + ' 到期' : ''));
       html += '<div class="panel"><div class="eyebrow">FREE TRIAL</div><h3 style="margin:8px 0 6px">你的 1 天免费试用授权码</h3>' +
         '<div class="qq" style="margin:14px 0"><div style="flex:1;min-width:0"><b class="qqn" style="font-family:ui-monospace,Consolas,monospace">' + esc(t.code) + '</b><div class="mini">' + tst + '</div></div><button class="btn p" onclick="copyText(\'' + esc(t.code) + '\')">复制授权码</button></div>' +
         '<ol class="mini" style="font-size:14px;line-height:1.9;margin:0 0 16px;padding-left:20px"><li>下载并安装 Leyra</li><li>打开 Leyra，在「激活」页填这个授权码，点「激活」</li><li>试用 1 天，满意后在售后 QQ 群购买正式授权码（' + esc(price()) + '），在软件里点「续费」填入，直接转为永久</li></ol>' +
@@ -326,7 +349,15 @@ function route() {
 }
 window.addEventListener('hashchange', route);
 // Only pages that show download/help data re-render; never wipe a form the visitor is typing in.
-function refreshInfo() { acct(); if (['home', 'price', 'guide', 'help', 'me'].indexOf(current()) >= 0 || !P[current()]) route(); }
+function refreshInfo() {
+  acct();
+  if (['home', 'price', 'guide', 'help', 'me'].indexOf(current()) >= 0 || !P[current()]) route();
+  // 注册页先于网站设置画出来时，补上邮箱验证码一栏，已经填的内容保留。
+  else if (current() === 'register' && INFO && INFO.email_code && !$('vc')) {
+    var keep = {}; ['lg', 'pw', 'pw2', 'ct'].forEach(function (k) { if ($(k)) keep[k] = $(k).value; });
+    route(); Object.keys(keep).forEach(function (k) { if ($(k)) $(k).value = keep[k]; });
+  }
+}
 acct(); route();
 fetch('/api/site/info').then(function (r) { return r.json(); }).then(function (i) { INFO = i; refreshInfo(); }).catch(function () { INFO = {}; refreshInfo(); });
 </script>
