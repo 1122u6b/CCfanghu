@@ -1,0 +1,4 @@
+#!/bin/bash
+# Stop the running service before files are replaced; protection rules are put back by the new service.
+/bin/launchctl bootout system/xin.leyra.agent 2>/dev/null || true
+exit 0

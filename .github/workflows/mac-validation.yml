@@ -1,0 +1,133 @@
+name: Mac validation (explicit compute opt-in)
+# Builds the Mac package (Apple silicon + Intel in one .pkg), installs it on a real Mac of each kind and runs the
+# customer flow. Separate from the Windows workflow; nothing here touches the Windows client.
+on:
+  workflow_dispatch:
+    inputs:
+      allow_hosted_compute:
+        description: 'Allow this run to use macOS runners (metered at a higher rate than Linux)'
+        type: boolean
+        required: true
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: mac-validation
+  cancel-in-progress: false
+jobs:
+  test-code:
+    if: ${{ inputs.allow_hosted_compute == true }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    outputs:
+      code: ${{ steps.issue.outputs.code }}
+      ui_code: ${{ steps.issue.outputs.ui_code }}
+      socks_port: ${{ steps.issue.outputs.socks_port }}
+      socks_pass: ${{ steps.issue.outputs.socks_pass }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Issue a one-day authorization code for the end-to-end test
+        id: issue
+        env:
+          LEYRA_SSH_KEY: ${{ secrets.LEYRA_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          key_file="$RUNNER_TEMP/leyra-key"; trap 'rm -f "$key_file"' EXIT; umask 077
+          printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
+          code=$(ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
+            'release=$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 "${release}admin.py" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-new --days 1 --note "automated Windows test"')
+          [[ "$code" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          ui=$(ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
+            'release=$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 "${release}admin.py" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-new --days 1 --note "automated UI click-through"')
+          [[ "$ui" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]
+          echo "ui_code=$ui" >> "$GITHUB_OUTPUT"
+          # A temporary SOCKS5 proxy on the server stands in for the customer's own IP (loopback only, 40 minutes).
+          port=$((20000 + RANDOM % 20000)); pass=$(openssl rand -hex 12)
+          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
+            "cat > /tmp/leyra-ci-socks.py && (setsid nohup python3 /tmp/leyra-ci-socks.py $port ci $pass 2400 >/dev/null 2>&1 &) && sleep 1 && ss -ltn | grep -q ':$port '" < deploy/ci_socks5.py
+          # GitHub refuses to pass on a URL containing user:password@, so hand over the parts.
+          echo "socks_port=$port" >> "$GITHUB_OUTPUT"; echo "socks_pass=$pass" >> "$GITHUB_OUTPUT"
+  build:
+    if: ${{ inputs.allow_hosted_compute == true }}
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build the Mac package (service for both chips, universal window app, mihomo for both chips)
+        run: mac/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-package
+          path: mac/out/Leyra-*.pkg
+          retention-days: 7
+  test:
+    needs: [build, test-code]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            chip: apple-silicon
+            code_key: code
+          - runner: macos-15-intel
+            chip: intel
+            code_key: ui_code
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-package
+          path: pkg
+      - name: Record this Mac's own network before installing
+        run: |
+          route -n get default | awk '/interface:/{print $2}' > /tmp/leyra-physical-if
+          curl -s --max-time 20 https://api.ipify.org > /tmp/leyra-real-ip
+          echo "physical interface $(cat /tmp/leyra-physical-if)"; uname -m; sw_vers
+      - name: Install the package like a customer (installer runs as administrator)
+        run: |
+          sudo LEYRA_OWNER_UID=$(id -u) installer -pkg pkg/Leyra-*.pkg -target / -verboseR
+          sleep 5
+          sudo launchctl print system/xin.leyra.agent | head -20
+          ls -la /Applications/Leyra.app/Contents/MacOS "/Library/Application Support/Leyra/agent"
+      - name: Customer flow (${{ matrix.chip }})
+        env:
+          TEST_CODE: ${{ needs.test-code.outputs[matrix.code_key] }}
+          SOCKS_PORT: ${{ needs.test-code.outputs.socks_port }}
+          SOCKS_PASS: ${{ needs.test-code.outputs.socks_pass }}
+        run: mac/tests/e2e.sh
+      - name: Service log on failure
+        if: failure()
+        run: |
+          sudo tail -50 /var/log/leyra-agent.log || true
+          sudo tail -50 "/Library/Application Support/LeyraConnect/agent-error.log" || true
+      - name: Remove protection rules (always)
+        if: always()
+        run: sudo "/Library/Application Support/Leyra/agent/leyra-agent" --recover || true
+  revoke-test-code:
+    if: ${{ always() && needs.test-code.outputs.code != '' }}
+    needs: [test-code, test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Revoke the end-to-end test code
+        env:
+          LEYRA_SSH_KEY: ${{ secrets.LEYRA_SSH_KEY }}
+          TEST_CODE: ${{ needs.test-code.outputs.code }}
+          UI_CODE: ${{ needs.test-code.outputs.ui_code }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TEST_CODE" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]
+          [[ -z "$UI_CODE" || "$UI_CODE" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]
+          key_file="$RUNNER_TEMP/leyra-key"; trap 'rm -f "$key_file"' EXIT; umask 077
+          printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
+          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
+            "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $TEST_CODE; [ -n '$UI_CODE' ] && sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $UI_CODE; pkill -f '[l]eyra-ci-socks.py' || true"

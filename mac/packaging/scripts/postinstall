@@ -1,0 +1,15 @@
+#!/bin/bash
+set -euo pipefail
+BASE="/Library/Application Support/Leyra"
+# One package for both kinds of Mac: keep the service built for this one.
+if [ "$(/usr/bin/uname -m)" = "arm64" ]; then SRC="agent-arm64"; else SRC="agent-x64"; fi
+rm -rf "$BASE/agent"; mv "$BASE/$SRC" "$BASE/agent"; rm -rf "$BASE/agent-arm64" "$BASE/agent-x64"
+chown -R root:wheel "$BASE"; chmod -R go-w "$BASE"
+chown root:wheel /Library/LaunchDaemons/xin.leyra.agent.plist; chmod 644 /Library/LaunchDaemons/xin.leyra.agent.plist
+# The Mac user who installed Leyra is the one its window may talk to.
+OWNER=$(/usr/bin/stat -f %u /dev/console)
+if [ "$OWNER" = "0" ] && [ -n "${LEYRA_OWNER_UID:-}" ]; then OWNER="$LEYRA_OWNER_UID"; fi
+"$BASE/agent/leyra-agent" --install "$OWNER"
+/bin/launchctl bootstrap system /Library/LaunchDaemons/xin.leyra.agent.plist
+/bin/launchctl kickstart -k system/xin.leyra.agent || true
+exit 0
