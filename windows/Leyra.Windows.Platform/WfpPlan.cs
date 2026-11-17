@@ -5,7 +5,9 @@ public sealed record GatewayEndpoint(IPEndPoint Endpoint,byte Protocol);
 public sealed record FilterSpec(bool Ipv6,int Slot,string Name,bool Permit,ulong Weight,string? Network=null,int? RemotePort=null,int? LocalPort=null,byte? Protocol=null,bool Loopback=false,ulong? Interface=null,string? Application=null,bool Transport=false);
 public sealed record WfpPlan(IReadOnlyList<FilterSpec> Filters)
 {
- public static WfpPlan Create(string kernel,string service,IReadOnlyList<GatewayEndpoint> gateways,IReadOnlyList<IPEndPoint> management,ulong tunnel,IReadOnlyList<DirectRule> direct)
+ /// <param name="kernelDirect">"Only listed sites go through the exit": the kernel connects the other sites
+ /// directly, so it alone may use the physical network. Other programs stay blocked as always.</param>
+ public static WfpPlan Create(string kernel,string service,IReadOnlyList<GatewayEndpoint> gateways,IReadOnlyList<IPEndPoint> management,ulong tunnel,IReadOnlyList<DirectRule> direct,bool kernelDirect=false)
  {
   if(gateways.Count>64 || management.Count>64 || direct.Count>64)throw new InvalidDataException("过滤例外超过上限");
   if(gateways.Count==0 || string.IsNullOrWhiteSpace(kernel) || string.IsNullOrWhiteSpace(service))throw new InvalidDataException("后台通道与程序身份必须明确");
@@ -30,6 +32,9 @@ public sealed record WfpPlan(IReadOnlyList<FilterSpec> Filters)
     filters.Add(new(true,11,"IPv6 本地地址",true,700,Network:"fc00::/7"));
     filters.Add(new(true,12,"IPv6 链路邻居发现",true,850,Network:"ff02::/16",Protocol:58));
    }
+   // Its packet-layer copy below cannot name the program, so in this mode the packet layer lets packets through;
+   // new connections are still decided by the program-aware layer (only the kernel gets out).
+   if(kernelDirect)filters.Add(new(v6,90,"分流：内核直连名单外网站",true,800,Application:kernel));
    for(var i=0;i<gateways.Count;i++)
    {
     var gateway=gateways[i];var e=gateway.Endpoint;if(e.Address.AddressFamily==(v6?System.Net.Sockets.AddressFamily.InterNetworkV6:System.Net.Sockets.AddressFamily.InterNetwork))

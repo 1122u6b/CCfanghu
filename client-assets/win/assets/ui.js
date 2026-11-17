@@ -1099,6 +1099,14 @@
   }
   /* 设置分组（01 §5.13）：通用、网络、关于，最下面单独一组危险操作 */
   function setGroup(title, sub, inner, cls) { return '<div class="p-sec p-setgroup' + (cls || '') + '"><div class="p-grouph"><h2>' + title + '</h2>' + (sub ? '<span>' + sub + '</span>' : '') + '</div>' + inner + '</div>'; }
+  function routeCard() {
+    var R = S.splitRoute || { listed: false, domains: [] };
+    return '<div class="hx-card p-setcard"><div class="hx-setrow"><div class="l"><span>只让名单里的网站走出口</span><small>' +
+      (R.listed ? '已开启：名单外的网站和应用直连，速度和平时一样，但会看到你的真实 IP' : '关闭时所有流量都走出口（最安全）；开启后只有名单里的网站走出口，其他直连更快') +
+      '</small></div>' + sw(!!R.listed, 'routeListed', '只让名单里的网站走出口') + '</div>' +
+      (R.listed ? '<div class="hx-stack" style="padding:0 0 4px"><textarea class="hx-input" data-keep="routedomains" rows="4" aria-label="走出口的网站" placeholder="一行一个网站，例如 claude.ai（自动包含子域名）">' + esc((R.domains || []).join('\n')) + '</textarea>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end">' + btn('text', '恢复默认', 'routeReset') + btn('secondary', '保存名单', 'routeSave') + '</div></div>' : '') + '</div>';
+  }
   function settingsPage() {
     return '<div class="p-pagehead"><div class="t"><h1>设置</h1></div></div>' +
       setGroup('通用', '', '<div class="hx-card p-setcard">' +
@@ -1106,7 +1114,7 @@
         '<div class="hx-setrow"><div class="l"><span>通知</span><small>状态变化、工单回复、到期提醒</small></div>' + sw(S.notify, 'notify', '通知') + '</div>' +
         '<div class="hx-setrow"><div class="l"><span>时区</span><small>' + (!TZN.exit ? lat(TZN.sys) + '· 还不知道出口所在的时区，暂时没法比对' : S.tzChanged ? '和出口一致 · ' + TZN.exit : lat(TZN.sys) + '· 和出口不一致，境外网站可能据此判断你所在的地区') + '</small></div>' + (!TZN.exit ? '' : S.tzChanged ? btn('text', '恢复原来的时区', 'tzRestore') : btn('secondary', '更换时区', 'tzChange')) + '</div>' +
         '</div>') +
-      setGroup('网络', '', '<div class="hx-card"><div class="p-cardhead" style="margin:0"><h2>局域网</h2></div>' +
+      setGroup('网络', '', routeCard() + '<div class="hx-card"><div class="p-cardhead" style="margin:0"><h2>局域网</h2></div>' +
         '<p class="p-explain">局域网地址都已内置（10.x、172.16～31.x、192.168.x 等），打印机、NAS、路由器直接可用，不用添加</p>' +
         (S.lan.length ? '<div class="hx-caption hx-muted" style="margin-top:4px">你添加的公网地址（不走独享线路）</div>' + lanUserList() : '') +
         '<details class="p-adv"' + (S.advOpen ? ' open' : '') + ' data-adv><summary>高级 ' + I('chevron', 16) + '</summary><div class="hx-stack" style="margin-top:8px"><p class="p-sub">公网地址默认不能添加。只有确认需要让某个公网地址看到你的真实 IP 时才在这里添加：单个地址或最大 /24 的网段，最多 20 条；AI 服务、CDN、公共 DNS 和线路自己的地址不能加。</p>' +

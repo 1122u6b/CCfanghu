@@ -296,6 +296,23 @@ jobs:
           if ($s -notmatch 'protected' -or $nowExit -ne $goodExit) { $failures += "did not switch back to the working exit by itself: $s (using $nowExit)" }
           if (-not $switched) { $failures += 'the automatic exit switch was not recorded in recent activity' }
           if ($badExit) { Ask ('{"type":"delete_exit","id":' + $badExit + '}') | Out-Null }
+          Write-Host '   only listed sites go through the exit, the rest connects directly (and back to everything through the exit)'
+          function SeenIp { try { (Invoke-WebRequest https://api.ipify.org -UseBasicParsing -TimeoutSec 25).Content.Trim() } catch { 'error ' + $_.Exception.Message } }
+          function Route($json) { Ask $json | Out-Null; Start-Sleep 4; return (WaitFor 'protected' 150) }
+          $ipAll = SeenIp; Write-Host "   everything through the exit: sites see $ipAll"
+          $s = Route '{"type":"set_route_mode","listed":true,"domains":["ipify.org"]}'
+          $ipListed = SeenIp; Write-Host "   list = ipify.org: it sees $ipListed"
+          if ($s -notmatch 'protected') { $failures += "list mode did not come back protected: $s" }
+          $s = Route '{"type":"set_route_mode","listed":true,"domains":["example.com"]}'
+          $ipDirect = SeenIp; $web = try { (Invoke-WebRequest https://www.microsoft.com -UseBasicParsing -TimeoutSec 25).StatusCode } catch { 0 }
+          Write-Host "   list = example.com: ipify (not listed) sees $ipDirect, another site answers $web"
+          $s = Route '{"type":"set_route_mode","listed":false}'
+          $ipBack = SeenIp; Write-Host "   list mode off again: sites see $ipBack"
+          if ($ipAll -notmatch '^\d+\.\d+\.\d+\.\d+$') { $failures += "could not read the exit IP: $ipAll" }
+          if ($ipListed -ne $ipAll) { $failures += "a listed site did not go through the exit: $ipListed vs $ipAll" }
+          if ($ipDirect -notmatch '^\d+\.\d+\.\d+\.\d+$' -or $ipDirect -eq $ipAll) { $failures += "a site not on the list did not connect directly: $ipDirect" }
+          if ($web -ne 200) { $failures += "direct connections were blocked in list mode: $web" }
+          if ($s -notmatch 'protected' -or $ipBack -ne $ipAll) { $failures += "switching back to everything through the exit failed: $s / $ipBack" }
           Write-Host '   another proxy app turns on the system proxy: it is named, and 帮我退出 really ends it'
           $py = (Get-Command python).Source
           $fake = Start-Process -FilePath $py -ArgumentList '-m','http.server','18888','--bind','127.0.0.1' -PassThru -WindowStyle Hidden

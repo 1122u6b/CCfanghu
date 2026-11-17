@@ -1066,6 +1066,35 @@
   // Pro 全套升到 Max 5x：一键登录官网，打开升档、预选这台电脑（补差价，到期日不变）。
   A.tierUp = function () { openWeb('tier_up'); };
 
+  /* ---------- 分流：只让名单里的网站走出口 ---------- */
+  S.splitRoute = { listed: false, domains: [], loaded: false };
+  function loadRoute() {
+    return call({ type: 'route_mode' }).then(function (r) {
+      S.splitRoute = { listed: !!r.listed, domains: r.domains || [], loaded: true }; if (!busy()) P.render();
+    }).catch(function () {});
+  }
+  function saveRoute(listed, domains, done) {
+    var req = { type: 'set_route_mode', listed: listed }; if (domains) req.domains = domains;
+    return call(req).then(function (r) {
+      S.splitRoute = { listed: !!r.listed, domains: r.domains || [], loaded: true };
+      var el = document.querySelector('[data-keep="routedomains"]'); if (el) el.value = S.splitRoute.domains.join('\n');  // 显示整理后的名单
+      P.toast(done); P.render(); })
+      .catch(function (e) { P.toast(msg(e)); });
+  }
+  A.routeListed = function () {
+    var on = !S.splitRoute.listed;
+    (on ? withOwner('开启后，只有名单里的网站走你的出口；其他网站和应用直连，会看到你的真实 IP。确认后继续。', '没有开启') : Promise.resolve(true)).then(function (ok) {
+      if (ok) saveRoute(on, null, on ? '已开启：只有名单里的网站走出口，线路正在重建' : '已关闭：所有流量走出口，线路正在重建');
+    });
+  };
+  A.routeSave = function () {
+    var raw = field('routedomains') || '';
+    var list = raw.split(/[\s,，、;；]+/).map(function (x) { return x.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, ''); }).filter(Boolean);
+    if (!list.length) { P.toast('至少留一个网站'); return; }
+    saveRoute(S.splitRoute.listed, list, '名单已保存，线路正在重建');
+  };
+  A.routeReset = function () { saveRoute(S.splitRoute.listed, ['claude.ai', 'claude.com', 'anthropic.com', 'claudeusercontent.com', 'challenges.cloudflare.com'], '已恢复默认名单'); };
+
   A.prepPaused = function () {
     var on = !S.prepPaused;
     (on ? Promise.resolve(true) : withOwner('关掉后开通前照常上网，你的真实 IP 会暴露。确认是你本人后继续。', '没有关掉')).then(function (ok) {
@@ -2011,7 +2040,7 @@
   setInterval(function () { if (!accountLoading && (accountFails || !account)) loadAccount(); }, 3000);
   // 续费处理中：结果早一点显示出来（这是问守护程序，不连服务端）。
   setInterval(function () { if (account && account.renewal && account.renewal !== 'done') loadAccount(); }, 5000);
-  loadZone(); loadRules();
+  loadZone(); loadRules(); loadRoute();
   setInterval(function () { if (account && account.activated) { loadZone(); loadRules(); } }, 30000);
   // 工单近乎实时：开着工单页每 5 秒取一次，其他时候每 30 秒（客服一回复就弹通知）。
 var ticketsAt = 0;

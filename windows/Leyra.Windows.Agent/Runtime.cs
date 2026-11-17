@@ -116,7 +116,7 @@ sealed partial class Runtime:IDisposable
   if(profile is null)return;
   var executable=File.Exists(kernel.Executable)?kernel.Executable:Environment.ProcessPath!;
   var endpoint=new System.Net.IPEndPoint(IPAddress.Parse(profile.Host),profile.Port);
-  filters.Apply(WfpPlan.Create(executable,Environment.ProcessPath!,[new GatewayEndpoint(endpoint,6)],[endpoint],luid,store.Settings.DirectRules));
+  filters.Apply(WfpPlan.Create(executable,Environment.ProcessPath!,[new GatewayEndpoint(endpoint,6)],[endpoint],luid,store.Settings.DirectRules,store.Settings.ProxyOnlyListed));
  }
  async Task StartProtected(CancellationToken stop)
  {
@@ -132,7 +132,7 @@ sealed partial class Runtime:IDisposable
   var dns=PrivateDns.Parse(await cloud.RpcAsync(new{type="dns_config"},ct),profile);
   // The gateway accepts multiplexed connections: new connections then cost one round trip to Hong Kong.
   var mux=config.TryGetProperty("mux",out var muxKind)&&muxKind.ValueKind==JsonValueKind.String&&muxKind.GetString()=="yamux";
-  await kernel.Start(MihomoConfiguration.Build(nodes,kernel.Secret,true,dns,store.Settings.DirectRules,mux),ct);
+  await kernel.Start(MihomoConfiguration.Build(nodes,kernel.Secret,true,dns,store.Settings.DirectRules,mux,store.Settings.ProxyOnlyListed?store.Settings.ProxyDomains:null),ct);
   for(var i=0;i<40;i++){tunnel=KernelSession.Tunnel();if(tunnel!=0)break;await Task.Delay(200,ct);}
   if(tunnel==0)throw new InvalidOperationException("没有找到已启动的本机 TUN 接口");
   ApplyGuard(tunnel);await VerifyDns(ct);
@@ -398,6 +398,15 @@ sealed partial class Runtime:IDisposable
     case "doctor":return await Doctor(Bool(request,"deep"),stop);
     case "account":return await Account(stop);
     case "direct_rules":return new{items=store.Settings.DirectRules.Select(x=>new{cidr=x.Cidr,note=x.Note,public_ip=x.Public}).ToArray()};
+    case "route_mode":return new{listed=store.Settings.ProxyOnlyListed,domains=store.Settings.ProxyDomains,defaults=MihomoConfiguration.DefaultProxyDomains};
+    case "set_route_mode":
+     {
+      var listed=Bool(request,"listed");
+      var domains=request.TryGetProperty("domains",out var ds)&&ds.ValueKind==JsonValueKind.Array?MihomoConfiguration.ProxyDomains(ds.EnumerateArray().Select(x=>x.GetString()??"")).ToList():store.Settings.ProxyDomains;
+      store.Settings.ProxyOnlyListed=listed;store.Settings.ProxyDomains=domains;store.Save();
+      // Rebuild the line with the new routing (blocking rules stay on while it does).
+      configured=false;retryAt=DateTimeOffset.MinValue;return new{saved=true,listed,domains};
+     }
     case "add_direct_rule":
      var rule=DirectRule.Parse(Text(request,"rule"),Text(request,"note"),Bool(request,"confirm_public"));if(rule.Public)NeedOwner(request);
      if(store.Settings.DirectRules.Count>=64&&!store.Settings.DirectRules.Any(x=>x.Cidr==rule.Cidr))throw new InvalidOperationException("直连规则最多 64 条");

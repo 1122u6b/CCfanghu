@@ -19,6 +19,9 @@ sealed class AgentSettings
  // Off by default: pausing or quitting asks for an in-app confirmation only, not the Windows password.
  public bool RequireOwnerPassword{get;set;}
  public List<DirectRule> DirectRules{get;set;}=[];
+ // Off: everything goes through the exit. On: only ProxyDomains (and subdomains) do; other sites connect directly.
+ public bool ProxyOnlyListed{get;set;}
+ public List<string> ProxyDomains{get;set;}=[..Leyra.Windows.Core.MihomoConfiguration.DefaultProxyDomains];
 }
 sealed class AgentStore
 {
@@ -32,6 +35,8 @@ sealed class AgentStore
   Settings=File.Exists(Path.Combine(Root,"state.json"))?JsonSerializer.Deserialize<AgentSettings>(File.ReadAllBytes(Path.Combine(Root,"state.json")))??throw new InvalidDataException("本机状态文件无效"):new();
   if(Settings.Schema!=1 || Settings.DirectRules.Count>64)throw new InvalidDataException("本机状态版本无效");
   Settings.DirectRules=Settings.DirectRules.Select(r=>DirectRule.Parse(r.Cidr,r.Note,r.Public)).ToList();
+  try{Settings.ProxyDomains=Leyra.Windows.Core.MihomoConfiguration.ProxyDomains(Settings.ProxyDomains??[]).ToList();}
+  catch(InvalidDataException){Settings.ProxyDomains=[..Leyra.Windows.Core.MihomoConfiguration.DefaultProxyDomains];}
  }
  public ServerProfile? Profile()=>File.Exists(ProfileFile)?ServerProfile.Parse(File.ReadAllBytes(ProfileFile)):null;
  public void Save()=>Atomic(Path.Combine(Root,"state.json"),JsonSerializer.SerializeToUtf8Bytes(Settings));
