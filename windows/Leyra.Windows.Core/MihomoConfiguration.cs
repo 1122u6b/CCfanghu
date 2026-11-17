@@ -34,22 +34,36 @@ public static class MihomoConfiguration
    Inspect(node);
   }
  }
- public static byte[] Build(JsonElement nodes,string controllerSecret,bool protectedMode,PrivateDns? dns,IReadOnlyList<DirectRule> direct)
+ /// <param name="mux">The gateway said it accepts multiplexing ("yamux"): each TLS gateway node becomes a fallback
+ /// group named like the node, first a multiplexed copy (one round trip per new connection instead of 5-6),
+ /// then the plain copy. The kernel checks both every 10 s with a 3 s limit, so a multiplexed connection that
+ /// silently died is left within about 13 s and new connections go the plain way until it works again.</param>
+ public static byte[] Build(JsonElement nodes,string controllerSecret,bool protectedMode,PrivateDns? dns,IReadOnlyList<DirectRule> direct,bool mux=false)
  {
   ValidateNodes(nodes);
   if(!Guid.TryParse(controllerSecret,out _))throw new InvalidDataException("控制接口密钥无效");
   if(protectedMode && dns is null)throw new InvalidDataException("完整防护需要已核对的私有 DNS 配置");
   if(direct.Count>64 || direct.Any(x=>DirectRule.Parse(x.Cidr,x.Note,x.Public)!=x))throw new InvalidDataException("直连规则无效");
-  var names=new HashSet<string>();var list=new JsonArray();var endpoints=new HashSet<string>();var labelList=new List<string>();
+  var names=new HashSet<string>();var list=new JsonArray();var muxGroups=new List<object>();var endpoints=new HashSet<string>();var labelList=new List<string>();
   foreach(var node in nodes.EnumerateArray())
   {
    var copy=JsonNode.Parse(node.GetRawText())!.AsObject();var label=copy["name"]?.GetValue<string>()??"自有节点";
    if(label.Length>160 || label.Any(char.IsControl))throw new InvalidDataException("节点名称无效");
    if(new[]{"出口","自动选择","DIRECT","REJECT","GLOBAL"}.Contains(label)||!names.Add(label)){label+=" "+(list.Count+1);while(!names.Add(label))label+="_";}
-   copy["name"]=label;labelList.Add(label);list.Add(copy);
+   labelList.Add(label);
+   if(mux && copy["type"] is JsonValue kind && kind.TryGetValue<string>(out var k) && k=="socks5" && copy["tls"] is JsonValue tls && tls.TryGetValue<bool>(out var secure) && secure)
+   {
+    string Unique(string n){while(!names.Add(n))n+="_";return n;}
+    var fast=copy.DeepClone().AsObject();var plain=copy;
+    fast["name"]=Unique(label+" · 复用");plain["name"]=Unique(label+" · 标准");
+    fast["smux"]=new JsonObject{["enabled"]=true,["protocol"]="yamux",["max-connections"]=4,["min-streams"]=4,["only-tcp"]=true};
+    list.Add(fast);list.Add(plain);
+    muxGroups.Add(new Dictionary<string,object>{{"name",label},{"type","fallback"},{"proxies",new[]{fast["name"]!.GetValue<string>(),plain["name"]!.GetValue<string>()}},{"url","https://www.gstatic.com/generate_204"},{"interval",10},{"timeout",3000},{"lazy",false}});
+   }
+   else{copy["name"]=label;list.Add(copy);}
    var ip=node.GetProperty("server").GetString()!;endpoints.Add(ip+(ip.Contains(':')?"/128":"/32"));
   }
-  var groups=new object[]{new Dictionary<string,object>{{"name","出口"},{"type","select"},{"proxies",new[]{"自动选择"}.Concat(labelList).ToArray()}},new Dictionary<string,object>{{"name","自动选择"},{"type","url-test"},{"proxies",labelList},{"url","https://www.gstatic.com/generate_204"},{"interval",300},{"tolerance",100}}};
+  var groups=new object[]{new Dictionary<string,object>{{"name","出口"},{"type","select"},{"proxies",new[]{"自动选择"}.Concat(labelList).ToArray()}},new Dictionary<string,object>{{"name","自动选择"},{"type","url-test"},{"proxies",labelList},{"url","https://www.gstatic.com/generate_204"},{"interval",300},{"tolerance",100}}}.Concat(muxGroups).ToArray();
   var config=new Dictionary<string,object>{{"mixed-port",17890},{"allow-lan",false},{"bind-address","127.0.0.1"},{"mode","rule"},{"log-level","warning"},{"external-controller","127.0.0.1:19090"},{"secret",controllerSecret},{"ipv6",false},{"proxies",list},{"proxy-groups",groups},{"rules",RoutingPolicy.Rules(direct)},{"profile",new Dictionary<string,object>{{"store-selected",true},{"store-fake-ip",true}}}};
   config["tun"]=new Dictionary<string,object>{{"enable",protectedMode},{"device","LeyraConnect"},{"stack","gvisor"},{"auto-route",true},{"auto-detect-interface",true},{"dns-hijack",new[]{"any:53","tcp://any:53"}},{"route-exclude-address",new[]{"127.0.0.0/8","::1/128"}.Concat(direct.Select(x=>x.Cidr)).Concat(endpoints).ToArray()}};
   if(protectedMode && dns is not null)

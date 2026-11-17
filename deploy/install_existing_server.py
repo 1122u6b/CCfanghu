@@ -160,7 +160,7 @@ def install(address):
  if os.geteuid()!=0:raise PermissionError('Run this installer as root on the existing server')
  if not ipaddress.ip_address(address).is_global:raise ValueError('A public literal server IP is required')
  source=Path(__file__).resolve().parents[1]/'server'
- files=['gateway.py','management.py','devices.py','dns_probe.py','ai_login.py','verify_live.py','admin.py','links.py','upstream_kernel.py','admin.html','website.py','customers.py','licenses.py','mailer.py','site/index.html','site/favicon.svg']
+ files=['gateway.py','management.py','devices.py','dns_probe.py','ai_login.py','verify_live.py','admin.py','links.py','upstream_kernel.py','admin.html','website.py','customers.py','licenses.py','mailer.py','mux.py','site/index.html','site/favicon.svg']
  for name in files:
   if name.endswith('.py'):compile((source/name).read_bytes(),name,'exec')
  records={service:read_service(service,entry) for service,entry in SERVICES.items()}

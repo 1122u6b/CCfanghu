@@ -108,7 +108,9 @@ sealed partial class Runtime:IDisposable
   MihomoConfiguration.ValidateNodes(nodes);
   var remoteRules=await Remote(new{type="direct_rules"},ct);ReadRules(remoteRules);
   var dns=PrivateDns.Parse(await cloud.RpcAsync(new{type="dns_config"},ct),profile);
-  await kernel.Start(MihomoConfiguration.Build(nodes,kernel.Secret,true,dns,store.Settings.DirectRules),ct);
+  // The gateway accepts multiplexed connections: new connections then cost one round trip to Hong Kong.
+  var mux=config.TryGetProperty("mux",out var muxKind)&&muxKind.ValueKind==JsonValueKind.String&&muxKind.GetString()=="yamux";
+  await kernel.Start(MihomoConfiguration.Build(nodes,kernel.Secret,true,dns,store.Settings.DirectRules,mux),ct);
   for(var i=0;i<40;i++){tunnel=KernelSession.Tunnel();if(tunnel!=0)break;await Task.Delay(200,ct);}
   if(tunnel==0)throw new InvalidOperationException("没有找到已启动的本机 TUN 接口");
   ApplyGuard(tunnel);await VerifyDns(ct);

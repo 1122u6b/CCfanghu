@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import urlsplit,parse_qs
 from devices import Devices
 from management import Management,ManagementError
+from mux import MuxSession,MUX_TARGET
 
 def make_certificate(cert,key,host,days=365):
     # Explicit config avoids platform OpenSSL defaults adding duplicate extensions.
@@ -271,7 +272,7 @@ class Gateway:
             observed=ipaddress.ip_address(peer[0])
             if getattr(observed,'ipv4_mapped',None):observed=observed.ipv4_mapped
             return await self.response(w,200,{'observed_source':str(observed),'scope':'this authenticated TLS connection only'})
-        if method=='GET' and path=='/api/v1/config':return await self.response(w,200,{'proxies':[self.node(device)],'license_required':False,'identity':{'role':'owner' if is_admin else 'device','id':None if is_admin else device.id}})
+        if method=='GET' and path=='/api/v1/config':return await self.response(w,200,{'proxies':[self.node(device)],'mux':'yamux' if self.mux_enabled() else None,'license_required':False,'identity':{'role':'owner' if is_admin else 'device','id':None if is_admin else device.id}})
         if method=='POST' and path=='/api/v1/rpc':
             n=int(h.get('content-length','0'))
             if not 0<n<=(2*1024*1024 if is_admin else 131072):return await self.response(w,413,{'error':'invalid content length'})
@@ -409,7 +410,11 @@ class Gateway:
                 self.device_active[device.id]=self.device_active.get(device.id,0)+1;counted_device=True
             head=await exact(r,4)
             if head[:3]!=b'\x05\x01\x00':w.write(b'\x05\x07\x00\x01'+b'\x00'*6);await w.drain();return
-            target=await address(r,head[3]);upr,upwriter=await connect_any(await self.dial_nodes(device.management if device else None),target)
+            target=await address(r,head[3])
+            if self.mux_enabled() and target==MUX_TARGET:
+                w.write(b'\x05\x00\x00\x01'+b'\x00'*6);await w.drain()
+                return await self.mux_session(r,w,device)
+            upr,upwriter=await connect_any(await self.dial_nodes(device.management if device else None),target)
             w.write(b'\x05\x00\x00\x01'+b'\x00'*6);await w.drain()
             tasks=[asyncio.create_task(self.pipe(r,upwriter)),asyncio.create_task(self.pipe(upr,w))]
             if device:tasks.append(asyncio.create_task(self.watch_device(device)))
@@ -431,6 +436,29 @@ class Gateway:
                 if writer:
                     writer.close()
                     with contextlib.suppress(Exception):await writer.wait_closed()
+    def mux_enabled(self):return self.config.get('mux',True) is not False
+    async def mux_session(self,r,w,device):
+        """Many connections from one computer inside this one (see mux.py). Same device checks: every
+        stream counts against the per-device limit and the whole session ends when the device is revoked."""
+        management=device.management if device else None
+        async def open_upstream(target):return await connect_any(await self.dial_nodes(management),target)
+        limit=int(self.config.get('max_connections_per_device',10000))
+        def take():
+            if device is None:return True
+            if self.device_active.get(device.id,0)>=limit:return False
+            self.device_active[device.id]=self.device_active.get(device.id,0)+1;return True
+        def give():
+            if device is None:return
+            left=self.device_active.get(device.id,1)-1
+            if left>0:self.device_active[device.id]=left
+            else:self.device_active.pop(device.id,None)
+        session=MuxSession(r,w,open_upstream,take,give)
+        tasks=[asyncio.create_task(session.run())]
+        if device:tasks.append(asyncio.create_task(self.watch_device(device)))
+        try:await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for t in tasks:t.cancel()
+            await asyncio.gather(*tasks,return_exceptions=True)
     async def start(self):
         context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.minimum_version=ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(self.config['cert'],self.config['key'])
