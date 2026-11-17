@@ -233,7 +233,7 @@ class Gateway:
                     except CustomerError as e:raise ManagementError(str(e)) from None
                 call=(lambda:self.devices.rpc(self.management,request)) if is_admin else (lambda:self.devices.device_rpc(self.management,device,request))
                 # Subscription imports fetch from the internet; keep the event loop free meanwhile.
-                result=await asyncio.to_thread(call) if isinstance(request,dict) and request.get('type')=='import_exit_links' else call()
+                result=await asyncio.to_thread(call) if isinstance(request,dict) and request.get('type') in ('import_exit_links','ip_geo') else call()
             except ManagementError as e:return await self.response(w,400,{'error':'invalid management request','detail':str(e)[:300]})
             except (ValueError,TypeError,KeyError):return await self.response(w,400,{'error':'invalid management request'})
             return await self.response(w,200,result)

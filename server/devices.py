@@ -26,6 +26,49 @@ class Device:
         return self.id + '.' + self.secret
 
 
+_geo_cache = {}
+
+
+def ip_geo(ip):
+    """Country, city and timezone of a public IP, looked up from the server (fast, direct internet).
+    The Windows app asks this when the lookup through the customer's own exit is too slow."""
+    import ipaddress, urllib.request
+    try:
+        addr = ipaddress.ip_address(str(ip))
+    except ValueError:
+        raise ManagementError('invalid ip') from None
+    if not addr.is_global:
+        raise ManagementError('not a public ip')
+    ip = str(addr); hit = _geo_cache.get(ip)
+    if hit and time.time() - hit[0] < 6 * 3600:
+        return hit[1]
+    def get(url):
+        req = urllib.request.Request(url, headers={'User-Agent': 'Leyra', 'Accept': 'application/json'})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            return json.loads(r.read(65536))
+    info = None
+    try:
+        r = get('https://ipinfo.io/' + ip + '/json')
+        if r.get('ip') == ip and not r.get('bogon') and r.get('country'):
+            info = {'ip': ip, 'country': r.get('country', ''), 'region': r.get('region', ''), 'city': r.get('city', ''), 'timezone': r.get('timezone', ''), 'org': r.get('org', '')}
+    except Exception:
+        pass
+    if info is None:
+        try:
+            r = get('https://ipwho.is/' + ip)
+            if r.get('success'):
+                info = {'ip': ip, 'country': r.get('country_code', ''), 'region': r.get('region', ''), 'city': r.get('city', ''),
+                        'timezone': (r.get('timezone') or {}).get('id', ''), 'org': (r.get('connection') or {}).get('org', '')}
+        except Exception:
+            pass
+    if info is None:
+        raise ManagementError('归属地服务暂时查不到这个地址')
+    if len(_geo_cache) > 5000:
+        _geo_cache.clear()
+    _geo_cache[ip] = (time.time(), info)
+    return info
+
+
 class Devices:
     def __init__(self, root):
         self.root = Path(root) / 'devices-v1'
@@ -179,9 +222,11 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,tar
                    'ticket_reply','ticket_rate','upload_chunk','ticket_image','help','exits','store_exit',
                    'select_exit','delete_exit','direct_rules','ai_accounts','ai_secrets','ai_report',
                    'add_direct_rule','remove_direct_rule','set_direct_note','dns_config','dns_probe_begin','dns_probe_result','ai_login_begin','ai_login_poll','ai_login_cancel',
-                   'update_exit','update_manifest','update_chunk','import_exit_links','license_renew'}
+                   'update_exit','update_manifest','update_chunk','import_exit_links','license_renew','ip_geo'}
         if kind not in allowed:
             raise ManagementError('device is not allowed to perform this command')
+        if kind == 'ip_geo':
+            return ip_geo(req.get('ip'))
         if kind == 'license_renew':
             return self.licenses.renew(req.get('code'), device, req.get('machine'))
         if kind == 'account':

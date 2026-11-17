@@ -113,7 +113,9 @@ sealed class MainWindow:Form
   var sensitive=type is "pair" or "pause" || (type=="block_before_ready"&&payload["on"]?.GetValue<bool>()==false) || (type=="add_direct_rule"&&payload["confirm_public"]?.GetValue<bool>()==true);
   if(sensitive&&Interlocked.Exchange(ref ownerProof,null) is string proof)payload["owner_proof"]=proof;
   var deep=type=="doctor"&&payload["deep"]?.GetValue<bool>()==true;
-  using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(deep?95:35));
+  // Activation talks to leyra.xin and then registers with the server; on a slow network that takes a while.
+  var slow=type is "activate" or "restore" or "own_exit" or "switch_code";
+  using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(deep?95:slow?100:35));
   await requests.WaitAsync(deadline.Token);
   try
   {

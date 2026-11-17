@@ -1128,8 +1128,8 @@
     var E = S.actErr || {}, off = S.busy.act ? ' disabled' : '';
     function err(k) { return E[k] ? '<span class="hx-help is-error">' + I('warning', 16) + esc(E[k]) + '</span>' : ''; }
     var steps = [['填授权码激活', '在售后 QQ 群下单拿到授权码，填在左边点「激活」。一个授权码只能用于一台电脑。'],
-      ['自动开始防护', '激活后自动连上独享线路，不用别的设置。'],
-      ['检查时区和局域网', '按首次向导确认时区和局域网设备，再做一次安全检查。']];
+      ['接入你的出口', '激活后点「接入你的出口」，粘贴你的 IP（socks5、http、ss、vmess 等链接或订阅），接上就自动开启防护。'],
+      ['自动校准，随时检查', '浏览器保护和电脑时区自动设好；「安全检查」里能看到浏览器实际的出口 IP。']];
     return '<div class="p-full lx-act"><div class="p-wordmark"><span class="p-logo" aria-hidden="true"></span>Leyra</div>' +
       '<div class="p-act"><div class="hx-card">' +
       '<div><h1 class="hx-title">激活</h1><p class="p-sub">填你在售后 QQ 群买到的授权码。重装过软件或系统的，填原来的授权码即可恢复。</p></div>' +

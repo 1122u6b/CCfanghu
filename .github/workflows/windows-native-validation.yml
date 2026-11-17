@@ -272,6 +272,24 @@ jobs:
           if ($null -eq $acct.reply.value.exits.list -or -not $acct.reply.value.exits.can_add) { $failures += 'account exits are not {list, can_add}' }
           Write-Host '   full security check while protected'
           Ask '{"type":"doctor"}' | Out-Null; Copy-Item "C:\LeyraCi\out_$script:n.json" doctor.json -ErrorAction SilentlyContinue
+          Write-Host '   another proxy app turns on the system proxy: it is named, and 帮我退出 really ends it'
+          $py = (Get-Command python).Source
+          $fake = Start-Process -FilePath $py -ArgumentList '-m','http.server','18888','--bind','127.0.0.1' -PassThru -WindowStyle Hidden
+          Start-Sleep 4
+          $is = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
+          Set-ItemProperty $is ProxyEnable 1; Set-ItemProperty $is ProxyServer '127.0.0.1:18888'
+          Ask '{"type":"check_conflicts"}' | Out-Null
+          $c = (Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value.items | Where-Object { $_.id -like 'proxy-owner-*' } | Select-Object -First 1
+          if (-not $c) { $failures += 'the program behind the system proxy was not identified' }
+          else {
+            Write-Host "   found: $($c.name) ($($c.evidence))"
+            Ask ('{"type":"shell_action","command":"force_quit_conflict","args":{"id":"' + $c.id + '"}}') | Out-Null
+            Start-Sleep 2
+            if (-not $fake.HasExited) { $failures += 'the program behind the system proxy is still running after 帮我退出' } else { Write-Host '   it was ended' }
+            if ((Get-ItemProperty $is).ProxyEnable -ne 0) { $failures += 'system proxy still on after ending its program' } else { Write-Host '   system proxy switched off' }
+          }
+          if (-not $fake.HasExited) { Stop-Process -Id $fake.Id -Force }
+          Set-ItemProperty $is ProxyEnable 0
           Write-Host '   dropped connections while protected'
           dotnet $tool --pipe-stress 200 | Select-Object -Last 3 | ForEach-Object { Write-Host "   $_" }
           if ($LASTEXITCODE -ne 0) { $failures += 'service stopped answering after dropped connections (protected)' }
@@ -291,7 +309,7 @@ jobs:
           schtasks /Delete /TN LeyraCiRecover /F | Out-Null
           if (Test-Path "$env:ProgramData\LeyraConnect\agent-error.log") { Write-Host '--- agent-error.log ---'; Get-Content "$env:ProgramData\LeyraConnect\agent-error.log" }
           if ($script:adminSeen) { $failures += 'requests ran with administrator rights; the limited-user path was not tested' }
-          if (Test-Path doctor.json) { Write-Host '--- security check verdicts ---'; (Get-Content doctor.json -Raw | ConvertFrom-Json).reply.value.items | ForEach-Object { Write-Host "$($_.id) $($_.verdict) $($_.detail)"; if ($_.id -eq 'L8' -and $_.verdict -eq 'fail') { $failures += "false leak alarm: $($_.detail)" }; if ($_.id -eq 'P7' -and $_.verdict -ne 'pass') { $failures += "browser WebRTC protection not set automatically: $($_.detail)" } } }
+          if (Test-Path doctor.json) { Write-Host '--- security check verdicts ---'; (Get-Content doctor.json -Raw | ConvertFrom-Json).reply.value.items | ForEach-Object { Write-Host "$($_.id) $($_.verdict) $($_.detail)"; if ($_.id -eq 'L8' -and $_.verdict -eq 'fail') { $failures += "false leak alarm: $($_.detail)" }; if ($_.id -eq 'P7' -and $_.verdict -ne 'pass') { $failures += "browser WebRTC protection not set automatically: $($_.detail)" }; if ($_.id -eq 'C1' -and $_.verdict -ne 'pass') { $failures += "timezone not matched to the exit automatically: $($_.detail)" } } }
           if ($failures.Count) { $failures | ForEach-Object { Write-Host "FAIL: $_" }; throw 'Customer flow failed' }
           Write-Host 'LEYRA_CUSTOMER_FLOW=PASS'
       - name: Silent uninstall and verify cleanup

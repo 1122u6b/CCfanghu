@@ -986,9 +986,10 @@
     S.actErr = e;
     if (Object.keys(e).length) { P.render(); return; }
     S.busy.act = { text: '正在验证授权码' }; P.render();
+    var slowHint = setTimeout(function () { if (S.busy.act) { S.busy.act = { text: '网络较慢，正在激活，请稍等，不要重复点…' }; P.render(); } }, 10000);
     // 激活成功的提示按套餐写（账户信息拿回来才知道）：全套「线路开通中」，单独软件、免费试用「下一步接入你的出口」。
     var done = function (text) {
-      S.busy.act = null; S.actErr = {}; S.screen = 'main'; S.page = 'overview'; S.status = 'prep';
+      clearTimeout(slowHint); S.busy.act = null; S.actErr = {}; S.screen = 'main'; S.page = 'overview'; S.status = 'prep';
       // 激活后直接进概览，不走引导；防护由客户自己点「开启防护」。
       store('cc.wizard.pending', false);
       poll();
@@ -998,7 +999,7 @@
       });
     };
     var fail = function (err) {
-      var m = msg(err); S.busy.act = null;
+      var m = msg(err); clearTimeout(slowHint); S.busy.act = null;
       // 联系方式的问题写在联系方式下面（common::contact 的提示都以这几个词开头）。
       S.actErr = /^(联系方式|微信|QQ|邮箱|Telegram)/.test(m) ? { contact: m } : { code: m };
       P.render();

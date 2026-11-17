@@ -263,10 +263,13 @@ sealed partial class Runtime:IDisposable
      NeedOwner(request);await PairWith(ServerProfile.Parse(JsonSerializer.SerializeToUtf8Bytes(request.GetProperty("profile"))),stop);return new{saved=true};
     case "activate":case "restore":
      // One authorization code = one computer: the server binds the code to this hardware ID.
+     var watch=System.Diagnostics.Stopwatch.StartNew();
      var issued=await RedeemCode(new{code=Text(request,"code"),machine=MachineId.Get(),contact=Text(request,"contact"),order_no=Text(request,"order_no"),label=Environment.MachineName},stop);
+     var redeemed=watch.Elapsed;
      // Like the original: after activation the overview asks for the customer's own exit (IP);
      // protection starts by itself once one is connected.
-     await PairWith(issued,stop);exitCount=null;exitAskAt=DateTimeOffset.MinValue;Record("activated");return new{saved=true};
+     await PairWith(issued,stop);
+     if(watch.Elapsed>TimeSpan.FromSeconds(10))Program.Log("slow activation",new TimeoutException($"code check {redeemed.TotalSeconds:N1} s, registering this computer {(watch.Elapsed-redeemed).TotalSeconds:N1} s"));exitCount=null;exitAskAt=DateTimeOffset.MinValue;Record("activated");return new{saved=true};
     case "switch_code":
      var renewed=await Remote(new{type="license_renew",code=Text(request,"code"),machine=MachineId.Get()},stop);
      retryAt=DateTimeOffset.MinValue;configured=false;state="starting";return new{saved=true,suite=false,expires_at=renewed.GetProperty("expires_at").GetInt64()};

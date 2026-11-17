@@ -39,6 +39,12 @@ sealed partial class Runtime
   catch(Exception e)when(e is HttpRequestException or TaskCanceledException or JsonException){}
   if(info is null)
   {
+   // A slow customer exit makes the lookup through it time out; our server looks it up directly instead.
+   try{var r=await Remote(new{type="ip_geo",ip},stop);if(Text(r,"ip")==ip)info=new(ip,Text(r,"country"),Text(r,"region"),Text(r,"city"),Text(r,"timezone"),Text(r,"org"));}
+   catch(Exception e)when(e is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or InvalidDataException){Program.Log("exit location via server",e);}
+  }
+  if(info is null)
+  {
    using var doc=JsonDocument.Parse(await http.GetStringAsync("https://ipwho.is/"+ip,stop));var r=doc.RootElement;
    if(!Bool(r,"success"))throw new InvalidDataException("归属地服务没有这个地址的数据");
    var tz=r.TryGetProperty("timezone",out var t)&&t.ValueKind==JsonValueKind.Object?Text(t,"id"):"";
@@ -59,12 +65,12 @@ sealed partial class Runtime
   if(exitIp.Length==0 || exitGeoFor==exitIp)return;
   try
   {
-   using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(7));
+   using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(20));
    var info=await LookupGeo(exitIp,deadline.Token);exitGeo=info;exitGeoFor=exitIp;
    if(info.Timezone.Length>0&&TimeZoneInfo.TryConvertIanaIdToWindowsId(info.Timezone,out _)&&store.Settings.ExitTimezone!=info.Timezone)
    {store.Settings.ExitTimezone=info.Timezone;store.Save();Record("exit",info.Label);}
   }
-  catch(Exception e)when(e is not OperationCanceledException || !stop.IsCancellationRequested){/* 下次出口检查时重试 */}
+  catch(Exception e)when(e is not OperationCanceledException || !stop.IsCancellationRequested){Program.Log("exit location",e);/* 下次出口检查时重试 */}
  }
 
  // ---------- 线路质量：内核对每条线路的实际延迟测试 ----------
@@ -195,17 +201,27 @@ sealed partial class Runtime
   var item=conflicts.Select(x=>JsonSerializer.SerializeToElement(x)).FirstOrDefault(x=>Text(x,"id")==id);
   if(item.ValueKind!=JsonValueKind.Object)throw new InvalidOperationException("它已经退出了");
   if(!item.TryGetProperty("quit",out var quit)||quit.ValueKind!=JsonValueKind.Object||!quit.TryGetProperty("images",out var images))throw new InvalidOperationException("这一项不能自动退出，请手动处理");
-  return images.EnumerateArray().Select(x=>x.GetString()??"").Where(x=>KnownConflicts.Any(c=>c.Images.Contains(x,StringComparer.OrdinalIgnoreCase))||x.Equals("mihomo",StringComparison.OrdinalIgnoreCase)).ToArray();
+  var owner=quit.TryGetProperty("owner",out var o)&&o.ValueKind==JsonValueKind.True;
+  return images.EnumerateArray().Select(x=>x.GetString()??"").Where(x=>owner&&x.Length>0||KnownConflicts.Any(c=>c.Images.Contains(x,StringComparer.OrdinalIgnoreCase))||x.Equals("mihomo",StringComparison.OrdinalIgnoreCase)).ToArray();
  }
  object ForceQuit(string id)
  {
   var images=ConflictImages(id);var own=Path.GetFullPath(kernel.Executable);
+  // The program behind the system proxy is matched by its folder too, so another program that merely
+  // shares a name (python, node...) is never ended.
+  string? folder=null;
+  if(id.StartsWith("proxy-owner-",StringComparison.Ordinal))
+   folder=conflicts.Select(x=>JsonSerializer.SerializeToElement(x)).Where(x=>Text(x,"id")==id).Select(x=>Path.GetDirectoryName(Text(x,"evidence"))).FirstOrDefault();
   foreach(var image in images)foreach(var p in Process.GetProcessesByName(image))using(p)
   {
-   try{var path=p.MainModule?.FileName;if(path is not null&&string.Equals(Path.GetFullPath(path),own,StringComparison.OrdinalIgnoreCase))continue;p.Kill(true);p.WaitForExit(3000);}
+   try{var path=p.MainModule?.FileName;if(path is not null&&string.Equals(Path.GetFullPath(path),own,StringComparison.OrdinalIgnoreCase))continue;
+    if(folder is not null&&(path is null||!string.Equals(Path.GetDirectoryName(path),folder,StringComparison.OrdinalIgnoreCase)))continue;
+    p.Kill(true);p.WaitForExit(3000);}
    catch(Exception e)when(e is System.ComponentModel.Win32Exception or InvalidOperationException){}
   }
-  var left=images.Where(x=>Process.GetProcessesByName(x).Length>0).Select(x=>x+".exe").ToArray();
+  var left=images.Where(x=>Process.GetProcessesByName(x).Any(p=>{using(p)try{return folder is null||string.Equals(Path.GetDirectoryName(p.MainModule?.FileName),folder,StringComparison.OrdinalIgnoreCase);}catch(Exception e)when(e is System.ComponentModel.Win32Exception or InvalidOperationException){return false;}})).Select(x=>x+".exe").ToArray();
+  // It was the program behind the system proxy: the proxy now points to nothing, switch it off too.
+  if(id.StartsWith("proxy-owner-",StringComparison.Ordinal)&&left.Length==0){try{proxy.ClearAfterQuit();}catch(Exception e)when(e is InvalidOperationException or UnauthorizedAccessException or IOException){Program.Log("clear system proxy",e);}}
   RefreshConflicts(true);Record("repair","结束冲突软件 "+string.Join("、",images));return new{left};
  }
 
