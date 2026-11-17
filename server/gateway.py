@@ -93,7 +93,10 @@ async def connect_any(nodes,target):
     last=None
     for node in nodes:
         try:return await upstream_connect(node,target)
-        except (OSError,ValueError,asyncio.TimeoutError,asyncio.IncompleteReadError,asyncio.LimitOverrunError) as e:last=e
+        except (OSError,ValueError,asyncio.TimeoutError,asyncio.IncompleteReadError,asyncio.LimitOverrunError) as e:
+            last=e
+            # Only the exit's own address and the reason; never credentials or the site being visited.
+            print('upstream failed: %s:%s %s %s'%(node.get('server','?'),node.get('port','?'),type(e).__name__,str(e)[:120].replace('\n',' ')),flush=True)
     raise last or ValueError('no upstream configured')
 
 class Gateway:
