@@ -112,8 +112,13 @@ try {
   await page.check('[data-keep="act-agree"]');
   await click('activate');
   const t0 = Date.now();
-  let after = await waitText(/接入你的出口/, 110000);
-  const stillActivation = await page.locator('[data-keep="act-code"]').isVisible().catch(() => false);
+  // The activation page's own step list also says 接入你的出口, so wait for that page to be gone first.
+  const onActivation = () => page.locator('[data-keep="act-code"]').isVisible().catch(() => false);
+  let after = '', stillActivation = true;
+  for (const end = Date.now() + 110000; Date.now() < end; await page.waitForTimeout(1000)) {
+    stillActivation = await onActivation(); after = await text();
+    if (!stillActivation && /接入你的出口/.test(after)) break;
+  }
   await shot('02-after-activation');
   step('activation goes to the overview and asks for the own exit', /接入你的出口/.test(after) && !stillActivation, ((Date.now() - t0) / 1000).toFixed(0) + ' s');
   await page.waitForTimeout(5000);
