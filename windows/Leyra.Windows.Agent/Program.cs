@@ -47,9 +47,13 @@ sealed class AgentService:ServiceBase
  protected override void OnStart(string[] args)
  {
   try{AgentStore.VerifyDataPath();var store=new AgentStore();runtime=new Runtime(store);stop=new CancellationTokenSource();
-  task=Task.WhenAll(runtime.Run(stop.Token),new LocalPipe(runtime,store.Owner).Run(stop.Token));}
+  var protection=runtime.Run(stop.Token);var listener=new LocalPipe(runtime,store.Owner).Run(stop.Token);
+  task=Task.WhenAll(protection,listener);
+  // Either part ending on its own is a fault: record why, then exit so Windows restarts the service
+  // (recovery actions restart it after 5 s). Waiting for both would hide a dead listener forever.
+  foreach(var (part,name) in new[]{(protection,"protection loop"),(listener,"window connection listener")})
+   _=part.ContinueWith(t=>{if(stop.IsCancellationRequested)return;Program.Log(name+" stopped unexpectedly",t.Exception??new Exception("ended without error"));Environment.Exit(2);},TaskScheduler.Default);}
   catch(Exception e){Program.Log("service start failed",e);throw;}
-  _=task.ContinueWith(t=>{if(t.IsFaulted){Program.Log("service stopped unexpectedly",t.Exception!);Environment.Exit(2);}},TaskScheduler.Default);
   _=Task.Run(async()=>{try{await Task.Delay(TimeSpan.FromMinutes(1),stop.Token);Installation.CleanupOldVersions();}catch(OperationCanceledException){}});
  }
  protected override void OnStop()

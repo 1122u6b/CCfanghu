@@ -12,15 +12,31 @@ sealed class LocalPipe(Runtime runtime,SecurityIdentifier owner)
   security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid,null),PipeAccessRights.FullControl,AccessControlType.Allow));
   security.AddAccessRule(new PipeAccessRule(owner,PipeAccessRights.ReadWrite,AccessControlType.Allow));
   NamedPipeServerStream Create(bool first)=>NamedPipeServerStreamAcl.Create(PipeProtocol.Name,PipeDirection.InOut,8,PipeTransmissionMode.Byte,PipeOptions.Asynchronous|(first?PipeOptions.FirstPipeInstance:PipeOptions.None),65536,65536,security);
+  async Task<NamedPipeServerStream> CreateAgain(CancellationToken token)
+  {
+   for(var attempt=1;;attempt++)
+   {
+    try{return Create(false);}
+    catch(IOException e)when(attempt<50){if(attempt==1)Program.Log("pipe instance busy, retrying",e);await Task.Delay(200,token);}
+   }
+  }
   using var slots=new SemaphoreSlim(6,6);var tasks=new List<Task>();var current=Create(true);
   try
   {
    while(!stop.IsCancellationRequested)
    {
     await slots.WaitAsync(stop);
-    try{await current.WaitForConnectionAsync(stop);}catch{slots.Release();throw;}
+    try{await current.WaitForConnectionAsync(stop);}
+    catch(OperationCanceledException)when(stop.IsCancellationRequested){slots.Release();throw;}
+    catch(Exception e)when(e is IOException or ObjectDisposedException or InvalidOperationException or UnauthorizedAccessException)
+    {
+     // A window that closed its connection before it was accepted must not end the listener:
+     // drop that instance and keep listening, otherwise the app could never reach the service again.
+     slots.Release();Program.Log("pipe accept failed, listening again",e);
+     current.Dispose();current=await CreateAgain(stop);continue;
+    }
     var accepted=current;
-    try{current=Create(false);}catch{accepted.Dispose();slots.Release();throw;}
+    try{current=await CreateAgain(stop);}catch{accepted.Dispose();slots.Release();throw;}
     tasks.RemoveAll(t=>t.IsCompleted);
     tasks.Add(Task.Run(async()=>{try{await Client(accepted,stop);}finally{accepted.Dispose();slots.Release();}},CancellationToken.None));
    }

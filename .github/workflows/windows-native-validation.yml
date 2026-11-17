@@ -235,6 +235,9 @@ jobs:
           $at = (Get-Date).AddMinutes(8).ToString('HH:mm')
           schtasks /Create /TN LeyraCiRecover /SC ONCE /ST $at /RU SYSTEM /TR "`"$agent`" --recover" /F | Out-Null
           $failures = @()
+          Write-Host '0. windows that connect and drop at once must not stop the service from answering'
+          dotnet $tool --pipe-stress 200 | Select-Object -Last 3 | ForEach-Object { Write-Host "   $_" }
+          if ($LASTEXITCODE -ne 0) { $failures += 'service stopped answering after dropped connections (fresh install)' }
           Write-Host '1. status on a fresh install'
           if ((Ask '{"type":"status"}') -ne 0) { $failures += 'status request failed' }
           Write-Host '2. a wrong code is refused with a message, not a hang'
@@ -262,6 +265,9 @@ jobs:
           if ($null -eq $acct.reply.value.exits.list -or -not $acct.reply.value.exits.can_add) { $failures += 'account exits are not {list, can_add}' }
           Write-Host '   full security check while protected'
           Ask '{"type":"doctor"}' | Out-Null; Copy-Item "C:\LeyraCi\out_$script:n.json" doctor.json -ErrorAction SilentlyContinue
+          Write-Host '   dropped connections while protected'
+          dotnet $tool --pipe-stress 200 | Select-Object -Last 3 | ForEach-Object { Write-Host "   $_" }
+          if ($LASTEXITCODE -ne 0) { $failures += 'service stopped answering after dropped connections (protected)' }
           Write-Host '   彻底退出 while protected takes effect within 10 seconds'
           $t0 = Get-Date
           if ((Ask '{"type":"pause","minutes":10,"reason":"quit"}') -ne 0) { $failures += '彻底退出 request failed' }

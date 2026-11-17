@@ -6,6 +6,31 @@ using System.Text.Json;
 // Controlled child modes exercise the same ordinary argv launch used by the kernel.
 if(args.Length>0 && args[0]=="--fixture-job-exit")Environment.Exit(args.Length==2 && args[1]=="有 空格"?7:9);
 if(args.Length==1 && args[0]=="--fixture-job-wait"){await Task.Delay(TimeSpan.FromSeconds(30));Environment.Exit(0);}
+// Stress: windows that connect and drop the connection at once (or half way through a request)
+// must not take the service's listener down; afterwards a normal request still has to work.
+if(args.Length==2 && args[0]=="--pipe-stress")
+{
+ var rounds=int.Parse(args[1]);var dropped=0;
+ for(var i=0;i<rounds;i++)
+ {
+  try
+  {
+   using var p=new System.IO.Pipes.NamedPipeClientStream(".",PipeProtocol.Name,System.IO.Pipes.PipeDirection.InOut,System.IO.Pipes.PipeOptions.Asynchronous);
+   await p.ConnectAsync(5000);
+   if(i%3==1)await p.WriteAsync(new byte[]{0,0,0,9,123});
+   dropped++;
+  }
+  catch(Exception e){Console.WriteLine("round "+i+": "+e.GetType().Name+" "+e.Message);}
+ }
+ using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(30));
+ using var pipe=new System.IO.Pipes.NamedPipeClientStream(".",PipeProtocol.Name,System.IO.Pipes.PipeDirection.InOut,System.IO.Pipes.PipeOptions.Asynchronous);
+ await pipe.ConnectAsync(5000,timeout.Token);
+ using var request=JsonDocument.Parse("{\"type\":\"status\"}");
+ await PipeProtocol.WriteAsync(pipe,new{version=1,request=request.RootElement},timeout.Token);
+ var reply=await PipeProtocol.ReadAsync(pipe,timeout.Token);
+ Console.WriteLine("dropped "+dropped+" connections; service still answers: "+reply.GetProperty("ok").GetBoolean());
+ Environment.Exit(reply.GetProperty("ok").GetBoolean()?0:3);
+}
 // Same as --pipe, but reads the request from a file and writes {admin,exit,reply|error} to a file.
 // Used to send requests from a limited (non-administrator) token, like a customer's desktop app.
 if(args.Length==3 && args[0]=="--pipe-file")
