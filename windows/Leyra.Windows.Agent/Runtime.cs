@@ -72,13 +72,13 @@ sealed partial class Runtime:IDisposable
    finally{Publish();gate.Release();}
    // The check through the customer's exit runs without holding the lock, so pausing,
    // quitting and the window's other requests are never queued behind a slow exit.
-   if(state=="protected"&&configured&&DateTimeOffset.UtcNow>=nextNetProbe)
+   if(state=="protected"&&configured&&DateTimeOffset.UtcNow>=nextNetProbe&&(networkTask is null||networkTask.IsCompleted))
    {
-    try{await NetworkProbe(stop);}
-    catch(OperationCanceledException)when(stop.IsCancellationRequested){break;}
+    networkTask=Task.Run(async()=>{try{await NetworkProbe(stop);}catch(OperationCanceledException)when(stop.IsCancellationRequested){}catch(Exception e){Program.Log("network probe",e);}},CancellationToken.None);
    }
    try{await Task.Delay(1000,stop);}catch(OperationCanceledException)when(stop.IsCancellationRequested){break;}
   }
+  if(networkTask is not null)await networkTask;
  }
  async Task UpdateLoop(CancellationToken stop)
  {
@@ -117,7 +117,7 @@ sealed partial class Runtime:IDisposable
    try{exitIp=await ObserveExit(ct);exitVerified=true;break;}
    catch(Exception e)when(attempt<3&&e is not OperationCanceledException){await Task.Delay(1500,ct);}
   }
-  netFailures=0;nextNetProbe=DateTimeOffset.UtcNow.AddSeconds(30);
+  netFailures=0;nextNetProbe=DateTimeOffset.UtcNow;
   configured=true;lastError="";guardSince=DateTimeOffset.UtcNow;Record("protected");
   // Chrome / Edge WebRTC only through the protected line; restored on uninstall.
   try{if(!BrowserPolicyActive())BrowserPolicies.Install();}catch(Exception e)when(e is UnauthorizedAccessException or IOException or System.Security.SecurityException){Program.Log("browser policy",e);}
@@ -140,10 +140,13 @@ sealed partial class Runtime:IDisposable
   if(profile is null)throw new InvalidOperationException("尚未连接服务器");
   // This explicit proxy cannot fall back to a direct socket. The same pinned TLS gateway
   // observes the outgoing connection from the selected upstream back to our server.
-  using var probe=new PrivateServerClient(profile,TimeSpan.FromSeconds(8),throughLocalProxy:true);
-  var result=await probe.SendAsync("/api/v1/egress-probe",cancellation:stop);var observed=Text(result,"observed_source");
-  if(!AddressPolicy.IsLiteral(observed)||!AddressPolicy.IsPublic(observed))throw new InvalidDataException("自有服务器没有观察到有效公网出口");
-  return observed;
+  var current=profile;
+  return await EgressProbe.ObserveAsync(async ct=>
+  {
+   using var probe=new PrivateServerClient(current,TimeSpan.FromSeconds(8),throughLocalProxy:true);
+   var result=await probe.SendAsync("/api/v1/egress-probe",cancellation:ct);
+   return Text(result,"observed_source");
+  },ObservePublicExit,stop);
  }
  void Block(Exception e)
  {
@@ -177,6 +180,7 @@ sealed partial class Runtime:IDisposable
   configured=false;retryAt=DateTimeOffset.UtcNow;
   Record("exit_failover",(from??"当前出口")+" → "+next.Name);
  }
+ Task? networkTask;
  int netFailures;DateTimeOffset nextNetProbe=DateTimeOffset.MinValue;DateTimeOffset lastTraffic=DateTimeOffset.MinValue;
  // Pause and quit interrupt a line that is still being built instead of waiting up to a minute.
  CancellationTokenSource startCancel=new();bool startInterrupted;
@@ -187,15 +191,19 @@ sealed partial class Runtime:IDisposable
  async Task NetworkProbe(CancellationToken stop)
  {
   if(cloud is null)return;
+  var generation=configAt;
   var ok=false;
   try
   {
    using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(20));var ct=deadline.Token;
    await cloud.SendAsync("/api/v1/status",cancellation:ct);
-   exitIp=await ObserveExit(ct);exitVerified=true;netFailures=0;nextNetProbe=DateTimeOffset.UtcNow.AddSeconds(30);ok=true;
+   var observed=await ObserveExit(ct);
+   if(configAt!=generation||!configured||state!="protected")return;
+   exitIp=observed;exitVerified=true;netFailures=0;nextNetProbe=DateTimeOffset.UtcNow.AddSeconds(30);ok=true;
   }
   catch(Exception e)when(e is not OperationCanceledException||!stop.IsCancellationRequested)
   {
+   if(configAt!=generation||!configured||state!="protected")return;
    var fatal=e is HttpRequestException h&&h.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
    netFailures++;nextNetProbe=DateTimeOffset.UtcNow.AddSeconds(10);
    // Pages are still loading: everything has to go through the customer's exit (direct traffic is
@@ -206,7 +214,7 @@ sealed partial class Runtime:IDisposable
    if(!fatal&&flowing){netFailures=Math.Min(netFailures,2);return;}
    if(!fatal&&netFailures<3)return;
    await gate.WaitAsync(stop);
-   try{if(state=="protected"&&configured)Block(e);}
+   try{if(state=="protected"&&configured&&configAt==generation)Block(e);}
    finally{Publish();gate.Release();}
   }
   if(!ok)return;
@@ -214,7 +222,8 @@ sealed partial class Runtime:IDisposable
   try
   {
    using var extra=CancellationTokenSource.CreateLinkedTokenSource(stop);extra.CancelAfter(TimeSpan.FromSeconds(45));
-   await RefreshExitGeo(extra.Token);await SampleLines(extra.Token);await AutoTimezone(extra.Token);
+   await Task.WhenAll(RefreshExitGeo(extra.Token),SampleLines(extra.Token));
+   if(configAt==generation&&configured&&state=="protected")await AutoTimezone(extra.Token);
   }
   catch(Exception e)when(e is not OperationCanceledException||!stop.IsCancellationRequested){Program.Log("exit details",e);}
  }
@@ -223,7 +232,7 @@ sealed partial class Runtime:IDisposable
  DateTimeOffset tzRetryAt=DateTimeOffset.MinValue;
  async Task AutoTimezone(CancellationToken ct)
  {
-  var exit=store.Settings.ExitTimezone;
+  var exit=exitGeoFor==exitIp&&exitGeo is not null?exitGeo.Timezone:"";
   if(exit.Length==0||store.Settings.TimezoneDismissedFor==exit||DateTimeOffset.UtcNow<tzRetryAt||SystemClock.Matches(exit))return;
   try{store.Settings.OriginalTimezone??=TimeZoneInfo.Local.Id;store.Save();await SystemClock.SetTimezone(exit,ct);Record("timezone",exitGeo is not null&&exitGeoFor==exitIp?exitGeo.Label:exit);}
   catch(Exception e)when(e is not OperationCanceledException){tzRetryAt=DateTimeOffset.UtcNow.AddMinutes(10);Program.Log("automatic timezone",e);}
@@ -353,7 +362,7 @@ sealed partial class Runtime:IDisposable
      var at=store.Settings.DirectRules.FindIndex(r=>r.Cidr==Text(request,"cidr"));if(at<0)throw new InvalidOperationException("找不到这条规则");
      var old=store.Settings.DirectRules[at];DirectRule.Parse(old.Cidr,Text(request,"note"),old.Public);var edited=await Remote(request,stop);ReadRules(edited);return new{saved=true};
     case "set_timezone":
-     if(store.Settings.ExitTimezone.Length==0)throw new InvalidOperationException("还没有取得出口所在时区，请在防护建立后再试");
+     if(exitGeoFor!=exitIp||exitGeo is null||exitGeo.Timezone.Length==0)throw new InvalidOperationException("还没有取得当前出口所在时区，请在防护建立后再试");
      store.Settings.OriginalTimezone??=TimeZoneInfo.Local.Id;store.Settings.TimezoneDismissedFor="";store.Save();await SystemClock.SetTimezone(store.Settings.ExitTimezone,stop);return Zone();
     case "restore_timezone":
      if(store.Settings.OriginalTimezone is string original){await SystemClock.SetTimezone(original,stop);store.Settings.OriginalTimezone=null;}
@@ -387,6 +396,7 @@ sealed partial class Runtime:IDisposable
    store.SetProfile(paired.Profile);profile=paired.Profile;cloud?.Dispose();cloud=new PrivateServerClient(profile);nodes=paired.Nodes;
   }
   store.Settings.Enabled=enable;store.Settings.PausedUntil=0;store.Settings.QuitPause=false;store.Save();configured=false;kernel.Stop();retryAt=DateTimeOffset.MinValue;
+  state="provisioning";reason="own_exit";Publish();
  }
  const string ActivationUrl="https://leyra.xin/api/v1/activate";
  async Task<ServerProfile> RedeemCode(object body,CancellationToken stop)
@@ -429,3 +439,4 @@ sealed partial class Runtime:IDisposable
  }
  public void Dispose(){probe.Dispose();kernel.Dispose();cloud?.Dispose();filters.Dispose();gate.Dispose();}
 }
+

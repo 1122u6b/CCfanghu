@@ -82,6 +82,7 @@
   // 个人中心的套餐、到期、流量、本机设备：守护程序给之前也显示「—」。
   P.INFO.plan = '—'; P.INFO.used = '—'; P.INFO.limit = '—'; P.INFO.pct = 0; P.INFO.reset = '—'; P.INFO.device = '—'; P.INFO.bound = '—'; P.INFO.uptime = ''; P.INFO.daily = [];
   S.exp = { date: '—', days: 0 };
+  S.licensePermanent = null;
   S.lan = [];
   S.banner = null;
   S.notice = null;
@@ -233,7 +234,7 @@
   function apply(st) {
     applyLines(st);
     S.rate = st.rate ? { up: st.rate.up_bps, down: st.rate.down_bps } : null;
-    S.speedTesting = !!st.speed_testing;
+    S.speedTesting = !!S.busy.speed || !!st.speed_testing;
     // 最近一次检查（docs/03 §4）：安全检查页一打开就显示。
     var lc = st.last_check;
     // 防护记录（docs/01 §5.3）：时长按现在的时间算，每次刷新状态跟着走。
@@ -416,8 +417,11 @@
     T.core.invoke('relaunch_new_version').catch(function () {});
   }
 
+  var activationEpoch = 0;
   function poll() {
+    var epoch = activationEpoch;
     return call({ type: 'status' }).then(function (r) {
+      if (epoch !== activationEpoch) return;
       // 重新连上（睡眠唤醒、守护程序重启）：马上重拉账户信息，不等 30 秒。
       if (offline) { offline = false; if (!offlineQuiet) P.toast('已连上防护组件'); offlineQuiet = false; loadAccount(); }
       apply(r);
@@ -528,10 +532,13 @@
   // 测速（docs/01 §5.2）：只测当前线路；冷却、正在大量下载时守护程序回一句人话，照说。进度看状态里的 speed_testing。
   A.speedTest = function () {
     if (S.speedTesting || S.busy.speed) return;
-    S.busy.speed = true;
-    call({ type: 'speed_test' }).then(function () {
-      S.busy.speed = false; S.speedTesting = true; P.render();
-    }).catch(function (e) { S.busy.speed = false; P.render(); P.toast(msg(e), 'info'); });
+    S.busy.speed = true; S.speedTesting = true; P.render();
+    call({ type: 'speed_test' }).then(function (r) {
+      S.busy.speed = false; S.speedTesting = false;
+      if (ROUTES[S.route] && r && r.measured) ROUTES[S.route].speed = { mbps: r.down_bps * 8 / 1000000, ago: 0, measured: true };
+      if (r && r.measured) results.S4 = { id: 'S4', verdict: 'info', detail: '最近测速 ' + (r.down_bps * 8 / 1000000).toFixed(2) + ' Mbps' };
+      P.render(); poll();
+    }).catch(function (e) { S.busy.speed = false; S.speedTesting = false; P.render(); P.toast('测速未完成：' + msg(e), 'info'); });
   };
   A.refreshAny = function () { A.go(S.status === 'pm' ? 'overview' : 'routes'); A.routeRefresh(); };
   A.routeBad = A.pmSwitch = function () { act({ type: 'report_bad_line' }, '已换一条线路'); };
@@ -583,6 +590,7 @@
   function loadBrowsers() {
     return call({ type: 'browser_results' }).then(function (r) {
       var done = {};
+      (r.checks || []).forEach(function (it) { results[it.id] = it; });
       (r.items || []).forEach(function (i) { done[i.browser] = i; });
       S.browsers = (r.installed || []).map(function (n) {
         var t = browserTesting[n], d = done[n];
@@ -597,7 +605,7 @@
   A.browserTest = function (i) {
     var b = S.browsers[+i];
     if (!b) return;
-    var at = Math.floor(Date.now() / 1000) - 5, tries = 0;
+      var at = Math.floor(Date.now() / 1000), tries = 0;
     browserTesting[b.n] = at; b.st = 'testing'; P.render();
     T.core.invoke('test_browser', { browser: b.n }).then(function () {
       (function poll() {
@@ -632,7 +640,11 @@
     if (!rec) return;
     results = {};
     (rec.items || []).forEach(function (it) { results[it.id] = it; });
-    return checkHistOrig.apply(this, arguments);
+    var opened = checkHistOrig.apply(this, arguments);
+    // The browser section reports the current exit, including tests completed after
+    // this check. Refresh its IP/WebRTC rows together with the live browser summary.
+    loadBrowsers();
+    return opened;
   };
 
   window.CC_CHECK = function (GROUPS) {
@@ -648,7 +660,7 @@
         if ((IDS[n] === 'L1' || IDS[n] === 'L5') && r.verdict === 'info') return { n: n, s: 'skip', d: esc(r.detail) };
         // 「浏览器保护设置」记成「提示」的是名单以外的浏览器（docs/03 P7）：显示成提示，不给「安装保护设置」。
         var hint = IDS[n] === 'P7' && r.verdict === 'info';
-        var it = { n: n, s: hint ? 'warn' : (STATE[r.verdict] || 'ok'), d: r.verdict === 'pass' ? '正常' : esc(r.detail) };
+        var it = { n: n, s: hint ? 'warn' : (STATE[r.verdict] || 'ok'), d: r.verdict === 'pass' && IDS[n] !== 'L5' ? '正常' : esc(r.detail) };
         if (IDS[n] === 'P7' && !hint && it.s !== 'ok' && canInstallProfile) it.act = ['安装保护设置', 'webrtcInstall'];
         if (IDS[n] === 'E3' && it.s !== 'ok') it.act = ['同步时间', 'syncTime'];
         if (IDS[n] === 'E10' && it.s !== 'ok' && canInstallProfile) it.act = ['打开系统设置', 'bgOpen'];
@@ -799,6 +811,7 @@
     if (!a.activated && account && account.activated && S.screen !== 'activate') return;
     account = a;
     if (!a.activated) return;
+    if (S.screen === 'activate' && !S.busy.act) { S.screen = 'main'; S.page = 'overview'; S.wizard = null; }
     if (a.account_id) P.set({ account: a.account_id });
     if (!S.editingContact) S.contact = a.contact || '';
     // 单独软件 · 自带出口（docs/01 §5.2）：waiting 还没接出口 / connected 在用自己的出口 / upgraded 升级到了全套 /
@@ -806,6 +819,7 @@
     S.ownExit = a.own_exit || '';
     applyExits(a);
     var end = Math.min(a.software_expires_at || Infinity, a.node_expires_at || Infinity);
+    S.licensePermanent = isFinite(end) ? end >= FOREVER : null;
     if (isFinite(end) && end < FOREVER) S.exp = { date: day(end), days: a.days_left == null ? 0 : a.days_left };
     applyInfo(a);
     // 余额（docs/01 §5.7）：这台电脑归到网站账户才有；没有就不显示那张卡。
@@ -991,9 +1005,11 @@
     var slowHint = setTimeout(function () { if (S.busy.act) { S.busy.act = { text: '网络较慢，正在激活，请稍等，不要重复点…' }; P.render(); } }, 10000);
     // 激活成功的提示按套餐写（账户信息拿回来才知道）：全套「线路开通中」，单独软件、免费试用「下一步接入你的出口」。
     var done = function (text) {
+      activationEpoch++;
       clearTimeout(slowHint); S.busy.act = null; S.actErr = {}; S.screen = 'main'; S.page = 'overview'; S.status = 'prep';
       // 激活后直接进概览，不走引导；防护由客户自己点「开启防护」。
       store('cc.wizard.pending', false);
+      P.render();
       poll();
       loadAccount().then(function () {
         var k = suiteKind();
@@ -1334,6 +1350,7 @@
     var paren = [zoneCity(z.system), z.system_offset].filter(Boolean).join('，');
     P.TZN.sys = z.system ? (zoneName(z.system) || z.system) + (paren ? '（' + paren + '）' : '') : '—';
     S.tzChanged = !!z.matches;
+    if (results.C1) results.C1 = { id: 'C1', verdict: !z.exit ? 'skipped' : z.matches ? 'pass' : 'warn', detail: !z.exit ? (z.lookup_loading ? '正在查询出口所在地的时区' : z.lookup_error || '尚未取得出口时区，暂时无法比对') : z.matches ? '电脑时区已和出口所在地一致（' + z.exit + '）' : '电脑时区和出口所在地（' + z.exit + '）不一致' };
     if (S.wizard && S.wizard.tz !== 'kept') S.wizard.tz = z.matches ? 'changed' : S.wizard.tz;
     // 不一致、这个出口没点过「暂不」：弹一次（每个出口这次打开只弹一次）。
     if (z.exit && !z.matches && !z.dismissed && z.can_change && !zonePrompted[z.exit] && !S.dialog && S.screen === 'main') {
@@ -1997,3 +2014,4 @@
   setInterval(function () { if (account && account.activated) { loadZone(); loadRules(); } }, 30000);
   setInterval(function () { if (account && account.activated) loadTickets(); }, 60000);
 })();
+

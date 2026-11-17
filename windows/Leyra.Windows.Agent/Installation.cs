@@ -130,6 +130,8 @@ static class Installation
  // service. Its desktop process may still be open for a moment, so failures are retried next start.
  public static void CleanupOldVersions()
  {
+  // Local repair candidates retain the installed release so support can roll back.
+  if(Program.Version.Contains("-local",StringComparison.Ordinal))return;
   string root;try{root=Path.Combine(InstallRoot(),"versions");}catch(InvalidOperationException){return;}
   if(!Directory.Exists(root))return;
   foreach(var directory in Directory.EnumerateDirectories(root))
@@ -150,3 +152,4 @@ static class Installation
   try{ClearData();}catch(Exception e)when(e is IOException or UnauthorizedAccessException){}
  }
 }
+

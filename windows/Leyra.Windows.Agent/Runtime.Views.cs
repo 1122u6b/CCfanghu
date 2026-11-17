@@ -11,9 +11,9 @@ sealed partial class Runtime
 {
  object Zone()
  {
-  var system=SystemClock.CurrentIana();var exit=store.Settings.ExitTimezone;
+  var system=SystemClock.CurrentIana();var exit=exitGeoFor==exitIp&&exitGeo is not null?exitGeo.Timezone:"";
   var offset=TimeZoneInfo.Local.GetUtcOffset(DateTime.UtcNow);var text="UTC"+(offset<TimeSpan.Zero?"-":"+")+offset.ToString(@"hh\:mm");
-  return new{system,exit,matches=SystemClock.Matches(exit),can_change=exit.Length>0,dismissed=exit.Length>0&&store.Settings.TimezoneDismissedFor==exit,location=exitGeo is not null&&exitGeoFor==exitIp?exitGeo.Label:"",system_offset=text,original=store.Settings.OriginalTimezone is not null};
+  return new{system,exit,matches=exit.Length>0&&SystemClock.Matches(exit),can_change=exit.Length>0,dismissed=exit.Length>0&&store.Settings.TimezoneDismissedFor==exit,location=exitGeo is not null&&exitGeoFor==exitIp?exitGeo.Label:"",system_offset=text,original=store.Settings.OriginalTimezone is not null,lookup_loading=geoLoading,lookup_error=geoError};
  }
  async Task<object> Account(CancellationToken stop)
  {
@@ -73,17 +73,7 @@ sealed partial class Runtime
   }
   else{Add("L2","skipped","防护规则未安装，未做直连实测");Add("L3","skipped","防护规则未安装，未做直连实测");}
   Add("L4",dnsVerified?"pass":"skipped",dnsVerified?"系统解析经自有递归服务器到达权威服务器":"尚未取得私有 DNS 回执");
-  object[] browserItems;lock(browserResults)browserItems=browserResults.Values.ToArray();
-  var tested=browserItems.Select(x=>JsonSerializer.SerializeToElement(x)).ToArray();
-  if(tested.Length==0){Add("L5","skipped","还没有做浏览器实测");Add("L6","skipped","还没有做浏览器实测");}
-  else
-  {
-   var real=tested.Where(x=>Text(x,"exposure")=="real").Select(x=>Text(x,"browser")).ToArray();var lan=tested.Where(x=>Text(x,"exposure")=="lan").Select(x=>Text(x,"browser")).ToArray();
-   // Each browser with the address websites actually get from it, compared with the customer's exit.
-   var perBrowser=string.Join("；",tested.Select(x=>Text(x,"browser")+"："+(Text(x,"seen_ip").Length==0?"没取到出口 IP":Text(x,"seen_ip")+(x.TryGetProperty("match",out var m)&&m.ValueKind==JsonValueKind.True?"（和你的出口 IP 一致）":"（和你的出口 IP 不一致）"))));
-   Add("L5",real.Length==0?"pass":"fail",(real.Length==0?"浏览器出口都是你的出口 IP。":"这些浏览器用了不是出口的 IP："+string.Join("、",real)+"。")+perBrowser);
-   Add("L6",real.Length>0?"fail":lan.Length>0?"warn":"pass",lan.Length>0?"这些浏览器暴露了局域网地址："+string.Join("、",lan):"已测浏览器的 WebRTC 没有绕开独享线路");
-  }
+  items.AddRange(BrowserChecks());
   if(guarded&&HasGlobalIpv6())
   {
    var v6=await DirectTcpReachable(System.Net.Sockets.AddressFamily.InterNetworkV6,System.Net.IPAddress.Parse("2606:4700:4700::1001"),stop);
@@ -92,8 +82,8 @@ sealed partial class Runtime
   else Add("L7",guarded?"pass":"skipped",guarded?"电脑没有公网 IPv6 地址":"防护规则未安装，未做 IPv6 实测");
   if(live){lastBypassScan=DateTimeOffset.MinValue;RefreshBypass();var l8=JsonSerializer.SerializeToElement(bypassCheck??ScanBypass());Add("L8",Text(l8,"verdict"),Text(l8,"detail"));}
   else Add("L8","skipped","防护建立后才检查绕开独享线路的程序");
-  var exitZone=store.Settings.ExitTimezone;var zoneMatches=SystemClock.Matches(exitZone);
-  Add("C1",exitZone.Length==0?"info":zoneMatches?"pass":"warn",exitZone.Length==0?"正在查询出口所在地的时区":zoneMatches?"电脑时区已和出口所在地一致（"+exitZone+"）":"电脑时区和出口所在地（"+exitZone+"）不一致");
+  var exitZone=exitGeoFor==exitIp&&exitGeo is not null?exitGeo.Timezone:"";var zoneMatches=exitZone.Length>0&&SystemClock.Matches(exitZone);
+  Add("C1",exitZone.Length==0?"skipped":zoneMatches?"pass":"warn",exitZone.Length==0?(geoLoading?"正在查询出口所在地的时区":geoError.Length>0?geoError:"尚未取得出口时区，暂时无法比对"):zoneMatches?"电脑时区已和出口所在地一致（"+exitZone+"）":"电脑时区和出口所在地（"+exitZone+"）不一致");
   Add("S1",profile?.Role=="device"?"pass":"fail","独立设备身份；当前不使用商业激活码");
   Add("S2",configAt>DateTimeOffset.UtcNow.AddHours(-24)?"pass":"warn",configAt==DateTimeOffset.MinValue?"本次启动后还没有取得服务器配置":"线路配置取得于 "+configAt.ToLocalTime().ToString("MM-dd HH:mm"));
   var quality=nodes.ValueKind==JsonValueKind.Array?nodes.EnumerateArray().Select(n=>Quality(Text(n,"name"))).Where(q=>q.Success is not null).ToArray():[];
@@ -133,17 +123,27 @@ sealed partial class Runtime
   store.Settings.Enabled=true;store.Settings.PausedUntil=0;store.Settings.QuitPause=false;store.Save();retryAt=DateTimeOffset.MinValue;
   return new{id=result.GetProperty("id").GetInt32(),lines=result.GetProperty("lines").GetInt32(),skipped=result.GetProperty("skipped").EnumerateArray().Select(x=>x.GetString()??"").ToArray()};
  }
+ int speedActive;
  async Task<object> MeasureSpeed(CancellationToken stop)
  {
   if(state!="protected")throw new InvalidOperationException("请先建立已验证的线路");
-  using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(20));
+  if(Interlocked.CompareExchange(ref speedActive,1,0)!=0)throw new InvalidOperationException("测速正在进行，请稍等");
+  var generation=configAt;var line=selected;
+  try
+  {
+  using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(28));
   using var handler=new HttpClientHandler{UseProxy=true,Proxy=new WebProxy("http://127.0.0.1:17890"),AllowAutoRedirect=false};using var http=new HttpClient(handler);
-  var started=Stopwatch.StartNew();using var response=await http.GetAsync("https://speed.cloudflare.com/__down?bytes=1048576",HttpCompletionOption.ResponseHeadersRead,deadline.Token);response.EnsureSuccessStatusCode();
-  using var input=await response.Content.ReadAsStreamAsync(deadline.Token);var bytes=new byte[32768];long count=0;int n;
-  while((n=await input.ReadAsync(bytes,deadline.Token))>0){count+=n;if(count>1048576)throw new InvalidDataException("测速响应超过上限");}
-  if(count==0)throw new InvalidDataException("测速没有收到数据");
-  lastSpeed=((long)(count/Math.Max(.001,started.Elapsed.TotalSeconds)),DateTimeOffset.UtcNow);
-  return new{down_bps=(long)(count/Math.Max(.001,started.Elapsed.TotalSeconds)),measured=true,ago_secs=0};
+  using var headers=CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);headers.CancelAfter(TimeSpan.FromSeconds(17));
+  using var response=await http.GetAsync("https://speed.cloudflare.com/__down?bytes=1048576",HttpCompletionOption.ResponseHeadersRead,headers.Token);response.EnsureSuccessStatusCode();
+  headers.CancelAfter(Timeout.InfiniteTimeSpan);
+  using var input=await response.Content.ReadAsStreamAsync(deadline.Token);
+  var sample=await DownloadSample.MeasureAsync(input,512*1024,TimeSpan.FromSeconds(8),deadline.Token);
+  if(state!="protected"||!configured||configAt!=generation||selected!=line)throw new InvalidOperationException("测速期间线路已变化，请在连接稳定后重试");
+  lastSpeed=(sample.BytesPerSecond,DateTimeOffset.UtcNow);
+  return new{down_bps=sample.BytesPerSecond,measured=true,ago_secs=0,sample_bytes=sample.Bytes,sample_seconds=sample.Seconds};
+  }
+  catch(OperationCanceledException)when(!stop.IsCancellationRequested){throw new InvalidOperationException("测速连接超时，请检查当前出口后重试");}
+  finally{Interlocked.Exchange(ref speedActive,0);Publish();}
  }
  string? aiSession;int? aiIdentity;
  async Task<object> ShellAction(JsonElement request,CancellationToken stop)
@@ -190,3 +190,4 @@ sealed partial class Runtime
   throw new InvalidOperationException("此系统操作尚未接入："+command);
  }
 }
+

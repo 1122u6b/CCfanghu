@@ -99,11 +99,16 @@ sealed class BrowserProbe(Func<string,string?,IReadOnlyList<(string Ip,string Ty
     var el=document.getElementById('s');
     var ip=v.seen_ip?'<div style="font-size:22px;margin:12px 0"><b>浏览器出口 IP：'+v.seen_ip+'</b></div>':'<div>没能取得浏览器的出口 IP。</div>';
     var cmp=!v.seen_ip?'':v.match?'<div class="ok"><b>✓ 和你在 Leyra 里的出口 IP 一致</b>，网站看到的就是这个 IP。</div>':'<div style="color:#c5221f"><b>✗ 和你的出口 IP（'+(v.exit_ip||'未知')+'）不一致</b>，请回到 Leyra 查看处理办法。</div>';
-    var rtc=v.exposure==='real'?'<div style="color:#c5221f">WebRTC 暴露了不是出口的地址。</div>':v.exposure==='lan'?'<div style="color:#b06000">WebRTC 暴露了局域网地址。</div>':'<div class="ok">WebRTC 没有暴露其他地址。</div>';
-    el.innerHTML='<b class="ok">检查完成</b>，结果已经交回 Leyra。'+ip+cmp+rtc+'<p class="muted">这个页面可以关掉了。</p>';})
+    var rtc=v.exposure==='real'?'<div style="color:#c5221f">WebRTC 暴露了不是出口的地址。</div>':v.exposure==='lan'?'<div style="color:#b06000">WebRTC 暴露了局域网地址。</div>':v.exposure==='unknown'?'<div style="color:#b06000">未取得完整出口 IP，暂时无法完成比对，请回 Leyra 再试。</div>':'<div class="ok">WebRTC 没有暴露其他地址。</div>';
+    el.innerHTML=(v.exposure==='unknown'?'<b style="color:#b06000">检查结果不完整</b>':'<b class="ok">检查完成</b>')+'，结果已经交回 Leyra。'+ip+cmp+rtc+'<p class="muted">这个页面可以关掉了。</p>';})
    .catch(function(){document.getElementById('s').textContent='没能把结果交回 Leyra，请回到 Leyra 再查一次。';});
  }
- var ipDone=fetch('https://api64.ipify.org?format=json').then(function(r){return r.json();}).then(function(j){seen=j.ip;}).catch(function(){});
+ function getIp(url){
+  var controller=new AbortController(),timer=setTimeout(function(){controller.abort();},20000);
+  return fetch(url,{signal:controller.signal,cache:'no-store',credentials:'omit'}).then(function(r){if(!r.ok)throw Error('IP check failed');return r.json();}).then(function(j){if(typeof j.ip!=='string'||!/^[0-9a-fA-F:.]+$/.test(j.ip))throw Error('Invalid IP');return j.ip;}).finally(function(){clearTimeout(timer);});
+ }
+ // IPv4-only and dual-stack endpoints race: a broken IPv6 path must not hide a valid IPv4 result.
+ var ipDone=Promise.any([getIp('https://api.ipify.org?format=json'),getIp('https://api64.ipify.org?format=json')]).then(function(ip){seen=ip;}).catch(function(){});
  var iceDone=new Promise(function(resolve){
   try{
    var pc=new RTCPeerConnection({iceServers:[{urls:['stun:stun.l.google.com:19302','stun:stun.cloudflare.com:3478']}]});
@@ -117,9 +122,10 @@ sealed class BrowserProbe(Func<string,string?,IReadOnlyList<(string Ip,string Ty
   }catch(x){resolve();}
   setTimeout(resolve,8000);
  });
- Promise.all([ipDone,iceDone]).then(send);setTimeout(send,12000);
+ Promise.all([ipDone,iceDone]).then(send);setTimeout(send,22000);
 })();
 </script>
 """.Replace("__NONCE__",JsonSerializer.Serialize(nonce)));
  public void Dispose(){stop?.Cancel();listener?.Stop();stop?.Dispose();}
 }
+

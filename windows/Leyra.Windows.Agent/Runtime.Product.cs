@@ -21,8 +21,29 @@ sealed partial class Runtime
 {
  // ---------- IP 归属地：经已验证的本机代理查询，看到的是出口本身 ----------
  readonly Dictionary<string,(GeoInfo Info,DateTimeOffset At)> geoCache=new();
- GeoInfo? exitGeo;string exitGeoFor="";
+ GeoInfo? exitGeo;string exitGeoFor="",geoError="";bool geoLoading;
  static HttpClient ProxiedClient(TimeSpan timeout)=>new(new HttpClientHandler{UseProxy=true,Proxy=new WebProxy("http://127.0.0.1:17890"),AllowAutoRedirect=false}){Timeout=timeout};
+ async Task<string> ObservePublicExit(CancellationToken stop)
+ {
+  // No device token is sent to public services. TLS uses the ordinary trusted certificate chain.
+  // An explicit proxy is mandatory here; this client has no direct-connection fallback.
+  using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(8));
+  using var http=ProxiedClient(TimeSpan.FromSeconds(8));http.MaxResponseContentBufferSize=4096;
+  async Task<string> Query(string host)
+  {
+   using var doc=JsonDocument.Parse(await http.GetStringAsync("https://"+host+"?format=json",deadline.Token));
+   var ip=Text(doc.RootElement,"ip");if(!AddressPolicy.IsLiteral(ip)||!AddressPolicy.IsPublic(ip))throw new InvalidDataException("出口核验返回无效地址");return ip;
+  }
+  var pending=new List<Task<string>>{Query("api.ipify.org"),Query("api64.ipify.org")};
+  Exception? last=null;
+  while(pending.Count>0)
+  {
+   var completed=await Task.WhenAny(pending);pending.Remove(completed);
+   try{var ip=await completed;deadline.Cancel();foreach(var other in pending)_=other.ContinueWith(t=>{_ = t.Exception;},TaskContinuationOptions.OnlyOnFaulted);return ip;}
+   catch(Exception error)when(!stop.IsCancellationRequested){last=error;}
+  }
+  stop.ThrowIfCancellationRequested();throw new HttpRequestException("独立出口核验未成功",last);
+ }
  async Task<GeoInfo> LookupGeo(string ip,CancellationToken stop)
  {
   if(!AddressPolicy.IsLiteral(ip))throw new InvalidDataException("请输入明确的 IP 地址");
@@ -52,7 +73,7 @@ sealed partial class Runtime
    info=new(ip,Text(r,"country_code"),Text(r,"region"),Text(r,"city"),tz,org);
   }
   if(info.Country.Length is 0 or >3)throw new InvalidDataException("归属地数据无效");
-  lock(geoCache){geoCache[ip]=(info,DateTimeOffset.UtcNow);if(geoCache.Count>256)geoCache.Remove(geoCache.MinBy(x=>x.Value.At).Key);}
+  if(info.Timezone.Length>0)lock(geoCache){geoCache[ip]=(info,DateTimeOffset.UtcNow);if(geoCache.Count>256)geoCache.Remove(geoCache.MinBy(x=>x.Value.At).Key);}
   return info;
  }
  async Task<object> Geo(JsonElement request,CancellationToken stop)
@@ -62,15 +83,19 @@ sealed partial class Runtime
  }
  async Task RefreshExitGeo(CancellationToken stop)
  {
-  if(exitIp.Length==0 || exitGeoFor==exitIp)return;
+  if(exitIp.Length==0 || exitGeoFor==exitIp&&exitGeo?.Timezone.Length>0)return;
+  var ip=exitIp;geoLoading=true;
   try
   {
    using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(20));
-   var info=await LookupGeo(exitIp,deadline.Token);exitGeo=info;exitGeoFor=exitIp;
+   var info=await LookupGeo(ip,deadline.Token);
+   if(exitIp!=ip||!configured||state!="protected")return;
+   exitGeo=info;exitGeoFor=ip;geoError=info.Timezone.Length==0?"归属地服务未返回出口时区":"";
    if(info.Timezone.Length>0&&TimeZoneInfo.TryConvertIanaIdToWindowsId(info.Timezone,out _)&&store.Settings.ExitTimezone!=info.Timezone)
    {store.Settings.ExitTimezone=info.Timezone;store.Save();Record("exit",info.Label);}
   }
-  catch(Exception e)when(e is not OperationCanceledException || !stop.IsCancellationRequested){Program.Log("exit location",e);/* 下次出口检查时重试 */}
+  catch(Exception e)when(e is not OperationCanceledException || !stop.IsCancellationRequested){geoError="出口时区查询失败，将自动重试";Program.Log("exit location",e);}
+  finally{geoLoading=false;}
  }
 
  // ---------- 线路质量：内核对每条线路的实际延迟测试 ----------
@@ -238,12 +263,21 @@ sealed partial class Runtime
   return null;
  }
  string[] InstalledBrowsers()=>Browsers.Where(b=>BrowserPath(b.Exe) is not null).Select(b=>b.Name).ToArray();
- object BrowserResults(){lock(browserResults)return new{installed=InstalledBrowsers(),items=browserResults.Values.ToArray()};}
+ object BrowserResults(){lock(browserResults)return new{installed=InstalledBrowsers(),items=browserResults.Values.Where(x=>Text(Json(x),"exit_ip")==exitIp).ToArray(),checks=BrowserChecks()};}
+ object[] BrowserChecks()
+ {
+  JsonElement[] tested;lock(browserResults)tested=browserResults.Values.Select(Json).Where(x=>Text(x,"exit_ip")==exitIp).ToArray();
+  if(tested.Length==0)return [new{id="L5",verdict="skipped",detail="还没有做当前出口的浏览器实测"},new{id="L6",verdict="skipped",detail="还没有做当前出口的浏览器实测"}];
+  var real=tested.Any(x=>Text(x,"exposure")=="real");var lan=tested.Any(x=>Text(x,"exposure")=="lan");var unknown=tested.Any(x=>Text(x,"seen_ip").Length==0||Text(x,"exposure")=="unknown");
+  var detail=string.Join("；",tested.Select(x=>Text(x,"browser")+"："+Text(x,"detail")));
+  return [new{id="L5",verdict=real?"fail":unknown?"skipped":"pass",detail},new{id="L6",verdict=real?"fail":lan?"warn":unknown?"skipped":"pass",detail}];
+ }
  object StartBrowserTest(string browser)
  {
   var entry=Browsers.FirstOrDefault(b=>b.Name==browser);var path=entry.Exe is null?null:BrowserPath(entry.Exe);
   if(path is null)throw new InvalidOperationException("没有找到这个浏览器");
   if(state!="protected")throw new InvalidOperationException("请先恢复防护再检查浏览器");
+  lock(browserResults)browserResults.Remove(browser);
   return new{launch=path,url=probe.Begin(browser)};
  }
  object BrowserReport(string browser,string? seenIp,IReadOnlyList<(string Ip,string Type)> candidates)
@@ -254,6 +288,7 @@ sealed partial class Runtime
   if(leaked.Count>0){exposure="real";detail.Add("看到了非出口的公网地址："+string.Join("、",leaked.Distinct()));}
   else if(candidates.Any(c=>AddressPolicy.IsLiteral(c.Ip)&&!AddressPolicy.IsPublic(c.Ip)&&!IPAddress.IsLoopback(IPAddress.Parse(c.Ip)))){exposure="lan";detail.Add("WebRTC 暴露了局域网地址");}
   else detail.Add("WebRTC 没有暴露其他地址");
+  if(exposure=="clean"&&(seenIp is null||exitIp.Length==0))exposure="unknown";
   // What the customer wants to see: the address websites get from this browser, and whether it is their exit.
   var match=seenIp is not null&&exitIp.Length>0&&seenIp==exitIp;
   var ipLine=seenIp is null?"没能取得浏览器的出口 IP":"浏览器出口 IP "+seenIp+(exitIp.Length==0?"":match?"，和你的出口 IP 一致":"，和你的出口 IP "+exitIp+" 不一致");
@@ -364,3 +399,4 @@ sealed partial class Runtime
  }
  static bool ServiceAutoStart()=>Registry.GetValue(@"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\"+Installation.ServiceName,"Start",null) is int start&&start==2;
 }
+
