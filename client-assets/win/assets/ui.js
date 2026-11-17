@@ -444,7 +444,7 @@
     } else if (st === 'paused' && S.pause && S.pause.kind === 'off') {
       g = H.statusGraphic('warn', f); title = '防护未开启';
       body = '<p>点「开启防护」后，所有流量走独享线路，网站看不到你的真实 IP。开启前网站能看到你的真实 IP。</p>';
-      acts = S.busy.resume ? '' : btn('primary', I('shield', 14) + '开启防护', 'resume') + btn('secondary', '导入我的 IP', 'go:routes');
+      acts = S.busy.resume ? '' : btn('primary', I('shield', 14) + '开启防护', 'resume');
     } else if (st === 'paused') {
       var P = S.pause;
       g = H.statusGraphic('warn', f, { left: P.left, total: P.total, center: '<span class="hx-num-lg" style="color:var(--text);font-size:28px;line-height:36px" data-mmss>' + H.mmss(P.left) + '</span>' });
@@ -656,7 +656,7 @@
   function noExitsSec(b) {
     return '<div class="p-sec"><div class="p-cardhead"><h2>出口</h2><span class="p-sub">出口决定网站看到的 IP</span></div>' +
       '<div class="p-exits"><button class="p-exit add" data-act="exitAdd"' + (b ? ' disabled' : '') + '><b>' + I('plus', 16) + '导入我的 IP</b><small>粘贴 SOCKS5、HTTP 代理，或 ss、vmess、vless、trojan 链接、订阅地址</small></button></div>' +
-      '<p class="p-sub p-exitnote">还没导入时，使用服务器默认出口。导入后自动切到你的 IP。</p></div>';
+      '<p class="p-sub p-exitnote">导入后自动建立线路并开启防护，网站看到的就是你的 IP。</p></div>';
   }
   function routesPage() {
     var b = !!S.busy.route, sameDesc = ROUTES.every(function (r) { return r.desc === ROUTES[0].desc; }), ex = S.exits ? exitsShown()[S.exit] : null;

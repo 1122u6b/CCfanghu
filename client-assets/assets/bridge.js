@@ -992,7 +992,7 @@
       poll();
       loadAccount().then(function () {
         var k = suiteKind();
-        P.toast(text || '已激活，点「开启防护」开始保护');
+        P.toast(text || (k === 'soft' || k === 'trial' ? '已激活，下一步接入你的出口' : '已激活，线路开通中'));
       });
     };
     var fail = function (err) {

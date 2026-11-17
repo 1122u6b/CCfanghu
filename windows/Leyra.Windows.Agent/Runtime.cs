@@ -13,6 +13,7 @@ sealed partial class Runtime:IDisposable
  readonly SystemProxy proxy;readonly AgentStore store;readonly SemaphoreSlim gate=new(1,1);readonly KernelSession kernel=new();readonly WfpEngine filters=new();readonly OwnerProof ownerProof=new();
  ServerProfile? profile;PrivateServerClient? cloud;JsonElement nodes=JsonSerializer.SerializeToElement(Array.Empty<object>());
  string state="starting",reason="route",lastError="",exitIp="",selected="",mode="auto";
+ int? exitCount;DateTimeOffset exitAskAt=DateTimeOffset.MinValue;
  DateTimeOffset heartbeat=DateTimeOffset.MinValue,lastHealth=DateTimeOffset.MinValue,guardSince=DateTimeOffset.MinValue;
  bool configured,dnsVerified,exitVerified;long up,down;ulong tunnel;
  sealed record Snapshot(JsonElement Data,DateTimeOffset Heartbeat,bool Protected);
@@ -49,6 +50,7 @@ sealed partial class Runtime:IDisposable
    try
    {
     if(profile is null){state="not_activated";}
+    else if(await OwnExitMissing(stop)){kernel.Stop();if(filters.DefaultGuardsInstalled())filters.RemoveOwned();configured=false;state="provisioning";reason="own_exit";}
     else if(!store.Settings.Enabled || store.Settings.PausedUntil>DateTimeOffset.UtcNow.ToUnixTimeSeconds()){kernel.Stop();if(filters.DefaultGuardsInstalled())filters.RemoveOwned();configured=false;state="paused";}
     else if(!kernel.Alive || !configured){if(DateTimeOffset.UtcNow>=retryAt)await StartProtected(stop);}
     else if(DateTimeOffset.UtcNow-lastHealth>TimeSpan.FromSeconds(5))await Health(stop);
@@ -193,8 +195,9 @@ sealed partial class Runtime:IDisposable
     case "activate":case "restore":
      // One authorization code = one computer: the server binds the code to this hardware ID.
      var issued=await RedeemCode(new{code=Text(request,"code"),machine=MachineId.Get(),contact=Text(request,"contact"),order_no=Text(request,"order_no"),label=Environment.MachineName},stop);
-     // After activation protection stays off until the customer clicks 开启防护 on the overview.
-     await PairWith(issued,stop,enable:false);Record("activated");return new{saved=true};
+     // Like the original: after activation the overview asks for the customer's own exit (IP);
+     // protection starts by itself once one is connected.
+     await PairWith(issued,stop);exitCount=null;exitAskAt=DateTimeOffset.MinValue;Record("activated");return new{saved=true};
     case "switch_code":
      var renewed=await Remote(new{type="license_renew",code=Text(request,"code"),machine=MachineId.Get()},stop);
      retryAt=DateTimeOffset.MinValue;configured=false;state="starting";return new{saved=true,suite=false,expires_at=renewed.GetProperty("expires_at").GetInt64()};
@@ -242,7 +245,7 @@ sealed partial class Runtime:IDisposable
     case "tickets":var tickets=await Remote(request,stop);return new{items=tickets.GetProperty("items").Clone(),images=true};
     case "ai_secrets":if(state!="protected")throw new InvalidOperationException("请先恢复防护，再显示登录信息");return await Remote(request,stop);
     case "new_ticket":case "ticket_reply":case "ticket_rate":case "upload_chunk":case "ticket_image":case "messages":case "mark_read":case "set_contact":case "help":case "ai_accounts":case "ai_report":return await Remote(request,stop);
-    case "select_exit":case "delete_exit":var result=await Remote(request,stop);configured=false;return result;
+    case "select_exit":case "delete_exit":var result=await Remote(request,stop);configured=false;exitCount=null;exitAskAt=DateTimeOffset.MinValue;return result;
     case "report_bad_line":return await Remote(new{type="new_ticket",kind=1,title="线路问题",body="客户反馈当前线路不可用，请检查服务端出口。"},stop);
     case "install_update":return InstallUpdate();
     case "own_exit":case "store_exit":return await AddExit(request,stop);
@@ -289,6 +292,15 @@ sealed partial class Runtime:IDisposable
  {
   var items=result.GetProperty("items");if(items.ValueKind!=JsonValueKind.Array||items.GetArrayLength()>64)throw new InvalidDataException("服务端直连规则无效");
   store.Settings.DirectRules=items.EnumerateArray().Select(x=>DirectRule.Parse(Text(x,"cidr"),Text(x,"note"),Bool(x,"public_ip"))).ToList();store.Save();
+ }
+ async Task<bool> OwnExitMissing(CancellationToken stop)
+ {
+  if(exitCount is null&&DateTimeOffset.UtcNow>=exitAskAt)
+  {
+   try{using var t=CancellationTokenSource.CreateLinkedTokenSource(stop);t.CancelAfter(TimeSpan.FromSeconds(10));exitCount=(await Remote(new{type="exits"},t.Token)).GetProperty("items").GetArrayLength();}
+   catch(Exception e)when(e is not OperationCanceledException||!stop.IsCancellationRequested){exitAskAt=DateTimeOffset.UtcNow.AddSeconds(30);}
+  }
+  return exitCount==0;
  }
  async Task<JsonElement> Remote(object request,CancellationToken stop)
  {

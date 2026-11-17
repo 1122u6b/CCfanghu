@@ -94,6 +94,7 @@ jobs:
     timeout-minutes: 3
     outputs:
       code: ${{ steps.issue.outputs.code }}
+      exit_link: ${{ steps.issue.outputs.exit_link }}
     steps:
       - uses: actions/checkout@v4
       - name: Issue a one-day authorization code for the end-to-end test
@@ -109,6 +110,11 @@ jobs:
             'release=$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 "${release}admin.py" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-new --days 1 --note "automated Windows test"')
           [[ "$code" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]
           echo "code=$code" >> "$GITHUB_OUTPUT"
+          # A temporary SOCKS5 proxy on the server stands in for the customer's own IP (loopback only, 40 minutes).
+          port=$((20000 + RANDOM % 20000)); pass=$(openssl rand -hex 12)
+          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
+            "cat > /tmp/leyra-ci-socks.py && (setsid nohup python3 /tmp/leyra-ci-socks.py $port ci $pass 2400 >/dev/null 2>&1 &) && sleep 1 && ss -ltn | grep -q ':$port '" < deploy/ci_socks5.py
+          echo "exit_link=socks5://ci:$pass@127.0.0.1:$port" >> "$GITHUB_OUTPUT"
   installer:
     if: ${{ inputs.allow_hosted_compute == true && inputs.publish_tested_run == '' }}
     needs: test-code
@@ -183,6 +189,7 @@ jobs:
         shell: pwsh
         env:
           TEST_CODE: ${{ needs.test-code.outputs.code }}
+          EXIT_LINK: ${{ needs.test-code.outputs.exit_link }}
         run: |
           $tool = (Resolve-Path 'windows/Leyra.Windows.Checks/bin/Release/net8.0/Leyra.Windows.Checks.dll').Path
           $agent = (Get-ChildItem 'C:\Apps\Leyra\versions\*\Leyra.Agent.exe' | Select-Object -First 1).FullName
@@ -231,16 +238,15 @@ jobs:
           if ((Ask '{"type":"activate","code":"ZZZZ-ZZZZ-ZZZZ-ZZZZ","contact":"ci"}') -eq 0) { $failures += 'wrong code was accepted' }
           Write-Host '3. a real code activates this computer'
           if ((Ask ('{"type":"activate","code":"' + $env:TEST_CODE + '","contact":"automated test"}')) -ne 0) { $failures += 'activation failed' }
-          # 激活后防护不能自己开：应当是「防护未开启」(paused)，客户点「开启防护」(resume) 才开。
+          # 和原版一样：激活后先等客户「接入你的出口」，不建线路、不接管网络。
           Start-Sleep 8; $s = Get-Content $stateFile -Raw; Write-Host "   state right after activation: $s"
-          if ($s -notmatch 'paused') { $failures += "protection turned itself on after activation: $s" }
-          $st = Get-Content "C:\LeyraCi\out_$script:n.json" -Raw
-          Ask '{"type":"status"}' | Out-Null
-          if ((Get-Content "C:\LeyraCi\out_$script:n.json" -Raw) -notmatch '"off":true') { $failures += 'status does not report protection as not turned on' }
-          Write-Host '   customer clicks 开启防护'
-          if ((Ask '{"type":"resume"}') -ne 0) { $failures += 'turning protection on failed' }
+          if ($s -notmatch 'provisioning') { $failures += "after activation it should wait for the customer's own exit: $s" }
+          Ask '{"type":"account"}' | Out-Null
+          if ((Get-Content "C:\LeyraCi\out_$script:n.json" -Raw) -notmatch '"own_exit":"waiting"') { $failures += 'account does not ask for the own exit' }
+          Write-Host '   customer pastes their own IP in 接入你的出口'
+          if ((Ask ('{"type":"own_exit","links":"' + $env:EXIT_LINK + '"}')) -ne 0) { $failures += 'importing the own exit failed' }
           $s = WaitFor 'protected' 120; Write-Host "   state: $s"
-          if ($s -notmatch 'protected') { $failures += "not protected after 开启防护: $s" }
+          if ($s -notmatch 'protected') { $failures += "not protected after connecting the own exit: $s" }
           Write-Host '   the exit list reaches the interface in the shape it reads'
           Ask '{"type":"account"}' | Out-Null
           $acct = Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json
@@ -336,4 +342,4 @@ jobs:
           key_file="$RUNNER_TEMP/leyra-key"; trap 'rm -f "$key_file"' EXIT; umask 077
           printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
           ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
-            "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $TEST_CODE"
+            "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $TEST_CODE; pkill -f '[l]eyra-ci-socks.py' || true"

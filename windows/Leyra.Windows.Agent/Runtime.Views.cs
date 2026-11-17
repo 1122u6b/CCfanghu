@@ -28,7 +28,7 @@ sealed partial class Runtime
   int? selectedExit=exits.GetProperty("selected").ValueKind==JsonValueKind.Number?exits.GetProperty("selected").GetInt32():null;
   // Same shape the interface reads: {list:[{id,name,own,sub,lines,current}],can_add,max_own}.
   var exitItems=exits.GetProperty("items").EnumerateArray().Select(x=>new{id=x.GetProperty("id").GetInt32(),name=Text(x,"name"),own=true,sub=false,lines=x.TryGetProperty("lines",out var n)&&n.TryGetInt32(out var c)?c:1,current=x.GetProperty("id").GetInt32()==selectedExit,location="",exit_ip=""}).ToArray();
-  return new{activated=true,account_id=account.GetProperty("id").GetInt32(),contact=Text(account,"contact"),plan="自有服务器",device=Environment.MachineName+" · Windows",bound_at=account.GetProperty("created_at").GetInt64(),software_expires_at=expires??253402300799L,node_expires_at=expires??253402300799L,days_left=daysLeft,own_exit=expires is null?"connected":"",suite=new{kind=Text(account,"license_kind")=="trial"?"trial":expires is null?"soft":"old"},exits=new{list=exitItems,can_add=true,max_own=5},exits_mode="soft",current_exit=selectedExit,can_add_exit=true,channels,announcements=Array.Empty<object>(),messages_unread=messages.GetProperty("unread").GetInt32(),messages_latest=messages.GetProperty("items").GetArrayLength()==0?0:messages.GetProperty("items")[0].GetProperty("id").GetInt32(),ai_accounts=ai.GetProperty("items").GetArrayLength()>0,ai_version=aiversion};
+  return new{activated=true,account_id=account.GetProperty("id").GetInt32(),contact=Text(account,"contact"),plan="自有服务器",device=Environment.MachineName+" · Windows",bound_at=account.GetProperty("created_at").GetInt64(),software_expires_at=expires??253402300799L,node_expires_at=expires??253402300799L,days_left=daysLeft,own_exit=exitItems.Length==0?"waiting":"connected",suite=new{kind=Text(account,"license_kind")=="trial"?"trial":"soft"},exits=new{list=exitItems,can_add=true,max_own=5},exits_mode="soft",current_exit=selectedExit,can_add_exit=true,channels,announcements=Array.Empty<object>(),messages_unread=messages.GetProperty("unread").GetInt32(),messages_latest=messages.GetProperty("items").GetArrayLength()==0?0:messages.GetProperty("items")[0].GetProperty("id").GetInt32(),ai_accounts=ai.GetProperty("items").GetArrayLength()>0,ai_version=aiversion};
  }
  async Task<object> Doctor(bool deep,CancellationToken stop)
  {
@@ -126,7 +126,8 @@ sealed partial class Runtime
   // https subscriptions) because it is the side that dials them.
   int? target=request.TryGetProperty("exit_id",out var existing)&&existing.TryGetInt32(out var t)?t:null;
   var result=await Remote(new{type="import_exit_links",links,name=Text(request,"name","我的出口"),exit_id=target},stop);
-  configured=false;Record("exit",Text(request,"name","我的出口"));
+  configured=false;exitCount=null;exitAskAt=DateTimeOffset.MinValue;Record("exit",Text(request,"name","我的出口"));
+  store.Settings.Enabled=true;store.Settings.PausedUntil=0;store.Settings.QuitPause=false;store.Save();retryAt=DateTimeOffset.MinValue;
   return new{id=result.GetProperty("id").GetInt32(),lines=result.GetProperty("lines").GetInt32(),skipped=result.GetProperty("skipped").EnumerateArray().Select(x=>x.GetString()??"").ToArray()};
  }
  async Task<object> MeasureSpeed(CancellationToken stop)
