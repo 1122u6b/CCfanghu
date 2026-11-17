@@ -136,8 +136,9 @@ try {
   // 4. Speed test on the 线路 page: immediate feedback, then a figure (or a stated reason).
   await click('go:routes'); await page.waitForTimeout(1500);
   await click('speedTest');
-  await page.waitForTimeout(1500);
-  const testing = /正在测线路/.test(await text());
+  // A fast line finishes in about a second, so look for the running message right away.
+  let testing = false;
+  for (let i = 0; i < 20 && !testing; i++) { testing = /正在测线路/.test(await text()); if (!testing) await page.waitForTimeout(150); }
   step('speed test shows it is running right after the click', testing);
   // The measured speed appears in the line table; a failure says 测速未完成 with the reason.
   let routes = '', failedMsg = '';
