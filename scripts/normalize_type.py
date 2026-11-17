@@ -2,7 +2,8 @@
 
 Scale (size / line height):  12/18 caption · 13/20 small · 14/22 body · 16/24 heading ·
                               20/28 title · 24/32 figure · 28/36 display
-Weights: 400 regular, 500 medium, 600 semibold. Semibold only from 14 px up; smaller text uses 500.
+Weights (MiSans Regular / Medium / Semibold): 600 only for titles and big figures (16 px and up, plus the
+wordmark); every other emphasis (buttons, list names, bold words, current tab) is 500; body text 400.
 Run again after edits: it is idempotent and prints what it changed.
 """
 import re, sys
@@ -41,9 +42,24 @@ def fix_block(block):
     return block
 
 
+KEEP_SEMIBOLD = ('.p-wordmark',)
+
+
+def fix_weight(selector, block):
+    """Semibold is kept for 16 px and larger (titles, figures); everything else emphasised becomes medium."""
+    if '@font-face' in selector or not re.search(r'font-weight:\s*(600|700|bold)\b', block):
+        return block
+    m = re.search(r'font-size:\s*([0-9.]+)px', block)
+    if (m and float(m.group(1)) >= 16) or selector.strip().endswith(KEEP_SEMIBOLD):
+        return re.sub(r'font-weight:\s*(700|bold)\b', 'font-weight: 600', block)
+    changes['weight'] += 1
+    return re.sub(r'font-weight:\s*(600|700|bold)\b', 'font-weight: 500', block)
+
+
 def css(path):
     text = path.read_text(encoding='utf-8')
     out = re.sub(r'\{[^{}]*\}', lambda m: fix_block(m.group(0)), text)
+    out = re.sub(r'([^{}]*)(\{[^{}]*\})', lambda m: m.group(1) + fix_weight(m.group(1), m.group(2)), out)
     path.write_text(out, encoding='utf-8')
 
 
@@ -57,4 +73,4 @@ def js(path):
 css(ROOT / 'client-assets/win/assets/ui.css')
 css(ROOT / 'client-assets/assets/app.css')
 js(ROOT / 'client-assets/win/assets/ui.js')
-print('font sizes changed %(size)d, line heights changed %(line)d, small bold text made medium %(weight)d' % changes)
+print('font sizes changed %(size)d, line heights changed %(line)d, emphasis made medium %(weight)d' % changes)
