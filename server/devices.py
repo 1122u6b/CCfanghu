@@ -236,7 +236,7 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,tar
             return result
         # Help and signed-off releases are published once by the owner and shared read-only.
         if kind in ('help', 'update_manifest', 'update_chunk'):
-            return owner.rpc({k: v for k, v in req.items() if k in ('type', 'version', 'offset')})
+            return owner.rpc({k: v for k, v in req.items() if k in ('type', 'version', 'offset', 'platform')})
         if kind == 'dns_config':
             conf = owner.rpc(req)
             # Never distribute the existing shared DoH secret to customer devices.

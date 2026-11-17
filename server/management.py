@@ -98,14 +98,23 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
             if not row:return None
             value=json.loads(row[0])
             return value if isinstance(value,list) else [value]
-    def updates_dir(self):
-        d=self.root/'updates';d.mkdir(mode=0o700,exist_ok=True);return d
-    def update_manifest(self):
-        path=self.updates_dir()/'manifest.json'
+    # Windows packages live in updates/ (as before); the Mac package in updates/mac/. No platform = Windows,
+    # so Windows clients that never send one keep working unchanged.
+    @staticmethod
+    def update_platform(value):
+        if value in (None,'','windows'):return None
+        if value=='mac':return 'mac'
+        raise ManagementError('unknown platform')
+    def updates_dir(self,platform=None):
+        d=self.root/'updates';d.mkdir(mode=0o700,exist_ok=True)
+        if platform=='mac':d=d/'mac';d.mkdir(mode=0o700,exist_ok=True)
+        return d
+    def update_manifest(self,platform=None):
+        path=self.updates_dir(platform)/'manifest.json'
         if not path.exists():return None
         return json.loads(path.read_text())
     def update_rpc(self,kind,req):
-        d=self.updates_dir();staging=d/'staging.bin';meta_path=d/'staging.json';release=d/'release.bin'
+        platform=self.update_platform(req.get('platform'));d=self.updates_dir(platform);staging=d/'staging.bin';meta_path=d/'staging.json';release=d/'release.bin'
         if kind=='admin_update_begin':
             version=text(req.get('version'),40,True)
             if not re.fullmatch(VERSION_PATTERN,version):raise ManagementError('invalid version')
@@ -136,10 +145,10 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
                 with contextlib.suppress(FileNotFoundError):p.unlink()
             return {'saved':True}
         if kind=='update_manifest':
-            meta=self.update_manifest()
+            meta=self.update_manifest(platform)
             return {'version':None} if meta is None else {k:meta[k] for k in ('version','size','sha256','notes','published_at')}
         if kind=='update_chunk':
-            meta=self.update_manifest()
+            meta=self.update_manifest(platform)
             if meta is None or req.get('version')!=meta['version']:raise ManagementError('update is no longer published')
             offset=req.get('offset')
             if not isinstance(offset,int) or not 0<=offset<meta['size']:raise ManagementError('invalid offset')

@@ -117,7 +117,7 @@ def main(argv=None):
     sub.add_parser('help-get', help='查看帮助页内容')
     p = sub.add_parser('exits', help='查看设备的出口'); p.add_argument('device')
     p = sub.add_parser('ai-account-add', help='给设备添加 AI 账户'); p.add_argument('device'); p.add_argument('account_json'); p.add_argument('secret_json')
-    p = sub.add_parser('publish-update', help='发布客户端安装包，客户端自动下载并校验 SHA-256'); p.add_argument('version'); p.add_argument('file'); p.add_argument('--notes', default='')
+    p = sub.add_parser('publish-update', help='发布客户端安装包，客户端自动下载并校验 SHA-256'); p.add_argument('version'); p.add_argument('file'); p.add_argument('--platform', choices=['windows', 'mac'], default='windows'); p.add_argument('--notes', default='')
     sub.add_parser('update-status', help='当前发布的客户端版本')
     sub.add_parser('withdraw-update', help='撤回已发布的客户端版本')
     p = sub.add_parser('license-new', help='生成授权码'); p.add_argument('--days', type=int, default=0, help='0 表示永久'); p.add_argument('--count', type=int, default=1); p.add_argument('--note', default='')
@@ -197,7 +197,7 @@ def main(argv=None):
             for block in iter(lambda: f.read(1 << 20), b''):
                 h.update(block)
         digest = h.hexdigest()
-        c.rpc({'type': 'admin_update_begin', 'version': a.version, 'size': size, 'sha256': digest, 'notes': a.notes})
+        c.rpc({'type': 'admin_update_begin', 'platform': a.platform, 'version': a.version, 'size': size, 'sha256': digest, 'notes': a.notes})
         offset = 0
         with open(path, 'rb') as f:
             while True:
@@ -206,17 +206,18 @@ def main(argv=None):
                     break
                 for attempt in range(4):
                     try:
-                        offset = c.rpc({'type': 'admin_update_chunk', 'offset': offset, 'data': base64.b64encode(chunk).decode()})['offset']; break
+                        offset = c.rpc({'type': 'admin_update_chunk', 'platform': a.platform, 'offset': offset, 'data': base64.b64encode(chunk).decode()})['offset']; break
                     except AdminError:
                         if attempt == 3:
                             raise
                         time.sleep(2 ** attempt)
                 print('\r上传 %d%%' % (offset * 100 // size), end='', flush=True)
         print()
-        r = c.rpc({'type': 'admin_update_commit'})
+        r = c.rpc({'type': 'admin_update_commit', 'platform': a.platform})
         print('已发布 %s，SHA-256 %s。客户端会自动下载、校验后提示安装。' % (r['version'], r['sha256']))
     elif a.command == 'update-status':
-        print(json.dumps(c.rpc({'type': 'update_manifest'}), ensure_ascii=False, indent=2))
+        for plat in ('windows', 'mac'):
+            print(plat, json.dumps(c.rpc({'type': 'update_manifest', 'platform': plat}), ensure_ascii=False, indent=2))
     elif a.command == 'login-link':
         r = c.rpc({'type': 'admin_session_create', 'hours': a.hours})
         print(a.base.rstrip('/') + '#' + r['token'])

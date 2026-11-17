@@ -3,10 +3,16 @@
 # Usage: publish_release.sh <dir containing Leyra-X.Y.Z-setup.exe and .sha256>   (needs LEYRA_SSH_KEY)
 set -euo pipefail
 dir=$1
-setup=$(ls "$dir"/Leyra-*-setup.exe | head -n1)
-version=$(basename "$setup" | sed -E 's/^Leyra-(.+)-setup\.exe$/\1/')
+# Windows: Leyra-X.Y.Z-setup.exe; Mac: Leyra-X.Y.Z.pkg (each with a .sha256 next to it).
+if ls "$dir"/Leyra-*-setup.exe >/dev/null 2>&1; then
+  setup=$(ls "$dir"/Leyra-*-setup.exe | head -n1); platform=windows
+  version=$(basename "$setup" | sed -E 's/^Leyra-(.+)-setup\.exe$/\1/')
+else
+  setup=$(ls "$dir"/Leyra-*.pkg | head -n1); platform=mac
+  version=$(basename "$setup" | sed -E 's/^Leyra-(.+)\.pkg$/\1/')
+fi
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]
-(cd "$dir" && sha256sum -c "$(basename "$setup" .exe).sha256")
+(cd "$dir" && sha256sum -c "$(basename "$setup" | sed -E 's/\.(exe|pkg)$//').sha256")
 sha=$(sha256sum "$setup" | cut -d' ' -f1)
 key_file="${RUNNER_TEMP:-/tmp}/leyra-key"; umask 077
 printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
@@ -31,6 +37,6 @@ for part in "$parts"/p*; do
   echo "piece $n/$total uploaded"
 done
 ssh "${ssh_options[@]}" "$host" "cd $stage && cat p[0-9][0-9][0-9] > setup.exe && echo '$sha  setup.exe' | sha256sum -c --quiet"
-ssh "${ssh_options[@]}" "$host" "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 publish-update $version $stage/setup.exe --notes 'Leyra $version' | tail -n1"
+ssh "${ssh_options[@]}" "$host" "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 publish-update $version $stage/setup.exe --platform $platform --notes 'Leyra $version' | tail -n1"
 ssh "${ssh_options[@]}" "$host" "rm -rf -- $stage" || true
-echo "LEYRA_RELEASE_PUBLISHED=$version"
+echo "LEYRA_RELEASE_PUBLISHED=$platform $version"

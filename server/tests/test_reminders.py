@@ -75,3 +75,23 @@ class TicketStates(unittest.TestCase):
                 d.device_rpc(M(tmp), device, {'type': 'admin_ticket_state', 'id': t['id'], 'state': 'resolved'})
             with self.assertRaises(ManagementError):
                 admin({'type': 'admin_ticket_state', 'id': t['id'], 'state': 'whatever'})
+
+
+class PlatformUpdates(unittest.TestCase):
+    """The Mac package is published next to the Windows one; old Windows clients (no platform) see only Windows."""
+
+    def test_separate_releases(self):
+        import base64, hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            m = Management(tmp)
+            def publish(platform, version, data):
+                m.rpc({'type': 'admin_update_begin', 'platform': platform, 'version': version, 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()})
+                m.rpc({'type': 'admin_update_chunk', 'platform': platform, 'offset': 0, 'data': base64.b64encode(data).decode()})
+                m.rpc({'type': 'admin_update_commit', 'platform': platform})
+            publish('windows', '1.0.0', b'W' * 100); publish('mac', '1.0.1', b'M' * 50)
+            self.assertEqual(m.rpc({'type': 'update_manifest'})['version'], '1.0.0')            # old Windows client
+            self.assertEqual(m.rpc({'type': 'update_manifest', 'platform': 'mac'})['version'], '1.0.1')
+            chunk = m.rpc({'type': 'update_chunk', 'platform': 'mac', 'version': '1.0.1', 'offset': 0})
+            self.assertEqual(base64.b64decode(chunk['data']), b'M' * 50)
+            from management import ManagementError
+            with self.assertRaises(ManagementError): m.rpc({'type': 'update_manifest', 'platform': 'linux'})

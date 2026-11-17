@@ -82,6 +82,8 @@ class Site:
             return await self.send(w, 200, f.read_bytes(), kind) if f.is_file() else await self.send(w, 404, {'error': '页面不存在'})
         if method == 'GET' and path == '/download/windows':
             return await self.download(w)
+        if method == 'GET' and path == '/download/mac':
+            return await self.download(w, 'mac')
         if not path.startswith('/api/site/'):
             return await self.send(w, 404, {'error': '页面不存在'})
         action = path[len('/api/site/'):]
@@ -131,21 +133,24 @@ class Site:
 
     def info(self):
         manifest = self.gateway.management.update_manifest() or {}
+        mac = self.gateway.management.update_manifest('mac') or {}
         help_content = self.gateway.management.rpc({'type': 'help'})
         group = next((c for c in help_content.get('channels', []) if c.get('kind') == 'qqgroup'), {})
         return {'product': 'Leyra', 'email_code': self.mailer.configured(), 'price': help_content.get('price', ''), 'qq_group': group.get('value', ''), 'qq_group_name': group.get('label', ''), 'version': manifest.get('version'), 'size': manifest.get('size'), 'published_at': manifest.get('published_at'),
                 'notes': manifest.get('notes', ''), 'download': '/download/windows' if manifest.get('version') else None,
+                'mac_version': mac.get('version'), 'mac_size': mac.get('size'), 'mac_download': '/download/mac' if mac.get('version') else None,
                 'faq': help_content.get('faq', []), 'guides': [g for g in help_content.get('guides', []) if str(g.get('url', '')).startswith('https://')]}
 
-    async def download(self, w):
-        manifest = self.gateway.management.update_manifest()
-        release = Path(self.gateway.management.root) / 'updates' / 'release.bin'
+    async def download(self, w, platform=None):
+        manifest = self.gateway.management.update_manifest(platform)
+        release = self.gateway.management.updates_dir(platform) / 'release.bin'
         if not manifest or not release.is_file():
             return await self.send(w, 404, {'error': '安装包还没有发布'})
         size = release.stat().st_size
-        name = 'Leyra-%s-setup.exe' % manifest['version']
-        w.write(('HTTP/1.1 200 OK\r\nContent-Type: application/vnd.microsoft.portable-executable\r\nContent-Length: %d\r\n'
-                 'Content-Disposition: attachment; filename="%s"\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n' % (size, name)).encode())
+        name = ('Leyra-%s.pkg' if platform == 'mac' else 'Leyra-%s-setup.exe') % manifest['version']
+        kind = 'application/octet-stream' if platform == 'mac' else 'application/vnd.microsoft.portable-executable'
+        w.write(('HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %d\r\n'
+                 'Content-Disposition: attachment; filename="%s"\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n' % (kind, size, name)).encode())
         with open(release, 'rb') as f:
             while True:
                 block = f.read(256 * 1024)
