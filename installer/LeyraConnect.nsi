@@ -10,7 +10,7 @@ Unicode true
  !error "PAYLOAD must name the verified self-contained Windows payload"
 !endif
 !ifndef PREREQUISITES
- !error "PREREQUISITES must name the offline WebView2 prerequisites"
+ !error "PREREQUISITES must name the folder holding the WebView2 bootstrapper"
 !endif
 !ifndef WEBVIEW_SHA256
  !error "WEBVIEW_SHA256 must pin the bundled offline runtime"
@@ -22,7 +22,7 @@ Name "Leyra"
 OutFile "${OUTPUT}"
 InstallDir "$PROGRAMFILES64\Leyra"
 RequestExecutionLevel admin
-SetCompressor zlib
+SetCompressor /SOLID lzma
 ShowInstDetails show
 ShowUninstDetails show
 !define MUI_ABORTWARNING
@@ -95,13 +95,13 @@ Section "安装" SEC_MAIN
  Call CheckInstallDir
  SetOutPath "$PLUGINSDIR"
  File "VerifyRuntime.ps1"
- File "${PREREQUISITES}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
- DetailPrint "正在安装 Microsoft WebView2 运行环境……"
+ File "${PREREQUISITES}\MicrosoftEdgeWebview2Setup.exe"
+ DetailPrint "正在检查 Microsoft WebView2 运行环境（没有的话会自动联网安装）……"
  StrCpy $0 "webview2"
- StrCpy $1 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\VerifyRuntime.ps1" -Installer "$PLUGINSDIR\MicrosoftEdgeWebView2RuntimeInstallerX64.exe" -ExpectedSha256 "${WEBVIEW_SHA256}"'
+ StrCpy $1 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\VerifyRuntime.ps1" -Installer "$PLUGINSDIR\MicrosoftEdgeWebview2Setup.exe" -ExpectedSha256 "${WEBVIEW_SHA256}"'
  Call RunLogged
  ${If} $Result != 0
-  MessageBox MB_ICONSTOP "Microsoft 运行环境未通过校验或安装失败，安装已停止。" /SD IDOK
+  MessageBox MB_ICONSTOP "Microsoft WebView2 运行环境安装失败。请确认电脑能上网后重新运行安装程序。" /SD IDOK
   Abort
  ${EndIf}
  SetOutPath "$INSTDIR\versions\${VERSION}"

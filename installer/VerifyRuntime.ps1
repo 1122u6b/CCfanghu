@@ -3,6 +3,12 @@ $ErrorActionPreference='Stop'
 # A parent PowerShell 7 can leak its module path into Windows PowerShell; use the system one.
 $env:PSModulePath=[Environment]::GetEnvironmentVariable('PSModulePath','Machine')
 try {
+ # Windows 10 / 11 normally ship WebView2 already; only install it when it is missing.
+ $id='{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+ foreach ($key in @("HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$id","HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\$id","HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients\$id")) {
+  $pv=(Get-ItemProperty -LiteralPath $key -Name pv -ErrorAction SilentlyContinue).pv
+  if ($pv -and $pv -ne '0.0.0.0') {Write-Output "WebView2 $pv already installed";exit 0}
+ }
  Import-Module Microsoft.PowerShell.Security
  $stream=[IO.File]::OpenRead($Installer)
  try {$hash=-join ([Security.Cryptography.SHA256]::Create().ComputeHash($stream) | ForEach-Object {$_.ToString('x2')})} finally {$stream.Dispose()}

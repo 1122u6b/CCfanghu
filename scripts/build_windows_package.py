@@ -16,8 +16,8 @@ def main():
  from prepare_kernel import prepare
  prepare('windows',payload,ROOT/'artifacts/downloads')
  shutil.copy2(ROOT/'THIRD-PARTY-NOTICES.txt',payload/'THIRD-PARTY-NOTICES.txt')
- prerequisites=ROOT/'artifacts/prerequisites';runtime=prerequisites/'MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
- if not runtime.is_file():raise SystemExit('Provide official Microsoft offline WebView2 runtime in artifacts/prerequisites')
+ prerequisites=ROOT/'artifacts/prerequisites';runtime=prerequisites/'MicrosoftEdgeWebview2Setup.exe'
+ if not runtime.is_file():raise SystemExit('Provide the official Microsoft WebView2 bootstrapper (MicrosoftEdgeWebview2Setup.exe) in artifacts/prerequisites')
  digest=hashlib.sha256(runtime.read_bytes()).hexdigest()
  manifest=json.loads((prerequisites/'runtime-origin.json').read_text())
  if manifest['sha256']!=digest:raise SystemExit('Offline runtime checksum mismatch')

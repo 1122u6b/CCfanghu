@@ -132,16 +132,16 @@ jobs:
           python-version: '3.12'
       - name: Install NSIS
         run: choco install nsis -y --no-progress
-      - name: Fetch official Microsoft WebView2 offline runtime and check its signature
+      - name: Fetch the official Microsoft WebView2 bootstrapper (2 MB) and check its signature
         shell: pwsh
         run: |
           $dir = "artifacts/prerequisites"; New-Item -ItemType Directory -Force $dir | Out-Null
-          $file = "$dir/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
-          Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/?linkid=2124701' -OutFile $file
+          $file = "$dir/MicrosoftEdgeWebview2Setup.exe"
+          Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $file
           $sig = Get-AuthenticodeSignature -LiteralPath $file
           if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { throw 'WebView2 runtime signature invalid' }
           $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
-          @{ sha256 = $hash; source = 'https://go.microsoft.com/fwlink/?linkid=2124701' } | ConvertTo-Json | Set-Content "$dir/runtime-origin.json"
+          @{ sha256 = $hash; source = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' } | ConvertTo-Json | Set-Content "$dir/runtime-origin.json"
       - name: Build installer
         run: python scripts/build_windows_package.py --makensis "C:\Program Files (x86)\NSIS\makensis.exe"
       - name: Build the request tool used for the end-to-end test
