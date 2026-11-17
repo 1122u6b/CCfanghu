@@ -89,8 +89,19 @@ try {
   page.on('pageerror', e => console.log('page error: ' + e.message));
   await page.goto('file:///' + root.replace(/\\/g, '/'));
 
-  // 1. A fresh install opens on the activation page.
+  // 0. A fresh install first asks to agree to the disclaimer: the sentence is typed, not pasted.
   await page.waitForTimeout(4000);
+  if (await page.locator('#f-consent').isVisible().catch(() => false)) {
+    await shot('00-disclaimer');
+    await page.locator('#f-consent').click();
+    await page.keyboard.type('我同意以上服务条款，承诺完全遵守并合规使用', { delay: 30 });
+    await click('consentGo');
+    await page.waitForTimeout(2500);
+    step('disclaimer agreed by typing the sentence', !(await page.locator('#f-consent').isVisible().catch(() => false)));
+  } else step('disclaimer page shown on a fresh install', false, 'not shown');
+
+  // 1. Then the activation page.
+  await page.waitForTimeout(1500);
   const actVisible = await page.locator('[data-keep="act-code"]').isVisible().catch(() => false);
   await shot('01-activation-page');
   step('fresh install opens on the activation page', actVisible);
