@@ -345,12 +345,14 @@
     patchProg();
   }
   /* 浏览器实测（docs/01 §5.3）：在每个浏览器里打开一次本机测试页，看 WebRTC 暴露了什么。用户点了才查（会弹出浏览器窗口）。 */
-  var BROWSER_TEXT = { clean: '正常：只看到线路出口', lan: '会让网站看到你的局域网地址，建议换 Chrome、Edge 或 Firefox', real: '暴露了真实 IP，先别用这个浏览器上网', none: '还没查过', testing: '正在检查，等浏览器窗口跑完…' };
+  var BROWSER_TEXT = { clean: '正常：只看到线路出口', lan: '会让网站看到你的局域网地址，建议换 Chrome、Edge 或 Firefox', real: '暴露了真实 IP，先别用这个浏览器上网', none: '还没查过', unknown: '未取得完整结果，请检查线路后再试', testing: '正在检查，等浏览器窗口跑完…' };
   function browserSum() {
     var b = S.browsers, has = function (x) { return b.filter(function (i) { return i.st === x; }).map(function (i) { return i.n; }); };
-    var real = has('real'), lan = has('lan'), none = has('none').length;
+    var real = has('real'), lan = has('lan'), none = has('none').length + has('unknown').length + has('testing').length;
     if (real.length) return { s: 'danger', d: real.join('、') + ' 暴露了真实 IP' };
     if (lan.length) return { s: 'warn', d: lan.join('、') + ' 会让网站看到你的局域网地址' };
+    if (has('testing').length) return { s: 'skip', d: '正在浏览器中检查，等待实际结果回传' };
+    if (has('unknown').length) return { s: 'skip', d: '浏览器检查未取得完整出口 IP，请检查线路后重试' };
     if (none === b.length) return { s: 'skip', d: '这次没查：要在浏览器里打开一个测试页' };
     return { s: 'ok', d: none ? '查过的正常，还有 ' + none + ' 个浏览器没查' : '正常' };
   }
@@ -502,7 +504,7 @@
   function baseLeft() { return S.exp.days; }
   /* 还在用自带出口（没升级）：永久使用、不续费，有「升级到全套」 */
   function byo() { return S.ownExit === 'waiting' || S.ownExit === 'connected'; }
-  function suiteWord() { return window.CC_SUITE_WORD ? window.CC_SUITE_WORD() : '全套'; }
+  function suiteWord() { return byo() ? '授权' : window.CC_SUITE_WORD ? window.CC_SUITE_WORD() : '全套'; }
   /* Pro 全套升到 Max 5x：服务端说能升（suite.can_tier_up）才给，一键登录官网补差价，到期日不变 */
   function tierUpBtn() { return S.tierUp ? btn('text', '升到 Max 5x', 'tierUp') : ''; }
   /* 免费试用（01 §3.1「免费试用」、§4 第 8 步）：只试单独软件（接自己的出口），没有「升级到全套」。
@@ -563,8 +565,8 @@
     else if (S.busy.update) k = 'update';
     else if (S.renew.phase === 'needinfo') k = 'renewInfo';
     else if (S.renew.phase === 'processing' && !(S.status === 'pm' && S.reason === 'traffic')) k = 'renewWait';
-    else if (S.alerts.expire1d && !byo()) k = 'expire1d';
-    else if (S.alerts.expireSoon && !S.renewDone.node && !S.renew.phase && !nodeExpired() && !byo()) k = 'renewSoon';
+    else if (S.alerts.expire1d && (!byo() || S.licensePermanent === false)) k = 'expire1d';
+    else if (S.alerts.expireSoon && !S.renewDone.node && !S.renew.phase && !nodeExpired() && (!byo() || S.licensePermanent === false)) k = 'renewSoon';
     else if (S.trial === 'on' && S.trialEnd.days <= 3) k = 'trial';
     else if (S.alerts.update) k = 'update';
     else if (S.banner) k = 'banner';
@@ -611,7 +613,7 @@
     var cRoute =
       '<button class="hx-card hx-data p-cardbtn" data-act="go:routes"><div class="lab">' + I('signal', 16) + '当前线路' + I('chevron', 16, 'go') + '</div><div class="val txt">' + (st === 'pm' ? '未连接' : r.n === '-' ? (st === 'down' ? '—' : '还没有线路') : '线路 ' + r.n) + '</div><div class="sub">' + (st === 'pm' ? '网络已断开' : r.n === '-' ? (st === 'down' ? '恢复防护后显示' : '开通后自动接入') : [r.tag, typeof r.ms === 'number' ? r.ms + ' ms' : ''].filter(Boolean).join(' · ')) + '</div></button>';
     var cTraffic = '<div class="hx-card hx-data"><div class="lab">' + I('download', 16) + '本月流量</div><div class="val">' + trafficVal(full) + '</div>' + tr + '<div class="sub"' + (full ? ' style="color:var(--danger)"' : '') + '>' + (full ? '已用完 · ' + INFO.reset + '重置' : '下次重置 ' + INFO.reset) + '</div></div>';
-    var cAccount = '<button class="hx-card hx-data p-cardbtn" data-act="go:profile"><div class="lab">' + I('calendar', 16) + '账户' + I('chevron', 16, 'go') + '</div><div class="val txt">' + (exp ? '已到期' : S.trial ? (S.trial === 'on' ? trialLeft() : '已到期') : byo() ? '永久使用' : S.exp.date === '—' ? '—' : '还有 ' + nodeLeft() + ' 天') + '</div><div class="sub">' + (exp ? suiteWord() + ' ' + S.exp.date + '已到期' : S.trial ? '免费试用 · ' + S.trialEnd.date + (S.trial === 'on' ? '到期' : '') : byo() ? '一次买断 · 永久授权' : S.exp.date === '—' ? '到期日还没拿到' : suiteWord() + ' ' + nodeDate() + '到期') + '</div></button>';
+    var cAccount = '<button class="hx-card hx-data p-cardbtn" data-act="go:profile"><div class="lab">' + I('calendar', 16) + '账户' + I('chevron', 16, 'go') + '</div><div class="val txt">' + (exp ? '已到期' : S.trial ? (S.trial === 'on' ? trialLeft() : '已到期') : byo() && S.licensePermanent === true ? '永久使用' : S.exp.date === '—' ? '—' : '还有 ' + nodeLeft() + ' 天') + '</div><div class="sub">' + (exp ? suiteWord() + ' ' + S.exp.date + '已到期' : S.trial ? '免费试用 · ' + S.trialEnd.date + (S.trial === 'on' ? '到期' : '') : byo() && S.licensePermanent === true ? '一次买断 · 永久授权' : S.exp.date === '—' ? '到期日还没拿到' : suiteWord() + ' ' + nodeDate() + '到期') + '</div></button>';
     if (side) return '<div class="p-sec p-pmgrid">' + supportCard(st !== 'pm') + '<div class="p-datagrid two">' + cRoute + cAccount + activityCard(2, true) + '</div></div>';
     // 已保护、暂停、启动中：线路和出口已经在上面的数据格里，第三张放售后 QQ 群（01 §6.4）
     // 不统计流量：下面一排只放账户和售后 QQ 群两张，留足空间。
@@ -677,7 +679,7 @@
       '<div class="hx-row p-routeacts">' + btn('secondary', I('refresh', 16) + '刷新连接', 'routeRefresh', b ? ' disabled' : '') +
         btn('secondary', I('download', 16) + '测速', 'speedTest', b || S.speedTesting ? ' disabled' : '') +
         btn('secondary', '这条线路不好用', 'routeBad', b ? ' disabled' : '') + '<span class="p-sub">换到另一条线路，并把这条线路的情况告诉我们</span></div>' +
-      (S.speedTesting ? inline('正在测线路 ' + ROUTES[S.route].n + ' 的下载速度，约 8 秒') : '') + '</div>' +
+      (S.speedTesting ? inline('正在测线路 ' + ROUTES[S.route].n + ' 的下载速度：连接后采样 8 秒，慢速线路最多约 30 秒') : '') + '</div>' +
       '<p class="p-sub">' + (ex ? '当前出口连不上时，自动换到你添加的下一个出口；全都连不上才断网，不会暴露真实 IP。' : '线路全都连不上时自动断网，不会暴露真实 IP。') + '</p>' + histChart() + eventsCard();
   }
 
@@ -814,7 +816,7 @@
     // 到期卡（01 §5.7）：全套一个到期日，线路和 Claude 账号一起，旁边「续费」；单独软件买断、永久使用，旁边「升级到全套」
     var tiles = S.trial ? (S.trial === 'on' ? tile('calendar', '免费试用', trialLeft(), S.trialEnd.date + '到期', btn('text', '购买', 'buySoft') + btn('text', '换授权码', 'dialog:switchCode'))
         : tile('calendar', '免费试用', '已到期', S.trialEnd.date + '已到期', btn('text', '购买', 'buySoft') + btn('text', '换授权码', 'dialog:switchCode'), ' danger'))
-      : byo() ? tile('calendar', '授权', '永久使用', '一次买断，永久使用')
+      : byo() && S.licensePermanent === true ? tile('calendar', '授权', '永久使用', '一次买断，永久使用')
       : exp ? tile('calendar', suiteWord(), '已到期', suiteWord() + ' ' + S.exp.date + '已到期', (suiteWord() === '全套' ? btn('text', '重新开通全套', 'upgrade') : renewAct), ' danger')
       : S.exp.date === '—' ? tile('calendar', '账户', '—', '到期日还没拿到') : tile('calendar', suiteWord(), days(nodeLeft()), suiteWord() + ' ' + nodeDate() + '到期' + (renewTag ? ' · ' + renewTag : '') + offlinePaid(), renewAct + tierUpBtn());
     var nocap = unlimited(), full = !nocap && INFO.pct >= 100, pct = Math.min(100, INFO.pct);
@@ -2106,3 +2108,4 @@
     AIACC: AIACC, MSGS: MSGS, ANNS: ANNS, FAQ: FAQ, GUIDES: GUIDES, DIAG: DIAG, showPopup: showPopup, browserSum: browserSum, renewOpts: renewOpts, fmtRate: fmtRate,
     set: function (o) { if (o.account != null) ACCOUNT = o.account; if (o.ip != null) IP = o.ip; if (o.code != null) CODE = o.code; if (o.checkId != null) CHECK_ID = o.checkId; if (o.exitMaxOwn != null) EXIT_MAX_OWN = o.exitMaxOwn; } };
 })();
+

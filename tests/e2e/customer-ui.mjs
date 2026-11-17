@@ -123,11 +123,17 @@ try {
   await page.waitForTimeout(1500);
   const testing = /正在测线路/.test(await text());
   step('speed test shows it is running right after the click', testing);
-  const sp = await waitText(/测速完成|测速失败/, 45000);
-  await page.waitForTimeout(1500);
+  // The measured speed appears in the line table; a failure says 测速未完成 with the reason.
+  let routes = '', failedMsg = '';
+  const end4 = Date.now() + 45000;
+  while (Date.now() < end4) {
+    routes = await page.locator('.p-routes').first().innerText().catch(() => '');
+    failedMsg = ((await text()).match(/测速未完成[^\n]*/) || [''])[0];
+    if (/\d+(\.\d+)? Mbps/.test(routes) || failedMsg) break;
+    await page.waitForTimeout(1000);
+  }
   await shot('04-speed-test');
-  const measured = /\d+(\.\d+)? Mbps/.test(await page.locator('.p-routes').first().innerText().catch(() => ''));
-  step('speed test gives a result', /测速完成/.test(sp) && measured, (sp.match(/测速(完成|失败)[^\n]*/) || [''])[0]);
+  step('speed test gives a result', /\d+(\.\d+)? Mbps/.test(routes), (routes.match(/\d+(\.\d+)? Mbps/) || [failedMsg || 'no result'])[0]);
 
   // 5. Security check, all groups open.
   await click('go:check'); await page.waitForTimeout(1000);
@@ -141,25 +147,26 @@ try {
   // 6. Browser check: the report then shows the browser's exit IP compared with the exit.
   await click('dialog:browsers'); await page.waitForTimeout(1500);
   await page.locator('[data-act^="browserTest:"]').first().click();
-  const b = await waitText(/检查完成/, 90000);
+  await waitText(/浏览器出口 IP \d+\.\d+\.\d+\.\d+/, 90000);
   await page.keyboard.press('Escape').catch(() => {});
+  await page.locator('[data-act="close"]').first().click().catch(() => {});
   await page.waitForTimeout(2000);
   await shot('06-browser-check');
   const report = await text();
-  step('browser check updates the report with the browser exit IP', /检查完成/.test(b) && /出口 IP \d+\.\d+\.\d+\.\d+/.test(report) && /一致/.test(report),
-       (report.match(/浏览器出口[^\n]*/) || [''])[0]);
+  step('browser check updates the report with the browser exit IP', /浏览器出口 IP \d+\.\d+\.\d+\.\d+，和你的出口 IP 一致/.test(report),
+       (report.match(/浏览器出口 IP[^\n；]*/) || ['report not updated'])[0]);
 
   // 7. Timezone matched to the exit (may need a later check once the location is known).
-  let tz = '';
-  for (let i = 0; i < 4; i++) {
-    tz = (report.match(/电脑时区[^\n]*/) || [''])[0];
-    if (/已和出口所在地一致/.test(tz)) break;
+  // The 时区 row reads 正常 (or the full sentence) once the computer matches the exit's location.
+  const tzRow = t => (t.match(/\n时区\n([^\n]*)/) || ['', ''])[1];
+  const tzOk = r => /^正常$|已和出口所在地一致/.test(r);
+  let tz = tzRow(report);
+  for (let i = 0; i < 4 && !tzOk(tz); i++) {
     await page.waitForTimeout(30000); await click('checkAgain'); await waitText(/安全检查 · \d+ 项/, 120000);
-    tz = ((await text()).match(/电脑时区[^\n]*/) || [''])[0];
-    if (/已和出口所在地一致/.test(tz)) break;
+    await page.waitForTimeout(2000); tz = tzRow(await text());
   }
   await shot('07-timezone');
-  step('timezone matched to the exit', /已和出口所在地一致/.test(tz), tz);
+  step('timezone matched to the exit', tzOk(tz), tz || 'row not found');
 
   // 8. 彻底退出 from settings: protection off and the window asked to close, within 15 s.
   await click('go:settings'); await page.waitForTimeout(1000);

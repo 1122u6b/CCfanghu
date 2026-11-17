@@ -55,11 +55,15 @@ sealed class LocalPipe(Runtime runtime,SecurityIdentifier owner)
    if(caller is null||!caller.Equals(owner))throw new UnauthorizedAccessException("caller "+(caller?.Value??"(none)")+" is not owner "+owner.Value);
    if(envelope.GetProperty("version").GetInt32()!=1)throw new InvalidDataException("本机通信版本不匹配");
    var request=envelope.GetProperty("request");var deep=request.TryGetProperty("type",out var type)&&type.GetString()=="doctor"&&request.TryGetProperty("deep",out var d)&&d.ValueKind==JsonValueKind.True;
-   using var operation=CancellationTokenSource.CreateLinkedTokenSource(stop);operation.CancelAfter(TimeSpan.FromSeconds(deep?90:32));
+   var slow=type.ValueKind==JsonValueKind.String&&type.GetString() is "activate" or "restore" or "own_exit" or "switch_code";
+   using var operation=CancellationTokenSource.CreateLinkedTokenSource(stop);operation.CancelAfter(TimeSpan.FromSeconds(deep?90:slow?95:32));
    object result;
    try{result=new{ok=true,value=await runtime.Handle(request,operation.Token)};}
+   catch(OperationCanceledException)when(!stop.IsCancellationRequested){result=new{ok=false,error="操作超时，请检查网络后重试；已激活的授权可直接恢复"};}
    catch(Exception e)when(e is not OperationCanceledException){result=new{ok=false,error=e.Message};}
-   await PipeProtocol.WriteAsync(pipe,result,operation.Token);
+   // The operation deadline may have elapsed; use a fresh, bounded write to return its error.
+   using var write=CancellationTokenSource.CreateLinkedTokenSource(stop);write.CancelAfter(TimeSpan.FromSeconds(3));
+   await PipeProtocol.WriteAsync(pipe,result,write.Token);
   }
   catch(Exception e)when(e is IOException or UnauthorizedAccessException or JsonException or OperationCanceledException or InvalidDataException or System.ComponentModel.Win32Exception)
   {
@@ -68,3 +72,4 @@ sealed class LocalPipe(Runtime runtime,SecurityIdentifier owner)
   }
  }
 }
+

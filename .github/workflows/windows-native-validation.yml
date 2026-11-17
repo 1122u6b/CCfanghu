@@ -41,6 +41,10 @@ jobs:
         run: |
           npm ci
           npm run test:ui
+      - name: Background service regression checks
+        run: |
+          dotnet build tests/AgentRegression/AgentRegression.csproj -c Release -m:1 --nologo
+          dotnet tests/AgentRegression/bin/Release/net8.0-windows/AgentRegression.dll
       - name: Compile desktop shell
         run: dotnet build windows/Leyra.Windows.Desktop -c Release -m:1 --nologo
       - name: Compile privileged service
