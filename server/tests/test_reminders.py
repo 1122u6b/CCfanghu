@@ -36,6 +36,15 @@ class ExpiryReminders(unittest.TestCase):
         self.assertTrue(all(m['link'] == {'kind': 'renewal'} and m['level'] == 'action' and 'tag' not in m for m in items))
         self.assertEqual(Management(Path(self.g.devices.root) / self.id).rpc({'type': 'messages'})['unread'], 3)
 
+    def test_short_code_only_reminded_when_expired(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            g = Gateway.__new__(Gateway); g.devices = Devices(tmp)
+            code = g.devices.licenses.create(1, 1)['codes'][0]
+            ident = g.devices.licenses.activate(code, 'c' * 64, '', '', g.devices, 'PC')['id']
+            at = g.devices.licenses.expires_at(ident)
+            self.assertEqual(g.remind_expiry(at - 3600), 0)
+            self.assertEqual(g.remind_expiry(at + 60), 1)
+
     def test_disabled_device_not_reminded(self):
         self.g.devices.set_enabled(self.id, False)
         self.assertEqual(self.g.remind_expiry(self.at + 60), 0)

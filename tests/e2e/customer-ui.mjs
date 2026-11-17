@@ -77,7 +77,15 @@ function step(name, ok, detail = '') { results.push({ name, ok, detail }); conso
 async function shot(name) { await page.screenshot({ path: path.join(out, name + '.png') }).catch(() => {}); }
 async function text() { return page.evaluate(() => document.body.innerText); }
 async function waitText(re, ms) { const end = Date.now() + ms; while (Date.now() < end) { const t = await text(); if (re.test(t)) return t; await page.waitForTimeout(1000); } return await text(); }
-async function click(act) { await page.locator(`[data-act="${act}"]`).first().click(); }
+// A reminder popup (e.g. 授权明天到期) may come up at any time: dismiss it like a customer would, then click.
+async function dismissPopups() {
+  for (let i = 0; i < 3; i++) {
+    const ok = page.locator('.p-popup').getByRole('button', { name: '知道了' }).first();
+    if (!(await ok.isVisible().catch(() => false))) return;
+    await ok.click().catch(() => {}); await page.waitForTimeout(500);
+  }
+}
+async function click(act) { await dismissPopups(); await page.locator(`[data-act="${act}"]`).first().click(); }
 async function heroTitle() { return page.locator('.p-hero h2').first().innerText().catch(() => ''); }
 
 try {
@@ -163,7 +171,7 @@ try {
 
   // 6. Browser check: the report then shows the browser's exit IP compared with the exit.
   await click('dialog:browsers'); await page.waitForTimeout(1500);
-  await page.locator('[data-act^="browserTest:"]').first().click();
+  await dismissPopups(); await page.locator('[data-act^="browserTest:"]').first().click();
   await waitText(/浏览器出口 IP \d+\.\d+\.\d+\.\d+/, 90000);
   await page.keyboard.press('Escape').catch(() => {});
   await page.locator('[data-act="close"]').first().click().catch(() => {});

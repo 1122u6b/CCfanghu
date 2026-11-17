@@ -445,7 +445,10 @@ class Gateway:
             at=self.devices.licenses.expires_at(row['id'])
             if at is None or at>=253402300799:continue
             left=at-now;renew={'kind':'renewal'}
+            # A short code (1-day trial etc.) would get "expires tomorrow" right after activation: only remind when it runs out.
+            short=at-int(row.get('created_at') or 0)<=3*86400
             if left<=0:tag,title,body='expired','授权已到期，防护已停止','你的授权码已经到期，防护已停止，网络保持阻断以免暴露真实 IP。续费后自动恢复防护；想先用自己的网络，可以在设置里点「撤掉防护」（会暴露真实 IP）。'
+            elif short:continue
             elif left<=86400:tag,title,body='1d','授权明天到期','你的授权码明天到期，到期后防护会立即停止。请及时续费，续费后时间自动顺延。'
             elif left<=3*86400:tag,title,body='3d','授权还有 3 天到期','你的授权码还有 3 天到期，到期后防护会立即停止。请及时续费，续费后时间自动顺延。'
             else:continue
