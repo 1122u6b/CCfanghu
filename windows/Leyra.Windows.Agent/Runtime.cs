@@ -107,7 +107,10 @@ sealed partial class Runtime:IDisposable
    catch(Exception e)when(attempt<3&&e is not OperationCanceledException){await Task.Delay(1500,ct);}
   }
   netFailures=0;nextNetProbe=DateTimeOffset.UtcNow.AddSeconds(30);
-  configured=true;lastError="";guardSince=DateTimeOffset.UtcNow;Record("protected");await Health(ct);
+  configured=true;lastError="";guardSince=DateTimeOffset.UtcNow;Record("protected");
+  // Chrome / Edge WebRTC only through the protected line; restored on uninstall.
+  try{if(!BrowserPolicyActive())BrowserPolicies.Install();}catch(Exception e)when(e is UnauthorizedAccessException or IOException or System.Security.SecurityException){Program.Log("browser policy",e);}
+  await Health(ct);
  }
  async Task VerifyDns(CancellationToken stop)
  {

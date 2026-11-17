@@ -674,7 +674,8 @@
 
   /* ---------- 浏览器保护设置（P7） ---------- */
   // macOS：引导用户装描述文件（系统不让程序自己装）；Windows 由守护程序直接写浏览器策略，不用引导。
-  var canInstallProfile = /Mac/.test(navigator.platform || navigator.userAgent);
+  // Windows 由后台服务直接写 Chrome / Edge 的策略；Mac 打开描述文件。两边都有「安装保护设置」按钮。
+  var canInstallProfile = true;
   var profileHinted = false;
   A.webrtcInstall = function () {
     T.core.invoke('install_webrtc_profile').then(function () {
