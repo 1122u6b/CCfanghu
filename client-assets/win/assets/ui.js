@@ -1556,7 +1556,9 @@
     // 和上一次一模一样就不动：鼠标停着的按钮、选中的字都还在。
     if (html === lastHtml) return;
     lastHtml = html;
-    root.innerHTML = html;
+    // 换页时整页重画（保留换页动效）；同一页里只改变化的部分。以前每秒整窗重画，悬停闪、动画重播、点击偶尔落空，用起来一卡一卡。
+    if (lastPage !== S.page || !root.firstChild) { lastPage = S.page; root.innerHTML = html; }
+    else morphHtml(root, html);
 
     Array.prototype.forEach.call(root.querySelectorAll('[data-keep]'), function (el) { var k = el.getAttribute('data-keep'); if (k in keep) { if (el.type === 'checkbox') el.checked = keep[k]; else el.value = keep[k]; } });
     Array.prototype.forEach.call(root.querySelectorAll('[data-scroll]'), function (el) { var k = el.getAttribute('data-scroll') + ':' + S.page; if (k in scroll) el.scrollTop = scroll[k]; else if (el.getAttribute('data-scroll') === 'thread') el.scrollTop = el.scrollHeight; });
@@ -1570,6 +1572,36 @@
     };
     // 换页不用 startViewTransition：过渡那 0.2 秒里点击全落到整页上（白点），看到的又是截图，位置对不上。换页动效是 .p-main.fx。
     commit();
+  }
+  var lastPage = null;
+  // 把 html 套到现有节点上：同位置同标签的节点保留，只改属性和文字；不同的才替换。事件都挂在 root/document 上，节点保留不影响点击。
+  function morphHtml(target, html) {
+    var t = document.createElement('template'); t.innerHTML = html; morphChildren(target, t.content);
+  }
+  function morphChildren(from, to) {
+    var fc = from.firstChild, tc = to.firstChild;
+    while (tc) {
+      var tnext = tc.nextSibling;
+      if (!fc) { from.appendChild(tc); tc = tnext; continue; }
+      var fnext = fc.nextSibling;
+      if (fc.nodeType === tc.nodeType && (fc.nodeType !== 1 || fc.tagName === tc.tagName)) {
+        if (fc.nodeType === 1) morphNode(fc, tc);
+        else if (fc.nodeValue !== tc.nodeValue) fc.nodeValue = tc.nodeValue;
+      } else from.replaceChild(tc, fc);
+      fc = fnext; tc = tnext;
+    }
+    while (fc) { var n = fc.nextSibling; from.removeChild(fc); fc = n; }
+  }
+  function morphNode(from, to) {
+    var i, fa = from.attributes, ta = to.attributes;
+    for (i = fa.length - 1; i >= 0; i--) if (!to.hasAttribute(fa[i].name)) from.removeAttribute(fa[i].name);
+    for (i = 0; i < ta.length; i++) if (from.getAttribute(ta[i].name) !== ta[i].value) from.setAttribute(ta[i].name, ta[i].value);
+    if (from.tagName === 'INPUT' && !from.hasAttribute('data-keep') && from !== document.activeElement) {
+      if (from.type === 'checkbox' || from.type === 'radio') from.checked = to.hasAttribute('checked');
+      else from.value = to.getAttribute('value') || '';
+    }
+    if (from.tagName === 'TEXTAREA' || from.tagName === 'SELECT') { if (from.outerHTML !== to.outerHTML) from.parentNode.replaceChild(to, from); return; }
+    morphChildren(from, to);
   }
   function winStyle() { return ' style="width:' + S.winW + 'px;height:' + (S.winW === 860 ? 560 : S.winW === 1200 ? 720 : 620) + 'px"'; }
   function patchCountdown() {
