@@ -56,15 +56,16 @@ sealed partial class Runtime:IDisposable
     else if(DateTimeOffset.UtcNow-lastHealth>TimeSpan.FromSeconds(5))await Health(stop);
    }
    catch(OperationCanceledException)when(stop.IsCancellationRequested){break;}
-   catch(Exception e)
-   {
-    lastError=e.Message;configured=false;dnsVerified=false;exitVerified=false;kernel.Stop();
-    try{ApplyGuard(0);state="blocked";reason=e is HttpRequestException h?h.StatusCode switch{HttpStatusCode.Forbidden=>"software_expired",HttpStatusCode.Unauthorized=>"device_unbound",_=>"all_lines_down"}:"all_lines_down";}
-    catch{state="unprotected";reason="guard_failed";}
-    retryAt=DateTimeOffset.UtcNow.AddSeconds(Math.Min(60,5*Math.Pow(2,Math.Min(failures++,4))));
-    Record("blocked",reason);
-   }
+   catch(OperationCanceledException)when(startInterrupted){startInterrupted=false;kernel.Stop();configured=false;}
+   catch(Exception e){Block(e);}
    finally{Publish();gate.Release();}
+   // The check through the customer's exit runs without holding the lock, so pausing,
+   // quitting and the window's other requests are never queued behind a slow exit.
+   if(state=="protected"&&configured&&DateTimeOffset.UtcNow>=nextNetProbe)
+   {
+    try{await NetworkProbe(stop);}
+    catch(OperationCanceledException)when(stop.IsCancellationRequested){break;}
+   }
    try{await Task.Delay(1000,stop);}catch(OperationCanceledException)when(stop.IsCancellationRequested){break;}
   }
  }
@@ -89,7 +90,8 @@ sealed partial class Runtime:IDisposable
  {
   if(profile is null || cloud is null)return;
   state="starting";dnsVerified=false;exitVerified=false;Publish();ApplyGuard(0);
-  using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(45));var ct=deadline.Token;
+  if(startCancel.IsCancellationRequested){startCancel.Dispose();startCancel=new();}
+  using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop,startCancel.Token);deadline.CancelAfter(TimeSpan.FromSeconds(60));var ct=deadline.Token;
   var config=await cloud.SendAsync("/api/v1/config",cancellation:ct);nodes=config.GetProperty("proxies").Clone();configAt=DateTimeOffset.UtcNow;
   if(!config.TryGetProperty("identity",out var identity)||Text(identity,"role")!="device"||Text(identity,"id")!=profile.DeviceId)throw new InvalidDataException("服务器没有返回当前设备的独立身份");
   MihomoConfiguration.ValidateNodes(nodes);
@@ -99,6 +101,12 @@ sealed partial class Runtime:IDisposable
   for(var i=0;i<40;i++){tunnel=KernelSession.Tunnel();if(tunnel!=0)break;await Task.Delay(200,ct);}
   if(tunnel==0)throw new InvalidOperationException("没有找到已启动的本机 TUN 接口");
   ApplyGuard(tunnel);await VerifyDns(ct);
+  for(var attempt=1;;attempt++)
+  {
+   try{exitIp=await ObserveExit(ct);exitVerified=true;break;}
+   catch(Exception e)when(attempt<3&&e is not OperationCanceledException){await Task.Delay(1500,ct);}
+  }
+  netFailures=0;nextNetProbe=DateTimeOffset.UtcNow.AddSeconds(30);
   configured=true;lastError="";guardSince=DateTimeOffset.UtcNow;Record("protected");await Health(ct);
  }
  async Task VerifyDns(CancellationToken stop)
@@ -123,17 +131,53 @@ sealed partial class Runtime:IDisposable
   if(!AddressPolicy.IsLiteral(observed)||!AddressPolicy.IsPublic(observed))throw new InvalidDataException("自有服务器没有观察到有效公网出口");
   return observed;
  }
+ void Block(Exception e)
+ {
+  lastError=e.Message;configured=false;dnsVerified=false;exitVerified=false;netFailures=0;kernel.Stop();
+  try{ApplyGuard(0);state="blocked";reason=e is HttpRequestException h?h.StatusCode switch{HttpStatusCode.Forbidden=>"software_expired",HttpStatusCode.Unauthorized=>"device_unbound",_=>"all_lines_down"}:"all_lines_down";}
+  catch{state="unprotected";reason="guard_failed";}
+  retryAt=DateTimeOffset.UtcNow.AddSeconds(Math.Min(60,5*Math.Pow(2,Math.Min(failures++,4))));
+  Record("blocked",reason);Program.Log("protection blocked",e);
+ }
+ int netFailures;DateTimeOffset nextNetProbe=DateTimeOffset.MinValue;
+ // Pause and quit interrupt a line that is still being built instead of waiting up to a minute.
+ CancellationTokenSource startCancel=new();bool startInterrupted;
+ // Every 30 s: server reachable and traffic really leaves through the customer's exit.
+ // Real exits (home broadband, residential proxies) drop single requests now and then; the
+ // local rules keep blocking direct traffic meanwhile, so only 3 failures in a row (about
+ // 1.5 minutes) count as the line being down. Expired or unbound devices stop at once.
+ async Task NetworkProbe(CancellationToken stop)
+ {
+  if(cloud is null)return;
+  try
+  {
+   using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(20));var ct=deadline.Token;
+   await cloud.SendAsync("/api/v1/status",cancellation:ct);
+   exitIp=await ObserveExit(ct);exitVerified=true;netFailures=0;nextNetProbe=DateTimeOffset.UtcNow.AddSeconds(30);
+   await RefreshExitGeo(ct);await SampleLines(ct);
+  }
+  catch(Exception e)when(e is not OperationCanceledException||!stop.IsCancellationRequested)
+  {
+   var fatal=e is HttpRequestException h&&h.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+   netFailures++;nextNetProbe=DateTimeOffset.UtcNow.AddSeconds(10);
+   Program.Log("line check failed ("+netFailures+"/3)",e);
+   if(!fatal&&netFailures<3)return;
+   await gate.WaitAsync(stop);
+   try{if(state=="protected"&&configured)Block(e);}
+   finally{Publish();gate.Release();}
+  }
+ }
+ // Every 5 s, local only and fast: the kernel, the TUN interface and the blocking rules are in place.
  async Task Health(CancellationToken stop)
  {
   if(cloud is null)throw new InvalidOperationException("尚未连接服务器");
-  using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(12));var ct=deadline.Token;
-  await cloud.SendAsync("/api/v1/status",cancellation:ct);
   if(!kernel.Alive || KernelSession.Tunnel()!=tunnel || !filters.DefaultGuardsInstalled())throw new InvalidOperationException("防护组件或本机规则发生变化");
-  await kernel.Get("version",ct);
-  exitVerified=false;exitIp=await ObserveExit(ct);exitVerified=true;
-  await RefreshExitGeo(ct);await SampleLines(ct);
-  var traffic=await kernel.Rates(ct);up=traffic.Up;down=traffic.Down;
-  var proxies=await kernel.Get("proxies/"+Uri.EscapeDataString("出口"),ct);selected=Text(proxies,"now");
+  using(var local=CancellationTokenSource.CreateLinkedTokenSource(stop))
+  {
+   local.CancelAfter(TimeSpan.FromSeconds(4));
+   try{var traffic=await kernel.Rates(local.Token);up=traffic.Up;down=traffic.Down;var proxies=await kernel.Get("proxies/"+Uri.EscapeDataString("出口"),local.Token);selected=Text(proxies,"now");}
+   catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidDataException or JsonException){/* 读流量只是显示用，下次再读 */}
+  }
   heartbeat=DateTimeOffset.UtcNow;lastHealth=heartbeat;
   var evidence=new ProtectionEvidence(kernel.Alive,tunnel!=0,filters.DefaultGuardsInstalled(),dnsVerified,exitVerified,heartbeat);
   if(evidence.Assess(heartbeat)!=ProtectionPhase.Protected)throw new InvalidOperationException("本机防护证据不完整");
@@ -185,7 +229,19 @@ sealed partial class Runtime:IDisposable
   if(type=="check_conflicts"){RefreshConflicts(true);return new{items=conflicts,complete=true};}
   if(type=="geo")return await Geo(request,stop);
   if(type=="check_update"){await CheckForUpdate(true,stop);return new{version=updateReady,current=Program.Version};}
+  // Requests that only read or talk to the server don't wait behind protection changes.
+  switch(type)
+  {
+   case "account":return await Account(stop);
+   case "direct_rules":return new{items=store.Settings.DirectRules.Select(x=>new{cidr=x.Cidr,note=x.Note,public_ip=x.Public}).ToArray()};
+   case "tickets":var tickets=await Remote(request,stop);return new{items=tickets.GetProperty("items").Clone(),images=true};
+   case "new_ticket":case "ticket_reply":case "ticket_rate":case "upload_chunk":case "ticket_image":case "messages":case "mark_read":case "set_contact":case "help":case "ai_accounts":case "ai_report":return await Remote(request,stop);
+   case "report_bad_line":return await Remote(new{type="new_ticket",kind=1,title="线路问题",body="客户反馈当前线路不可用，请检查服务端出口。"},stop);
+   case "speed_test":return await MeasureSpeed(stop);
+  }
+  if(type is "pause" or "trial_quit"){startInterrupted=true;startCancel.Cancel();}
   await gate.WaitAsync(stop);
+  startInterrupted=false;
   try
   {
    switch(type)

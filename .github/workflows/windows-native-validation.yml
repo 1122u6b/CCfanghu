@@ -232,7 +232,7 @@ jobs:
           Write-Host "   whoami: $(whoami) / elevated: $(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrators'))"
           Write-Host "   service runs as: $((Get-CimInstance Win32_Service -Filter "Name='LeyraConnect'").StartName)"
           # Safety net: whatever happens below, give this machine its network back within 4 minutes.
-          $at = (Get-Date).AddMinutes(4).ToString('HH:mm')
+          $at = (Get-Date).AddMinutes(8).ToString('HH:mm')
           schtasks /Create /TN LeyraCiRecover /SC ONCE /ST $at /RU SYSTEM /TR "`"$agent`" --recover" /F | Out-Null
           $failures = @()
           Write-Host '1. status on a fresh install'
@@ -252,12 +252,22 @@ jobs:
           if ((Ask ('{"type":"own_exit","links":"' + $link + '"}')) -ne 0) { $failures += 'importing the own exit failed' }
           $s = WaitFor 'protected' 120; Write-Host "   state: $s"
           if ($s -notmatch 'protected') { $failures += "not protected after connecting the own exit: $s" }
+          Write-Host '   stays protected for 90 seconds without dropping (no on/off flapping)'
+          $drops = 0; $end = (Get-Date).AddSeconds(90)
+          while ((Get-Date) -lt $end) { $x = Get-Content $stateFile -Raw; if ($x -notmatch 'protected') { $drops++; Write-Host "   dropped: $x" }; Start-Sleep 3 }
+          if ($drops) { $failures += "protection dropped $drops times within 90 seconds" } else { Write-Host '   stayed protected the whole time' }
           Write-Host '   the exit list reaches the interface in the shape it reads'
           Ask '{"type":"account"}' | Out-Null
           $acct = Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json
           if ($null -eq $acct.reply.value.exits.list -or -not $acct.reply.value.exits.can_add) { $failures += 'account exits are not {list, can_add}' }
           Write-Host '   full security check while protected'
           Ask '{"type":"doctor"}' | Out-Null; Copy-Item "C:\LeyraCi\out_$script:n.json" doctor.json -ErrorAction SilentlyContinue
+          Write-Host '   彻底退出 while protected takes effect within 10 seconds'
+          $t0 = Get-Date
+          if ((Ask '{"type":"pause","minutes":10,"reason":"quit"}') -ne 0) { $failures += '彻底退出 request failed' }
+          $took = ((Get-Date) - $t0).TotalSeconds; Write-Host ("   彻底退出 answered in {0:N1} s" -f $took)
+          if ($took -gt 10) { $failures += "彻底退出 took $took seconds" }
+          $s = WaitFor 'paused' 10; if ($s -notmatch 'paused') { $failures += "not stopped after 彻底退出: $s" }
           Write-Host '4. network recovery tool, then service start and resume (the 恢复防护 path)'
           & $agent --recover; Write-Host "   recover exit $LASTEXITCODE"
           Start-Service LeyraConnect; Start-Sleep 3
