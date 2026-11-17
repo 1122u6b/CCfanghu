@@ -232,7 +232,7 @@ jobs:
           Write-Host "   whoami: $(whoami) / elevated: $(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrators'))"
           Write-Host "   service runs as: $((Get-CimInstance Win32_Service -Filter "Name='LeyraConnect'").StartName)"
           # Safety net: whatever happens below, give this machine its network back within 4 minutes.
-          $at = (Get-Date).AddMinutes(8).ToString('HH:mm')
+          $at = (Get-Date).AddMinutes(12).ToString('HH:mm')
           schtasks /Create /TN LeyraCiRecover /SC ONCE /ST $at /RU SYSTEM /TR "`"$agent`" --recover" /F | Out-Null
           $failures = @()
           Write-Host '0. windows that connect and drop at once must not stop the service from answering'
@@ -272,6 +272,21 @@ jobs:
           if ($null -eq $acct.reply.value.exits.list -or -not $acct.reply.value.exits.can_add) { $failures += 'account exits are not {list, can_add}' }
           Write-Host '   full security check while protected'
           Ask '{"type":"doctor"}' | Out-Null; Copy-Item "C:\LeyraCi\out_$script:n.json" doctor.json -ErrorAction SilentlyContinue
+          Write-Host '   the exit in use stops working: Leyra switches to the customer''s other exit by itself'
+          Ask '{"type":"account"}' | Out-Null
+          $goodExit = ((Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value.exits.list | Where-Object { $_.current } | Select-Object -First 1).id
+          if ((Ask '{"type":"own_exit","links":"socks5://ci:wrong@127.0.0.1:1","name":"坏的出口"}') -ne 0) { $failures += 'could not add the second (broken) exit' }
+          $badExit = (Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value.id
+          Start-Sleep 6
+          $s = WaitFor 'protected' 150; Write-Host "   state: $s"
+          Ask '{"type":"account"}' | Out-Null
+          $nowExit = ((Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value.exits.list | Where-Object { $_.current } | Select-Object -First 1).id
+          Ask '{"type":"history"}' | Out-Null
+          $switched = (Get-Content "C:\LeyraCi\out_$script:n.json" -Raw) -match 'exit_failover'
+          Write-Host "   good exit $goodExit, broken exit $badExit, now using $nowExit, switch recorded: $switched"
+          if ($s -notmatch 'protected' -or $nowExit -ne $goodExit) { $failures += "did not switch back to the working exit by itself: $s (using $nowExit)" }
+          if (-not $switched) { $failures += 'the automatic exit switch was not recorded in recent activity' }
+          if ($badExit) { Ask ('{"type":"delete_exit","id":' + $badExit + '}') | Out-Null }
           Write-Host '   another proxy app turns on the system proxy: it is named, and 帮我退出 really ends it'
           $py = (Get-Command python).Source
           $fake = Start-Process -FilePath $py -ArgumentList '-m','http.server','18888','--bind','127.0.0.1' -PassThru -WindowStyle Hidden

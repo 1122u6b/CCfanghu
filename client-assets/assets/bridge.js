@@ -165,6 +165,7 @@
         if (S.status !== 'starting' || !S.starting) S.starting = { stage: 0, t0: now - since * 1000, slow: false, hold: true };
         S.starting.stage = since > 5 ? 1 : 0;
         S.starting.slow = since >= 20;
+        S.starting.switching = p.reason === 'switching_exit';
         S.status = 'starting'; S.pause = null; break;
       case 'paused':
         // 彻底退出（docs/01 §5.3）：界面刚启动时看到，是上次退出后用户又打开了软件，恢复保护；
@@ -393,6 +394,7 @@
     if (e.kind === 'exit') return '切换到出口「' + esc(e.detail) + '」';
     if (e.kind === 'paused') return e.detail === 'quit' ? '彻底退出' : /^\d+$/.test(e.detail || '') ? '暂停防护 ' + e.detail + ' 分钟' : '暂停防护';
     if (e.kind === 'activated') return '已激活';
+    if (e.kind === 'exit_failover') return '出口连不上，已自动切换：' + esc(e.detail);
     if (e.kind === 'timezone') return '电脑时区已自动改成出口所在地（' + esc(e.detail) + '），可在设置里恢复';
     if (e.kind === 'bypass') return '有软件绕过保护：' + esc(e.detail);
     if (e.kind === 'protected') return prev && (prev.kind === 'paused' || prev.kind === 'blocked') ? '防护恢复' : '已保护';

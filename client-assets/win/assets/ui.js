@@ -424,8 +424,8 @@
       body = '<p>真实 IP 已隐藏，所有流量经' + (byo() ? '你的出口' : '独享线路') + '传输。</p>' + (S.guard ? '<span class="p-sub p-guard">已连续保护 ' + S.guard.dur + (S.guard.blocked != null ? ' · 挡下 ' + S.guard.blocked + ' 次直连' : '') + '</span>' : '');
       acts = S.busy.resume ? '' : btn('danger', I('lock', 14) + '暂停防护', 'pause') + btn('text', '安全检查', 'go:check');
     } else if (st === 'starting') {
-      g = H.statusGraphic('neutral', f); title = '启动中';
-      body = inline(S.starting.stage === 0 ? '正在建立独享线路' : '正在校验线路完整性');
+      g = H.statusGraphic('neutral', f); title = S.starting.switching ? '正在切换出口' : '启动中';
+      body = S.starting.switching ? '<p>当前出口连不上，正在切换到你添加的下一个出口。切换期间网络先断开，真实 IP 不会暴露。</p>' : inline(S.starting.stage === 0 ? '正在建立独享线路' : '正在校验线路完整性');
       if (S.starting.slow) body += '<p class="hint">在酒店、机场等需要网页登录的 Wi-Fi 上？可先暂停防护完成登录，线路连上后自动恢复</p>';
       acts = btn('danger', I('lock', 14) + '暂停防护', 'pauseLogin');
     } else if (st === 'pm') {
@@ -678,7 +678,7 @@
         btn('secondary', I('download', 16) + '测速', 'speedTest', b || S.speedTesting ? ' disabled' : '') +
         btn('secondary', '这条线路不好用', 'routeBad', b ? ' disabled' : '') + '<span class="p-sub">换到另一条线路，并把这条线路的情况告诉我们</span></div>' +
       (S.speedTesting ? inline('正在测线路 ' + ROUTES[S.route].n + ' 的下载速度，约 8 秒') : '') + '</div>' +
-      '<p class="p-sub">' + (ex ? '当前出口的线路全都连不上时自动断网，不会自己换到别的出口，也不会暴露真实 IP。' : '线路全都连不上时自动断网，不会暴露真实 IP。') + '</p>' + histChart() + eventsCard();
+      '<p class="p-sub">' + (ex ? '当前出口连不上时，自动换到你添加的下一个出口；全都连不上才断网，不会暴露真实 IP。' : '线路全都连不上时自动断网，不会暴露真实 IP。') + '</p>' + histChart() + eventsCard();
   }
 
   /* ---------------- 线路页：速度、延迟曲线、最近事件 ---------------- */

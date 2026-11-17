@@ -49,6 +49,17 @@ sealed partial class Runtime:IDisposable
    await gate.WaitAsync(stop);
    try
    {
+    if(failoverRequested&&profile is not null)
+    {
+     failoverRequested=false;
+     try{await Failover(stop);}
+     catch(Exception e)when(e is not OperationCanceledException||!stop.IsCancellationRequested)
+     {
+      // Could not reach the server to switch (the whole network may be down): no switching for a minute,
+      // the normal cut-off and retry takes over.
+      failoverPausedUntil=DateTimeOffset.UtcNow.AddMinutes(1);triedExits.Clear();Program.Log("switching exit failed",e);
+     }
+    }
     if(profile is null){state="not_activated";}
     else if(await OwnExitMissing(stop)){kernel.Stop();if(filters.DefaultGuardsInstalled())filters.RemoveOwned();configured=false;state="provisioning";reason="own_exit";}
     else if(!store.Settings.Enabled || store.Settings.PausedUntil>DateTimeOffset.UtcNow.ToUnixTimeSeconds()){kernel.Stop();if(filters.DefaultGuardsInstalled())filters.RemoveOwned();configured=false;state="paused";}
@@ -137,10 +148,34 @@ sealed partial class Runtime:IDisposable
  void Block(Exception e)
  {
   lastError=e.Message;configured=false;dnsVerified=false;exitVerified=false;netFailures=0;kernel.Stop();
-  try{ApplyGuard(0);state="blocked";reason=e is HttpRequestException h?h.StatusCode switch{HttpStatusCode.Forbidden=>"software_expired",HttpStatusCode.Unauthorized=>"device_unbound",_=>"all_lines_down"}:"all_lines_down";}
-  catch{state="unprotected";reason="guard_failed";}
+  var fatal=e is HttpRequestException hr&&hr.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+  // Another of the customer's own exits not tried yet: switch to it instead of cutting the network.
+  // The blocking rules stay on while switching, so the real IP is never used.
+  var switching=!fatal&&exitCount is int count&&count>1&&triedExits.Count<count&&DateTimeOffset.UtcNow>=failoverPausedUntil;
+  try{ApplyGuard(0);state=switching?"starting":"blocked";reason=e is HttpRequestException h?h.StatusCode switch{HttpStatusCode.Forbidden=>"software_expired",HttpStatusCode.Unauthorized=>"device_unbound",_=>"all_lines_down"}:"all_lines_down";}
+  catch{state="unprotected";reason="guard_failed";switching=false;}
+  if(switching){reason="switching_exit";failoverRequested=true;retryAt=DateTimeOffset.UtcNow;Program.Log("exit down, switching to the next exit",e);return;}
   retryAt=DateTimeOffset.UtcNow.AddSeconds(Math.Min(60,5*Math.Pow(2,Math.Min(failures++,4))));
+  triedExits.Clear();
   Record("blocked",reason);Program.Log("protection blocked",e);
+ }
+ // ---------- 出口自动切换：当前出口连不上时换到客户自己添加的下一个出口 ----------
+ bool failoverRequested;readonly HashSet<int> triedExits=new();DateTimeOffset failoverPausedUntil=DateTimeOffset.MinValue;
+ async Task Failover(CancellationToken stop)
+ {
+  var list=await Remote(new{type="exits"},stop);
+  var items=list.GetProperty("items").EnumerateArray().Select(x=>(Id:x.GetProperty("id").GetInt32(),Name:Text(x,"name"))).ToList();
+  exitCount=items.Count;
+  var current=list.GetProperty("selected").ValueKind==JsonValueKind.Number?list.GetProperty("selected").GetInt32():(int?)null;
+  if(current is int c)triedExits.Add(c);
+  var from=items.FirstOrDefault(x=>x.Id==current).Name;
+  // Next exit after the current one, in the order the customer added them.
+  var start=items.FindIndex(x=>x.Id==current);
+  var next=items.Skip(start+1).Concat(items.Take(Math.Max(0,start+1))).FirstOrDefault(x=>!triedExits.Contains(x.Id));
+  if(next.Name is null){triedExits.Clear();return;}
+  await Remote(new{type="select_exit",id=next.Id},stop);triedExits.Add(next.Id);
+  configured=false;retryAt=DateTimeOffset.UtcNow;
+  Record("exit_failover",(from??"当前出口")+" → "+next.Name);
  }
  int netFailures;DateTimeOffset nextNetProbe=DateTimeOffset.MinValue;DateTimeOffset lastTraffic=DateTimeOffset.MinValue;
  // Pause and quit interrupt a line that is still being built instead of waiting up to a minute.
@@ -199,7 +234,7 @@ sealed partial class Runtime:IDisposable
   heartbeat=DateTimeOffset.UtcNow;lastHealth=heartbeat;
   var evidence=new ProtectionEvidence(kernel.Alive,tunnel!=0,filters.DefaultGuardsInstalled(),dnsVerified,exitVerified,heartbeat);
   if(evidence.Assess(heartbeat)!=ProtectionPhase.Protected)throw new InvalidOperationException("本机防护证据不完整");
-  state="protected";failures=0;
+  state="protected";failures=0;if(triedExits.Count>0)triedExits.Clear();
  }
  object BuildStatus()
  {
