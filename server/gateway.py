@@ -102,7 +102,7 @@ class Gateway:
         from management import Management
         self.management=Management(config.get('data_dir') or str(Path(config.get('upstream_file',config['cert'])).parent))
         self.devices=Devices(self.management.root)
-        self.device_active={}
+        self.device_active={};self.device_checks={}
         from upstream_kernel import KernelUpstreams,find_binary
         binary=config.get('kernel_binary') or find_binary()
         self.kernel=KernelUpstreams(Path(self.management.root)/'upstream-kernel',Path(binary) if binary else None)
@@ -303,13 +303,19 @@ class Gateway:
             data=await asyncio.wait_for(r.read(65536),300)
             if not data:return
             w.write(data);await asyncio.wait_for(w.drain(),30)
+    def device_ok(self,device):
+        # One database check per computer every 5 s, shared by all its connections
+        # (hundreds of connections each checking every second slowed the gateway down).
+        now=time.monotonic();cached=self.device_checks.get(device.id)
+        if cached and cached[2]==device.secret and now-cached[1]<5:return cached[0]
+        ok=self.devices.current(device);self.device_checks[device.id]=(ok,now,device.secret);return ok
     async def watch_device(self,device):
         # Revoke active tunnels too; rotation also invalidates an existing lease.
-        while self.devices.current(device):
-            await asyncio.sleep(1)
+        while self.device_ok(device):
+            await asyncio.sleep(5)
 
     async def handle(self,r,w):
-        if self.active>=128:w.close();return
+        if self.active>=int(self.config.get('max_connections',8000)):w.close();return
         self.active+=1;upwriter=None;device=None;counted_device=False
         try:
             first=await exact(r,1)
@@ -324,7 +330,7 @@ class Gateway:
                 try:device=self.devices.authenticate(user.decode('ascii')+'.'+password.decode('ascii'))
                 except UnicodeError:device=None
             valid=bool(owner_valid or device is not None)
-            if device and self.device_active.get(device.id,0)>=int(self.config.get('max_connections_per_device',16)):valid=False
+            if device and self.device_active.get(device.id,0)>=int(self.config.get('max_connections_per_device',1000)):valid=False
             w.write(b'\x01\x00' if valid else b'\x01\x01');await w.drain()
             if not valid:return
             if device:

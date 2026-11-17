@@ -6,6 +6,27 @@ using System.Text.Json;
 // Controlled child modes exercise the same ordinary argv launch used by the kernel.
 if(args.Length>0 && args[0]=="--fixture-job-exit")Environment.Exit(args.Length==2 && args[1]=="有 空格"?7:9);
 if(args.Length==1 && args[0]=="--fixture-job-wait"){await Task.Delay(TimeSpan.FromSeconds(30));Environment.Exit(0);}
+// Busy computer: hold N connections through the protected line at the same time (a browser and
+// chat apps easily have hundreds), each a real tunnel through the local proxy to a public host.
+if(args.Length==3 && args[0]=="--hold")
+{
+ var count=int.Parse(args[1]);var seconds=int.Parse(args[2]);var held=new List<System.Net.Sockets.TcpClient>();var ok=0;
+ for(var i=0;i<count;i++)
+ {
+  try
+  {
+   var c=new System.Net.Sockets.TcpClient();await c.ConnectAsync("127.0.0.1",17890);var st=c.GetStream();
+   var hello=System.Text.Encoding.ASCII.GetBytes("CONNECT 1.1.1.1:443 HTTP/1.1\r\nHost: 1.1.1.1:443\r\n\r\n");await st.WriteAsync(hello);
+   var buf=new byte[256];using var t=new CancellationTokenSource(TimeSpan.FromSeconds(20));var n=await st.ReadAsync(buf,t.Token);
+   if(System.Text.Encoding.ASCII.GetString(buf,0,n).Contains(" 200")){ok++;held.Add(c);}else c.Dispose();
+  }
+  catch(Exception e){Console.WriteLine("connection "+i+": "+e.GetType().Name);}
+ }
+ Console.WriteLine("holding "+ok+" of "+count+" connections for "+seconds+" s");
+ await Task.Delay(TimeSpan.FromSeconds(seconds));
+ foreach(var c in held)c.Dispose();
+ Environment.Exit(ok>=count*9/10?0:3);
+}
 // Stress: windows that connect and drop the connection at once (or half way through a request)
 // must not take the service's listener down; afterwards a normal request still has to work.
 if(args.Length==2 && args[0]=="--pipe-stress")

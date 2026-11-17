@@ -189,6 +189,8 @@ def install(address):
  upgrading=Path(gateway.get('data_dir','/nonexistent')).resolve()==data
  gateway.update(data_dir=str(data),public_host=address,fingerprint=fingerprint)
  gateway.setdefault('site_port',SITE_PORT)
+ # One computer easily has hundreds of connections (browser tabs, chat apps); 16 cut real customers off.
+ gateway['max_connections_per_device']=max(int(gateway.get('max_connections_per_device',0) or 0),1000);gateway['max_connections']=max(int(gateway.get('max_connections',0) or 0),8000)
  if not upgrading:gateway.update(api_token=secrets.token_urlsafe(48),client_user='owner',client_password=secrets.token_urlsafe(48))
  dns['data_dir']=str(data);infrastructure['resolver_ip']=address
  sys.path.insert(0,str(release));from management import Management
@@ -209,7 +211,7 @@ def install(address):
    config=gateway if entry=='gateway.py' else dns
    path=release/(service+'.json');atomic(path,(json.dumps(config,indent=2)+'\n').encode(),0o640);os.chown(path,0,identities[service]['gid'])
    override=Path('/etc/systemd/system')/(service+'.d')/'90-leyra-connect.conf'
-   text='[Service]\nExecStart=\nExecStart=/usr/bin/python3 '+str(release/entry)+' --config '+str(path)+'\nWorkingDirectory='+str(release)+'\nReadWritePaths='+str(data)+'\n'
+   text='[Service]\nExecStart=\nExecStart=/usr/bin/python3 '+str(release/entry)+' --config '+str(path)+'\nWorkingDirectory='+str(release)+'\nReadWritePaths='+str(data)+'\nLimitNOFILE=65535\n'
    atomic(override,text.encode(),0o644);changed.append(service)
   systemctl('daemon-reload');systemctl('restart','leyra-dns.service');systemctl('restart','leyra-server.service')
   for service in SERVICES:

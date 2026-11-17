@@ -259,6 +259,13 @@ jobs:
           $drops = 0; $end = (Get-Date).AddSeconds(90)
           while ((Get-Date) -lt $end) { $x = Get-Content $stateFile -Raw; if ($x -notmatch 'protected') { $drops++; Write-Host "   dropped: $x" }; Start-Sleep 3 }
           if ($drops) { $failures += "protection dropped $drops times within 90 seconds" } else { Write-Host '   stayed protected the whole time' }
+          Write-Host '   busy computer: 60 connections open at once for 75 seconds, protection must not drop'
+          $hold = Start-Job -ScriptBlock { param($t) dotnet $t --hold 60 75 2>&1; "exit=$LASTEXITCODE" } -ArgumentList $tool
+          $busyDrops = 0; $end = (Get-Date).AddSeconds(85)
+          while ((Get-Date) -lt $end) { $x = Get-Content $stateFile -Raw; if ($x -notmatch 'protected') { $busyDrops++; Write-Host "   dropped: $x" }; Start-Sleep 3 }
+          $held = Receive-Job $hold -Wait -AutoRemoveJob; $held | Select-Object -Last 3 | ForEach-Object { Write-Host "   $_" }
+          if ($held -notcontains 'exit=0') { $failures += 'could not keep 60 connections open through the line' }
+          if ($busyDrops) { $failures += "protection dropped $busyDrops times while 60 connections were open" } else { Write-Host '   stayed protected with 60 connections open' }
           Write-Host '   the exit list reaches the interface in the shape it reads'
           Ask '{"type":"account"}' | Out-Null
           $acct = Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json
