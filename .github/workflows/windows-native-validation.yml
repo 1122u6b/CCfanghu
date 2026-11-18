@@ -346,6 +346,16 @@ jobs:
           $trace = try { (Invoke-WebRequest https://claude.ai/cdn-cgi/trace -Proxy http://127.0.0.1:17890 -UseBasicParsing -TimeoutSec 25).Content } catch { '' }
           $claudeIp = ([regex]::Match($trace, 'ip=([0-9a-fA-F.:]+)')).Groups[1].Value; Write-Host "   claude.ai sees $claudeIp (exit $ipAll)"
           if ($claudeIp -ne $ipAll) { $failures += "Claude did not go through the exit in coexist mode: $claudeIp" }
+          # The Claude desktop app is locked to Leyra (127.0.0.1): a stand-in claude.exe in its install folder may not
+          # reach anything directly, only through Leyra (and then it is seen with the exit address).
+          $fakeDir = "$env:LOCALAPPDATA\AnthropicClaude\app-9.9.9"; New-Item -ItemType Directory -Force $fakeDir | Out-Null
+          Copy-Item "$env:SystemRoot\System32\curl.exe" "$fakeDir\claude.exe" -Force; Start-Sleep 12
+          $direct = & "$fakeDir\claude.exe" -s -o NUL -w '%{http_code}' --noproxy '*' --max-time 8 https://1.1.1.1/cdn-cgi/trace
+          $via = & "$fakeDir\claude.exe" -s --noproxy '' --max-time 25 -x http://127.0.0.1:17890 https://claude.ai/cdn-cgi/trace
+          $viaIp = ([regex]::Match(($via -join "`n"), 'ip=([0-9a-fA-F.:]+)')).Groups[1].Value
+          Write-Host "   Claude app directly: $direct (must fail); through Leyra: seen as $viaIp"
+          if ($direct -eq '200') { $failures += 'the Claude desktop app could connect directly in coexist mode (not locked to Leyra)' }
+          if ($viaIp -ne $ipAll) { $failures += "the Claude desktop app through Leyra was not seen with the exit address: $viaIp" }
           # The line breaks (kernel ended): Claude must be refused or still on the exit, never another address.
           Stop-Process -Name mihomo -Force -ErrorAction SilentlyContinue
           $seen = @(); $end = [DateTime]::UtcNow.AddSeconds(25)
@@ -364,6 +374,10 @@ jobs:
           if ((Get-ItemProperty $is).ProxyServer -ne '127.0.0.1:17890') { $failures += 'Leyra did not take the system proxy back' } else { Write-Host '   taken back after the customer app changed it' }
           Ask '{"type":"pause","minutes":10}' | Out-Null; Start-Sleep 3
           $after = (Get-ItemProperty $is).ProxyServer; Write-Host "   after pause: $after"
+          $directAfter = & "$fakeDir\claude.exe" -s -o NUL -w '%{http_code}' --noproxy '*' --max-time 15 https://1.1.1.1/cdn-cgi/trace
+          Write-Host "   after pause the Claude app connects normally again: $directAfter"
+          if ($directAfter -ne '200') { $failures += "the Claude app lock stayed after pausing Leyra: $directAfter" }
+          Remove-Item "$env:LOCALAPPDATA\AnthropicClaude" -Recurse -Force -ErrorAction SilentlyContinue
           if ($after -ne '127.0.0.1:7890') { $failures += "the customer's system proxy was not given back on pause: $after" }
           Stop-Process -Id $own.Id -Force -ErrorAction SilentlyContinue
           Set-ItemProperty $is ProxyEnable 0; Remove-ItemProperty $is ProxyServer -ErrorAction SilentlyContinue

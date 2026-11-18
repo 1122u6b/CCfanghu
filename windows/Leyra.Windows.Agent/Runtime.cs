@@ -117,7 +117,15 @@ sealed partial class Runtime:IDisposable
  // Coexist mode: the customer's own proxy app stays the way out for everything but the listed sites.
  string? realIp; // coexist mode: this computer's own address (asked directly), to tell real leaks from the customer's proxy
  bool coexist;CoexistProxy.Upstream? upstream;
- void Unguard(){if(filters.DefaultGuardsInstalled())filters.RemoveOwned();coexistProxy.Restore();}
+ void Unguard(){filters.RemoveOwned();appGuardKey="";coexistProxy.Restore();}
+ // Coexist mode: the Claude desktop app is locked to 127.0.0.1 (Leyra) and browsers may not send UDP to the internet.
+ string appGuardKey="";
+ void ApplyAppGuard(bool force=false)
+ {
+  var (claude,browsers)=GuardedApps();var key=string.Join("|",claude)+"#"+string.Join("|",browsers);
+  if(!force&&key==appGuardKey)return;
+  filters.ApplyAppGuard(claude,browsers);appGuardKey=key;
+ }
  /// <summary>Coexist mode while the line is down or being rebuilt: Leyra stays the system proxy with a holding
  /// configuration — Claude (and the customer's list) is refused, everything else goes on to the customer's own
  /// proxy. Claude therefore never leaves through anything but the exit. If even this cannot start, the system
@@ -125,9 +133,9 @@ sealed partial class Runtime:IDisposable
  void HoldCoexist()
  {
   if(upstream is null){Unguard();return;}
-  // Coming from normal protection: its blocking rules would cut the customer's own proxy. Remove them (the system
-  // proxy stays on Leyra).
-  if(filters.DefaultGuardsInstalled())filters.RemoveOwned();
+  // Coming from normal protection: its blocking rules would cut the customer's own proxy. The per-program rules
+  // replace them (Claude locked to Leyra, no browser UDP to the internet); the system proxy stays on Leyra.
+  try{ApplyAppGuard(true);}catch(Exception e)when(e is not OutOfMemoryException){Program.Log("coexist program rules",e);}
   try
   {
    var reject=MihomoConfiguration.ClaudeAlways.Concat(MihomoConfiguration.Expand(store.Settings.ProxyDomains)).Distinct().Select(d=>MihomoConfiguration.Rule(d,"REJECT"));
@@ -173,7 +181,7 @@ sealed partial class Runtime:IDisposable
    ((System.Text.Json.Nodes.JsonArray)built["proxies"]!).Add(new System.Text.Json.Nodes.JsonObject{["name"]="本机原代理",["type"]=upstream.Type,["server"]="127.0.0.1",["port"]=upstream.Port,["udp"]=false});
    var rules=(System.Text.Json.Nodes.JsonArray)built["rules"]!;rules[rules.Count-1]="MATCH,本机原代理";
    await kernel.Start(System.Text.Encoding.UTF8.GetBytes(built.ToJsonString()),ct);
-   coexistProxy.Take();dnsVerified=true;tunnel=0;
+   coexistProxy.Take();ApplyAppGuard(true);dnsVerified=true;tunnel=0;
    try{using var direct=new HttpClient(new HttpClientHandler{UseProxy=false}){Timeout=TimeSpan.FromSeconds(10)};var ip=(await direct.GetStringAsync("https://api.ipify.org",ct)).Trim();realIp=System.Net.IPAddress.TryParse(ip,out _)?ip:null;}
    catch(Exception e)when(e is HttpRequestException or TaskCanceledException){realIp=null;}
   }
@@ -340,6 +348,8 @@ sealed partial class Runtime:IDisposable
    // The customer's proxy app may set the system proxy back to itself, or clear it when it quits: take it again
    // at once, so the listed sites never leave through anything but the exit.
    if(!coexistProxy.Holding()){coexistProxy.Take();Record("repair","系统代理被其他软件改动，已接回 Leyra");}
+   // A Claude update (new folder) or a newly started browser gets its rule within seconds.
+   ApplyAppGuard();
   }
   else if(!kernel.Alive || KernelSession.Tunnel()!=tunnel || !filters.DefaultGuardsInstalled())throw new InvalidOperationException("防护组件或本机规则发生变化");
   using(var local=CancellationTokenSource.CreateLinkedTokenSource(stop))

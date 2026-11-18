@@ -31,6 +31,37 @@ public sealed class WfpEngine:IDisposable
   }
   catch {Abort();throw;}
  }
+ /// <summary>Coexist mode (no default deny: the customer's own proxy must keep working). Per program instead:
+ /// the Claude desktop app may only reach this computer (127.0.0.1, where Leyra listens) and nothing else at all;
+ /// browsers may not send UDP to the internet (WebRTC would reveal the real address). Loopback is allowed for all,
+ /// local-network UDP for everyone but Claude. Slots 400-511, connection layer only.</summary>
+ [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.Synchronized)]
+ public void ApplyAppGuard(IReadOnlyList<string> lockedToLoopback,IReadOnlyList<string> noInternetUdp)
+ {
+  if(lockedToLoopback.Count>40||noInternetUdp.Count>60)throw new InvalidDataException("程序过滤规则超过上限");
+  var specs=new List<FilterSpec>();
+  foreach(var v6 in new[]{false,true})
+  {
+   specs.Add(new(v6,400,"共存：本机回环",true,1000,Loopback:true));
+   var lan=v6?new[]{"fe80::/10","fc00::/7","ff00::/8"}:new[]{"10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","169.254.0.0/16","224.0.0.0/4"};
+   for(var i=0;i<lan.Length;i++)specs.Add(new(v6,401+i,"共存：局域网 UDP",true,900,Network:lan[i],Protocol:17));
+   for(var i=0;i<lockedToLoopback.Count;i++)specs.Add(new(v6,410+i,"共存：Claude 只能连本机 Leyra",false,950,Application:lockedToLoopback[i]));
+   for(var i=0;i<noInternetUdp.Count;i++)specs.Add(new(v6,450+i,"共存：浏览器不发外网 UDP",false,800,Protocol:17,Application:noInternetUdp[i]));
+  }
+  Begin();
+  try
+  {
+   using var arena=new NativeArena();
+   var provider=new WfpProvider{Key=WfpOwnership.Provider,Flags=1,Display=new DisplayData{Name=arena.Text("LeyraConnect private protection"),Description=arena.Text("Owned outbound policies; recovery removes only this provider")}};
+   var error=Native.FwpmProviderAdd0(engine,in provider,IntPtr.Zero);if(error!=Exists)Native.Check(error);
+   var layer=new WfpSubLayer{Key=WfpOwnership.SubLayer,Flags=1,ProviderKey=arena.Struct(WfpOwnership.Provider),Weight=0x7000,Display=provider.Display};
+   error=Native.FwpmSubLayerAdd0(engine,in layer,IntPtr.Zero);if(error!=Exists)Native.Check(error);
+   RemoveOwnedFilters();
+   foreach(var spec in specs)Add(spec);
+   Commit();
+  }
+  catch {Abort();throw;}
+ }
  void Add(FilterSpec spec)
  {
   using var arena=new NativeArena();var conditions=new List<WfpCondition>();IntPtr app=IntPtr.Zero;

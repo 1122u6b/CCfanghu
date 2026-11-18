@@ -284,6 +284,31 @@ sealed partial class Runtime
  }
  /// <summary>Coexist mode: the Claude desktop app must only talk to Leyra on 127.0.0.1. Number of its connections that go
  /// straight to the internet instead (bypassing the exit); -1 when the app is not running.</summary>
+ /// <summary>Programs the coexist rules apply to: every copy of the Claude desktop app (its install folder and any
+ /// running copy; updates move it to a new folder) and the installed or running browsers.</summary>
+ (string[] Claude,string[] Browsers) GuardedApps()
+ {
+  static IEnumerable<string> Running(params string[] names)
+  {
+   foreach(var n in names)foreach(var p in Process.GetProcessesByName(n))using(p)
+   {
+    string? path=null;try{path=p.MainModule?.FileName;}catch(Exception e)when(e is System.ComponentModel.Win32Exception or InvalidOperationException){}
+    if(path is not null&&File.Exists(path))yield return Path.GetFullPath(path);
+   }
+  }
+  var claude=new HashSet<string>(Running("claude","Claude"),StringComparer.OrdinalIgnoreCase);
+  try
+  {
+   var profile=Microsoft.Win32.Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\"+store.Owner.Value,"ProfileImagePath",null) as string;
+   var folder=profile is null?null:Path.Combine(Environment.ExpandEnvironmentVariables(profile),"AppData","Local","AnthropicClaude");
+   if(folder is not null&&Directory.Exists(folder))
+    foreach(var f in Directory.EnumerateFiles(folder,"claude.exe",new EnumerationOptions{RecurseSubdirectories=true,MaxRecursionDepth=2,MatchCasing=MatchCasing.CaseInsensitive}))claude.Add(Path.GetFullPath(f));
+  }
+  catch(Exception e)when(e is IOException or UnauthorizedAccessException or System.Security.SecurityException){}
+  var browsers=new HashSet<string>(Running("chrome","msedge","firefox","brave"),StringComparer.OrdinalIgnoreCase);
+  foreach(var (_,exe) in Browsers)if(BrowserPath(exe) is string path)browsers.Add(Path.GetFullPath(path));
+  return (claude.OrderBy(x=>x).Take(40).ToArray(),browsers.OrderBy(x=>x).Take(60).ToArray());
+ }
  int ClaudeDirect()
  {
   var pids=new HashSet<int>();foreach(var p in Process.GetProcessesByName("Claude"))using(p)pids.Add(p.Id);
