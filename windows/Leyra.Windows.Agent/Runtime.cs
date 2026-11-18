@@ -125,6 +125,9 @@ sealed partial class Runtime:IDisposable
  void HoldCoexist()
  {
   if(upstream is null){Unguard();return;}
+  // Coming from normal protection: its blocking rules would cut the customer's own proxy. Remove them (the system
+  // proxy stays on Leyra).
+  if(filters.DefaultGuardsInstalled())filters.RemoveOwned();
   try
   {
    var reject=MihomoConfiguration.ClaudeAlways.Concat(store.Settings.ProxyDomains).Distinct().Select(d=>"DOMAIN-SUFFIX,"+d+",REJECT");

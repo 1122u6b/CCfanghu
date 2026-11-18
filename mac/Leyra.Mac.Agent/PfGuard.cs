@@ -71,6 +71,14 @@ sealed class PfGuard:IDisposable
   }
   catch(Exception e)when(e is InvalidOperationException or TimeoutException or System.ComponentModel.Win32Exception){return false;}
  }
+ /// <summary>Firewall rules and the DNS change only; the coexist system proxy stays as it is.</summary>
+ public void RemoveRules()
+ {
+  MacDns.Restore();
+  try{Pfctl("-a",Anchor,"-F","rules");}catch(Exception e)when(e is InvalidOperationException or TimeoutException){Program.Log("removing pf rules",e);}
+  if(!string.IsNullOrEmpty(token)){try{Pfctl("-X",token);}catch(Exception e)when(e is InvalidOperationException or TimeoutException){}}
+  token=null;
+ }
  public void RemoveOwned()
  {
   MacDns.Restore();   // protection off: the Mac's own DNS settings come back with the open network

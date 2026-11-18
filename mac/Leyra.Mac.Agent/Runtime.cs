@@ -120,6 +120,9 @@ sealed partial class Runtime:IDisposable
  void HoldCoexist()
  {
   if(upstream is null){filters.RemoveOwned();return;}
+  // Coming from normal protection: its firewall rules and DNS change would cut the customer's own proxy. Remove
+  // them (the system proxy stays on Leyra).
+  filters.RemoveRules();
   try
   {
    var reject=MihomoConfiguration.ClaudeAlways.Concat(store.Settings.ProxyDomains).Distinct().Select(d=>"DOMAIN-SUFFIX,"+d+",REJECT");

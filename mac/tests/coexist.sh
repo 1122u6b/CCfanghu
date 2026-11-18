@@ -11,15 +11,19 @@ SVC=$(networksetup -listallnetworkservices | tail -n +2 | grep -v '^\*' )
 proxyof(){ networksetup -getwebproxy "$(echo "$SVC" | head -1)" | tr '\n' ' '; }
 REAL=$(cat /tmp/leyra-real-ip); LOG=/tmp/own-proxy.log; : > $LOG
 
-echo "1. the customer's own proxy app is running and is the system proxy"
+echo "1. Leyra already protecting normally (firewall rules on), then the customer starts their own proxy app"
+ask '{"type":"resume"}' >/dev/null
+s=$(wait_for '^protected' 150) || fail "normal protection did not come up: $s"
+sudo pfctl -a com.apple/250.LeyraConnect -s rules 2>/dev/null | grep -q leyra-default-block || fail "normal protection had no firewall rules"
 python3 local_proxy.py 7890 $LOG & OWN=$!; sleep 1
 echo "$SVC" | while read -r s; do sudo networksetup -setwebproxy "$s" 127.0.0.1 7890; sudo networksetup -setsecurewebproxy "$s" 127.0.0.1 7890; done
-echo "   before Leyra: $(proxyof)"
+echo "   own proxy set as system proxy: $(proxyof)"
 
-echo "2. Leyra on, with ipify.org on the list (stands in for Claude)"
-ask '{"type":"set_route_mode","listed":false,"domains":["ipify.org"]}' >/dev/null
-ask '{"type":"resume"}' >/dev/null
+echo "2. Leyra rebuilds into coexist mode, ipify.org on the list (stands in for a listed site)"
+ask '{"type":"set_route_mode","listed":false,"domains":["ipify.org"]}' >/dev/null; sleep 4
 s=$(wait_for '^protected' 150) || fail "not protected in coexist mode: $s"; echo "   state: $s"
+OWNWEB=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -x http://127.0.0.1:7890 https://www.apple.com/)
+echo "   the customer's own proxy on its own: $OWNWEB"; [ "$OWNWEB" = "200" ] || [ "$OWNWEB" = "301" ] || fail "the customer's own proxy was blocked after switching to coexist mode: $OWNWEB"
 echo "   system proxy now: $(proxyof)"
 proxyof | grep -q "Port: 17890" || fail "system proxy was not put in front of the customer's proxy"
 sudo pfctl -a com.apple/250.LeyraConnect -s rules 2>/dev/null | grep -q leyra-default-block && fail "firewall rules loaded in coexist mode (would cut the customer's proxy)"
