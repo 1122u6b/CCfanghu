@@ -425,11 +425,17 @@ sealed partial class Runtime:IDisposable
     case "activate":case "restore":
      // One authorization code = one computer: the server binds the code to this hardware ID.
      var watch=System.Diagnostics.Stopwatch.StartNew();
-     var issued=await RedeemCode(new{code=Text(request,"code"),machine=MachineId.Get(),contact=Text(request,"contact"),order_no=Text(request,"order_no"),label=Environment.MachineName},stop);
+     // Each step says where it failed (and is logged), instead of one "operation timed out" for the whole thing.
+     ServerProfile issued;
+     try{issued=await RedeemCode(new{code=Text(request,"code"),machine=MachineId.Get(),contact=Text(request,"contact"),order_no=Text(request,"order_no"),label=Environment.MachineName},stop);}
+     catch(Exception e)when(e is HttpRequestException or TaskCanceledException or IOException or System.Net.Sockets.SocketException&&!stop.IsCancellationRequested)
+     {Program.Log("activation step 1 (code check at www.leyra.xin) failed after "+watch.Elapsed.TotalSeconds.ToString("N1")+" s",e);throw new InvalidOperationException("核对授权码失败：连不上 leyra.xin（"+e.GetType().Name+"），请检查网络后重试");}
      var redeemed=watch.Elapsed;
      // Like the original: after activation the overview asks for the customer's own exit (IP);
      // protection starts by itself once one is connected.
-     await PairWith(issued,stop);
+     try{await PairWith(issued,stop);}
+     catch(Exception e)when(e is HttpRequestException or TaskCanceledException or IOException or System.Net.Sockets.SocketException or InvalidDataException&&!stop.IsCancellationRequested)
+     {Program.Log("activation step 2 (registering at "+issued.Host+":"+issued.Port+") failed after "+(watch.Elapsed-redeemed).TotalSeconds.ToString("N1")+" s",e);throw new InvalidOperationException("授权码已通过，但登记这台电脑失败：连不上服务器 "+issued.Host+":"+issued.Port+"（"+e.GetType().Name+"），请检查网络后重试");}
      if(watch.Elapsed>TimeSpan.FromSeconds(10))Program.Log("slow activation",new TimeoutException($"code check {redeemed.TotalSeconds:N1} s, registering this computer {(watch.Elapsed-redeemed).TotalSeconds:N1} s"));exitCount=null;exitAskAt=DateTimeOffset.MinValue;Record("activated");return new{saved=true};
     case "switch_code":
      var renewed=await Remote(new{type="license_renew",code=Text(request,"code"),machine=MachineId.Get()},stop);
@@ -523,7 +529,7 @@ sealed partial class Runtime:IDisposable
   }
   else
   {
-   using var http=new HttpClient(new HttpClientHandler{AllowAutoRedirect=false}){Timeout=TimeSpan.FromSeconds(20)};
+   using var http=new HttpClient(new HttpClientHandler{AllowAutoRedirect=false,UseProxy=false}){Timeout=TimeSpan.FromSeconds(20)};
    using var response=await http.PostAsync(ActivationUrl,new StringContent(JsonSerializer.Serialize(body),System.Text.Encoding.UTF8,"application/json"),stop);
    var bytes=await response.Content.ReadAsByteArrayAsync(stop);if(bytes.Length>2*1024*1024)throw new InvalidDataException("服务器响应过大");
    using var doc=JsonDocument.Parse(bytes);

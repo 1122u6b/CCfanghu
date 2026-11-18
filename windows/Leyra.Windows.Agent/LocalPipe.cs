@@ -59,7 +59,7 @@ sealed class LocalPipe(Runtime runtime,SecurityIdentifier owner)
    using var operation=CancellationTokenSource.CreateLinkedTokenSource(stop);operation.CancelAfter(TimeSpan.FromSeconds(deep?90:slow?95:32));
    object result;
    try{result=new{ok=true,value=await runtime.Handle(request,operation.Token)};}
-   catch(OperationCanceledException)when(!stop.IsCancellationRequested){result=new{ok=false,error="操作超时，请检查网络后重试；已激活的授权可直接恢复"};}
+   catch(OperationCanceledException e)when(!stop.IsCancellationRequested){Program.Log("request timed out: "+(type.ValueKind==JsonValueKind.String?type.GetString():"?"),e);result=new{ok=false,error="操作超时，请检查网络后重试；已激活的授权可直接恢复"};}
    catch(Exception e)when(e is not OperationCanceledException){result=new{ok=false,error=e.Message};}
    // The operation deadline may have elapsed; use a fresh, bounded write to return its error.
    using var write=CancellationTokenSource.CreateLinkedTokenSource(stop);write.CancelAfter(TimeSpan.FromSeconds(3));
