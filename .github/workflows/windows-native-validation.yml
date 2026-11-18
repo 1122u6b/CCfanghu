@@ -371,6 +371,17 @@ jobs:
           Write-Host '   dropped connections while protected'
           dotnet $tool --pipe-stress 200 | Select-Object -Last 3 | ForEach-Object { Write-Host "   $_" }
           if ($LASTEXITCODE -ne 0) { $failures += 'service stopped answering after dropped connections (protected)' }
+          Write-Host '   blocking rules left behind while the activation is gone (reinstall): they are removed, the computer is online'
+          $data = "$env:ProgramData\LeyraConnect"
+          Stop-Service LeyraConnect; Start-Sleep 2
+          Move-Item "$data\device-profile.json" "$env:RUNNER_TEMP\profile.bak" -Force
+          Start-Service LeyraConnect; Start-Sleep 10
+          $web = try { (Invoke-WebRequest https://www.microsoft.com -UseBasicParsing -TimeoutSec 25).StatusCode } catch { 0 }
+          Write-Host "   not activated, a site answers: $web"
+          if ($web -ne 200) { $failures += 'blocking rules from before stayed after the activation was gone (activation would time out)' }
+          Stop-Service LeyraConnect; Move-Item "$env:RUNNER_TEMP\profile.bak" "$data\device-profile.json" -Force; Start-Service LeyraConnect
+          $s = WaitFor 'protected' 150
+          if ($s -notmatch 'protected') { $failures += "protection did not come back after the activation was restored: $s" }
           Write-Host '   彻底退出 while protected takes effect within 10 seconds'
           $t0 = [DateTime]::UtcNow
           if ((Ask '{"type":"pause","minutes":10,"reason":"quit"}') -ne 0) { $failures += '彻底退出 request failed' }

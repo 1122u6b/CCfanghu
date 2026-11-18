@@ -77,7 +77,10 @@ sealed partial class Runtime:IDisposable
       failoverPausedUntil=DateTimeOffset.UtcNow.AddMinutes(1);triedExits.Clear();Program.Log("switching exit failed",e);
      }
     }
-    if(profile is null){state="not_activated";}
+    // Not activated: nothing of Leyra may block the network (blocking before activation is never installed).
+    // Rules left by an earlier installation name the old program path and would block this service too:
+    // the activation then times out. Remove them.
+    if(profile is null){state="not_activated";if(filters.DefaultGuardsInstalled()){filters.RemoveOwned();Program.Log("removed blocking rules left by an earlier installation",new Exception("not activated"));}}
     else if(await OwnExitMissing(stop)){kernel.Stop();Unguard();configured=false;state="provisioning";reason="own_exit";}
     else if(!store.Settings.Enabled || store.Settings.PausedUntil>DateTimeOffset.UtcNow.ToUnixTimeSeconds()){kernel.Stop();Unguard();configured=false;state="paused";}
     else if(!kernel.Alive || !configured){if(DateTimeOffset.UtcNow>=retryAt)await StartProtected(stop);}
