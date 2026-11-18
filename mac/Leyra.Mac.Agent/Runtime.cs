@@ -113,34 +113,72 @@ sealed partial class Runtime:IDisposable
  // Coexist mode (Mac): the customer's own proxy app stays the way out for everything but the listed sites.
  string? realIp; // coexist mode: this computer's own address (asked directly), to tell real leaks from the customer's proxy
  bool coexist;CoexistProxy.Upstream? upstream;
- /// <summary>Coexist mode while the line is down or being rebuilt: Leyra stays the system proxy with a holding
- /// configuration — Claude (and the customer's list) is refused, everything else goes on to the customer's own
- /// proxy. Claude therefore never leaves through anything but the exit. If even this cannot start, the system
- /// proxy still points at Leyra: Claude stays unreachable rather than using another address.</summary>
+ // Programs whose traffic belongs to Claude whatever site they talk to: the desktop app (with its helpers) and the
+ // command-line tool. Their connections are told apart by program, so error reports, sign-in and update checks of
+ // the app go the same way as its chats.
+ static readonly string[] ClaudePrograms=["PROCESS-PATH-REGEX,/Claude[^/]*\\.app/","PROCESS-NAME,claude","PROCESS-NAME,Claude"];
+ // Browsers: their UDP (WebRTC, the usual real-address leak) is refused; web pages still load over TCP.
+ static readonly string[] BrowserPaths=["/Google Chrome[^/]*\\.app/","/Chromium[^/]*\\.app/","/Microsoft Edge[^/]*\\.app/","/Brave Browser[^/]*\\.app/",
+  "/Firefox[^/]*\\.app/","/Arc\\.app/","/Opera[^/]*\\.app/","/Vivaldi\\.app/","/Safari[^/]*\\.app/","/WebKit\\.framework/","/Comet\\.app/","/Dia\\.app/","/Yandex\\.app/","/QQBrowser\\.app/","/360Chrome[^/]*\\.app/"];
+ // Anthropic's own address ranges: a program that found Claude's address by itself (its own DNS) still goes the same way.
+ static readonly string[] AnthropicRanges=["IP-CIDR,160.79.104.0/23","IP-CIDR6,2607:6bc0::/48"];
+ /// <summary>Rules that come before everything else in list and coexist modes. <paramref name="target"/> is the exit,
+ /// or REJECT while the line is down: Claude is then unreachable instead of leaving another way.</summary>
+ static IEnumerable<string> LockRules(string target)=>
+  ClaudePrograms.Select(r=>r+","+target)
+  .Concat(BrowserPaths.Select(p=>"AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,"+p+")),REJECT"))
+  .Concat(AnthropicRanges.Select(r=>r+","+target+",no-resolve"));
+ /// <summary>Puts the program rules in front of a list-mode configuration; in coexist mode, what came in through the
+ /// system proxy (Leyra's local port) and is not Claude or listed goes on to the customer's own proxy, and what came
+ /// in through the tunnel (programs that never used a proxy, the customer's proxy app itself) goes out as before.</summary>
+ void Lockdown(System.Text.Json.Nodes.JsonObject built,string target,CoexistProxy.Upstream? up)
+ {
+  var rules=(System.Text.Json.Nodes.JsonArray)built["rules"]!;var list=rules.Select(x=>x!.GetValue<string>()).ToList();
+  list.InsertRange(0,LockRules(target));
+  if(up is not null)
+  {
+   ((System.Text.Json.Nodes.JsonArray)built["proxies"]!).Add(new System.Text.Json.Nodes.JsonObject{["name"]="本机原代理",["type"]=up.Type,["server"]="127.0.0.1",["port"]=up.Port,["udp"]=false});
+   list.Insert(list.Count-1,"IN-PORT,"+CoexistProxy.LocalPort+",本机原代理");
+  }
+  built["rules"]=new System.Text.Json.Nodes.JsonArray(list.Select(x=>(System.Text.Json.Nodes.JsonNode?)x).ToArray());
+  built["find-process-mode"]="strict";
+  // A program that connects to an address it looked up itself is still recognised by the site name it asks for.
+  built["sniffer"]=System.Text.Json.Nodes.JsonNode.Parse("{\"enable\":true,\"parse-pure-ip\":true,\"force-dns-mapping\":true,\"sniff\":{\"TLS\":{\"ports\":[443,8443]},\"HTTP\":{\"ports\":[80],\"override-destination\":false}}}");
+ }
+ /// <summary>Coexist mode while the line is down or being rebuilt: the firewall rules stay (no program of the
+ /// customer's gets around Leyra) and a holding kernel runs the tunnel — Claude (programs, sites, the customer's list)
+ /// is refused, browsers' UDP is refused, everything else goes on as before (system proxy users to the customer's
+ /// own proxy). If even this cannot start, the firewall keeps Claude unreachable rather than on another address.</summary>
  void HoldCoexist()
  {
-  if(upstream is null){filters.RemoveOwned();return;}
-  // Coming from normal protection: its firewall rules and DNS change would cut the customer's own proxy. Remove
-  // them (the system proxy stays on Leyra).
-  filters.RemoveRules();
+  if(upstream is null||profile is null){filters.RemoveOwned();return;}
+  var endpoint=new System.Net.IPEndPoint(IPAddress.Parse(profile.Host),profile.Port);
+  try{filters.Apply(PfPlan.Create([new GatewayEndpoint(endpoint,6)],KernelSession.TunnelName,store.Settings.DirectRules,true));}
+  catch(Exception e)when(e is not OutOfMemoryException){Program.Log("coexist holding firewall",e);}
   try
   {
    var reject=MihomoConfiguration.ClaudeAlways.Concat(MihomoConfiguration.Expand(store.Settings.ProxyDomains)).Distinct().Select(d=>MihomoConfiguration.Rule(d,"REJECT"));
-   var hold=new Dictionary<string,object>{{"mixed-port",17890},{"allow-lan",false},{"bind-address","127.0.0.1"},{"mode","rule"},{"log-level","warning"},
-    {"external-controller","127.0.0.1:19090"},{"secret",kernel.Secret},{"ipv6",false},
-    {"proxies",new object[]{new Dictionary<string,object>{{"name","本机原代理"},{"type",upstream.Type},{"server","127.0.0.1"},{"port",upstream.Port},{"udp",false}}}},
-    {"rules",reject.Append("MATCH,本机原代理").ToArray()},{"dns",new{enable=false}},{"tun",new{enable=false}}};
+   var exclude=new[]{"127.0.0.0/8","::1/128",profile.Host+(profile.Host.Contains(':')?"/128":"/32")}.Concat(store.Settings.DirectRules.Select(x=>x.Cidr)).ToArray();
+   var hold=new System.Text.Json.Nodes.JsonObject
+   {
+    ["mixed-port"]=CoexistProxy.LocalPort,["allow-lan"]=false,["bind-address"]="127.0.0.1",["mode"]="rule",["log-level"]="warning",
+    ["external-controller"]="127.0.0.1:19090",["secret"]=kernel.Secret,["ipv6"]=false,
+    ["proxies"]=new System.Text.Json.Nodes.JsonArray(),
+    ["rules"]=new System.Text.Json.Nodes.JsonArray(reject.Append("MATCH,DIRECT").Select(x=>(System.Text.Json.Nodes.JsonNode?)x).ToArray()),
+    ["tun"]=new System.Text.Json.Nodes.JsonObject{["enable"]=true,["device"]=KernelSession.TunnelName,["stack"]="gvisor",["auto-route"]=true,["auto-detect-interface"]=true,["dns-hijack"]=new System.Text.Json.Nodes.JsonArray("any:53","tcp://any:53"),["route-exclude-address"]=new System.Text.Json.Nodes.JsonArray(exclude.Select(x=>(System.Text.Json.Nodes.JsonNode?)x).ToArray())},
+    ["dns"]=System.Text.Json.Nodes.JsonNode.Parse("{\"enable\":true,\"listen\":\"127.0.0.1:53\",\"ipv6\":false,\"enhanced-mode\":\"fake-ip\",\"fake-ip-range\":\"198.18.0.1/16\",\"nameserver\":[\"https://223.5.5.5/dns-query\",\"https://1.1.1.1/dns-query\"]}")
+   };
+   Lockdown(hold,"REJECT",upstream);
    using var limit=new CancellationTokenSource(TimeSpan.FromSeconds(15));
-   kernel.Start(JsonSerializer.SerializeToUtf8Bytes(hold),limit.Token).GetAwaiter().GetResult();
-   CoexistProxy.Take();
+   kernel.Start(System.Text.Encoding.UTF8.GetBytes(hold.ToJsonString()),limit.Token).GetAwaiter().GetResult();
+   MacDns.Apply();
   }
   catch(Exception e)when(e is not OutOfMemoryException){Program.Log("coexist holding configuration",e);}
+  try{CoexistProxy.Take();}catch(Exception e)when(e is not OutOfMemoryException){Program.Log("coexist holding proxy",e);}
  }
  void ApplyGuard(ulong luid)
  {
   if(profile is null)return;
-  // No firewall rules in coexist mode: they would cut the customer's own proxy. While the line is down the
-  // customer's own proxy settings are back, so their network keeps working (never the bare real network).
   if(coexist){HoldCoexist();return;}
   var executable=File.Exists(kernel.Executable)?kernel.Executable:Environment.ProcessPath!;
   var endpoint=new System.Net.IPEndPoint(IPAddress.Parse(profile.Host),profile.Port);
@@ -161,23 +199,31 @@ sealed partial class Runtime:IDisposable
   var dns=PrivateDns.Parse(await cloud.RpcAsync(new{type="dns_config"},ct),profile);
   // The gateway accepts multiplexed connections: new connections then cost one round trip to Hong Kong.
   var mux=config.TryGetProperty("mux",out var muxKind)&&muxKind.ValueKind==JsonValueKind.String&&muxKind.GetString()=="yamux";
-  if(coexist&&upstream is not null)
-  {
-   // Local proxy only: listed sites through the exit, everything else to the customer's own proxy.
-   var built=System.Text.Json.Nodes.JsonNode.Parse(MihomoConfiguration.Build(nodes,kernel.Secret,false,null,store.Settings.DirectRules,mux,store.Settings.ProxyDomains))!.AsObject();
-   ((System.Text.Json.Nodes.JsonArray)built["proxies"]!).Add(new System.Text.Json.Nodes.JsonObject{["name"]="本机原代理",["type"]=upstream.Type,["server"]="127.0.0.1",["port"]=upstream.Port,["udp"]=false});
-   var rules=(System.Text.Json.Nodes.JsonArray)built["rules"]!;rules[rules.Count-1]="MATCH,本机原代理";
-   await kernel.Start(System.Text.Encoding.UTF8.GetBytes(built.ToJsonString()),ct);
-   CoexistProxy.Take();dnsVerified=true;tunnel=0;
-   try{using var direct=new HttpClient(new HttpClientHandler{UseProxy=false}){Timeout=TimeSpan.FromSeconds(10)};var ip=(await direct.GetStringAsync("https://api.ipify.org",ct)).Trim();realIp=System.Net.IPAddress.TryParse(ip,out _)?ip:null;}
-   catch(Exception e)when(e is HttpRequestException or TaskCanceledException){realIp=null;}
-  }
-  else
-  {
-  await kernel.Start(MihomoConfiguration.Build(nodes,kernel.Secret,true,dns,store.Settings.DirectRules,mux,store.Settings.ProxyOnlyListed?store.Settings.ProxyDomains:null),ct);
+  var listed=coexist||store.Settings.ProxyOnlyListed;
+  var built=System.Text.Json.Nodes.JsonNode.Parse(MihomoConfiguration.Build(nodes,kernel.Secret,true,dns,store.Settings.DirectRules,mux,coexist?store.Settings.ProxyDomains:store.Settings.ProxyOnlyListed?store.Settings.ProxyDomains:null))!.AsObject();
+  // List and coexist modes: Claude's programs and browsers' UDP are held by program, not only by site name.
+  if(listed)Lockdown(built,"出口",coexist?upstream:null);
+  await kernel.Start(System.Text.Encoding.UTF8.GetBytes(built.ToJsonString()),ct);
   for(var i=0;i<40;i++){tunnel=KernelSession.Tunnel();if(tunnel!=0)break;await Task.Delay(200,ct);}
   if(tunnel==0)throw new InvalidOperationException("没有找到已启动的本机 TUN 接口");
-  ApplyGuard(tunnel);MacDns.Apply();await VerifyDns(ct);
+  if(coexist)
+  {
+   var endpoint=new System.Net.IPEndPoint(IPAddress.Parse(profile.Host),profile.Port);
+   filters.Apply(PfPlan.Create([new GatewayEndpoint(endpoint,6)],KernelSession.TunnelName,store.Settings.DirectRules,true));
+  }
+  else ApplyGuard(tunnel);
+  MacDns.Apply();await VerifyDns(ct);
+  if(coexist)
+  {
+   // The listed sites never leave through anything but the exit: Leyra's local proxy stands in front of the customer's.
+   CoexistProxy.Take();
+   try{
+    // Asked from the network card itself (the tunnel would answer with the exit): this computer's real address.
+    var local=Physical().SelectMany(n=>n.GetIPProperties().UnicastAddresses).Select(x=>x.Address).First(a=>a.AddressFamily==System.Net.Sockets.AddressFamily.InterNetwork&&!IPAddress.IsLoopback(a));
+    var handler=new SocketsHttpHandler{UseProxy=false,ConnectCallback=async(c,token)=>{var s=new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork,System.Net.Sockets.SocketType.Stream,System.Net.Sockets.ProtocolType.Tcp);
+     try{s.Bind(new System.Net.IPEndPoint(local,0));await s.ConnectAsync(new System.Net.IPEndPoint(IPAddress.Parse(c.DnsEndPoint.Host),c.DnsEndPoint.Port),token);return new System.Net.Sockets.NetworkStream(s,true);}catch{s.Dispose();throw;}}};
+    using var direct=new HttpClient(handler){Timeout=TimeSpan.FromSeconds(10)};var trace=await direct.GetStringAsync("https://1.1.1.1/cdn-cgi/trace",ct);var ip=System.Text.RegularExpressions.Regex.Match(trace,@"(?m)^ip=(\S+)").Groups[1].Value;realIp=System.Net.IPAddress.TryParse(ip,out _)?ip:null;}
+   catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidOperationException or System.Net.Sockets.SocketException){realIp=null;}
   }
   for(var attempt=1;;attempt++)
   {
@@ -336,7 +382,7 @@ sealed partial class Runtime:IDisposable
    // at once, so the listed sites never leave through anything but the exit.
    if(!CoexistProxy.Holding()){CoexistProxy.Take();Record("repair","系统代理被其他软件改动，已接回 Leyra");}
   }
-  else if(!kernel.Alive || KernelSession.Tunnel()!=tunnel || !filters.DefaultGuardsInstalled())throw new InvalidOperationException("防护组件或本机规则发生变化");
+  if(!kernel.Alive || KernelSession.Tunnel()!=tunnel || !filters.DefaultGuardsInstalled())throw new InvalidOperationException("防护组件或本机规则发生变化");
   using(var local=CancellationTokenSource.CreateLinkedTokenSource(stop))
   {
    local.CancelAfter(TimeSpan.FromSeconds(4));
@@ -344,8 +390,6 @@ sealed partial class Runtime:IDisposable
    catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidDataException or JsonException){/* 读流量只是显示用，下次再读 */}
   }
   heartbeat=DateTimeOffset.UtcNow;lastHealth=heartbeat;
-  if(coexist){if(!exitVerified)throw new InvalidOperationException("还没有确认 Claude 走你的出口");}
-  else
   {
   var evidence=new ProtectionEvidence(kernel.Alive,tunnel!=0,filters.DefaultGuardsInstalled(),dnsVerified,exitVerified,heartbeat);
   if(evidence.Assess(heartbeat)!=ProtectionPhase.Protected)throw new InvalidOperationException("本机防护证据不完整");

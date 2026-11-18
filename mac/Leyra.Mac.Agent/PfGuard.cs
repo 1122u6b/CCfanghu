@@ -28,7 +28,11 @@ static class PfPlan
   foreach(var d in direct){var item=DirectRule.Parse(d.Cidr,d.Note,d.Public);r.Add("pass out quick inet to "+item.Cidr);}
   // "Only listed sites go through the exit": pf cannot tell programs apart, so the physical network is open;
   // new connections still enter the tunnel through the system routes and the kernel decides per site.
-  if(kernelDirect)r.Add("pass out quick all");
+  // Programs of the people using this Mac (uid 500 and up: Claude, browsers, everything they start) may not leave
+  // on the physical network at all: they only get out through the tunnel, where the kernel decides per program and
+  // per site. Without this a program that binds to the network card itself (a browser's WebRTC does) would go around
+  // Leyra with the real address. Only system services (Leyra's own kernel among them) connect directly.
+  if(kernelDirect){r.Add("block drop out quick proto { tcp udp } from any to any user >= 500");r.Add("pass out quick all");}
   r.Add(Marker);
   return string.Join("\n",r)+"\n";
  }

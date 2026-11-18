@@ -286,6 +286,7 @@ sealed partial class Runtime
   {
    var i=line.IndexOf("->",StringComparison.Ordinal);if(!line.StartsWith('n')||i<0)continue;
    var remote=line[(i+2)..];var colon=remote.LastIndexOf(':');var host=(colon>0?remote[..colon]:remote).Trim('[',']');
+   var localPart=line[1..i];if(localPart.StartsWith("198.18.",StringComparison.Ordinal)||localPart.StartsWith("127.",StringComparison.Ordinal))continue;   // through the tunnel or Leyra
    if(AddressPolicy.IsPublic(host))count++;
   }
   return count;
@@ -313,20 +314,32 @@ sealed partial class Runtime
  }
 
  // ---------- 安全检查里有实际探测的项目 ----------
- static NetworkInterface[] Physical()=>NetworkInterface.GetAllNetworkInterfaces().Where(n=>n.OperationalStatus==OperationalStatus.Up&&n.Name!="LeyraConnect"&&n.NetworkInterfaceType is not (NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel)&&n.GetIPProperties().GatewayAddresses.Count>0).ToArray();
- static async Task<bool> DirectTcpReachable(AddressFamily family,IPAddress target,CancellationToken stop)
+ static NetworkInterface[] Physical()=>NetworkInterface.GetAllNetworkInterfaces().Where(n=>n.OperationalStatus==OperationalStatus.Up&&n.Name!="LeyraConnect"&&n.Name!=KernelSession.TunnelName&&!n.Name.StartsWith("utun",StringComparison.Ordinal)&&n.NetworkInterfaceType is not (NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel)&&n.GetIPProperties().GatewayAddresses.Count>0).ToArray();
+ /// <summary>Runs a check program as the customer (their programs are what must not get around Leyra; system services
+ /// may connect directly in list and coexist modes). True when it exits with 0 (it got through).</summary>
+ static async Task<bool> AsUser(uint uid,string program,string[] args,CancellationToken stop)
+ {
+  var start=new ProcessStartInfo("/usr/bin/sudo",new[]{"-n","-u","#"+uid,program}.Concat(args)){UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true};
+  using var p=Process.Start(start);if(p is null)return false;
+  using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(8));
+  try{await p.WaitForExitAsync(deadline.Token);}catch(OperationCanceledException)when(!stop.IsCancellationRequested){p.Kill(true);return false;}
+  return p.ExitCode==0;
+ }
+ static async Task<bool> DirectTcpReachable(AddressFamily family,IPAddress target,CancellationToken stop,uint? asUser=null)
  {
   var local=Physical().SelectMany(n=>n.GetIPProperties().UnicastAddresses).Select(x=>x.Address).FirstOrDefault(a=>a.AddressFamily==family&&!IPAddress.IsLoopback(a)&&!(family==AddressFamily.InterNetworkV6&&a.IsIPv6LinkLocal));
   if(local is null)return false;
+  if(asUser is uint uid)return await AsUser(uid,"/usr/bin/nc",["-z","-G","3","-s",local.ToString(),target.ToString(),"443"],stop);
   using var socket=new Socket(family,SocketType.Stream,ProtocolType.Tcp);socket.Bind(new IPEndPoint(local,0));
   using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(3));
   try{await socket.ConnectAsync(new IPEndPoint(target,443),deadline.Token);return true;}
   catch(Exception e)when(e is SocketException or OperationCanceledException&&!stop.IsCancellationRequested){return false;}
  }
- static async Task<bool> DirectDnsAnswered(CancellationToken stop)
+ static async Task<bool> DirectDnsAnswered(CancellationToken stop,uint? asUser=null)
  {
   var local=Physical().SelectMany(n=>n.GetIPProperties().UnicastAddresses).Select(x=>x.Address).FirstOrDefault(a=>a.AddressFamily==AddressFamily.InterNetwork&&!IPAddress.IsLoopback(a));
   if(local is null)return false;
+  if(asUser is uint uid)return await AsUser(uid,"/bin/sh",["-c","/usr/bin/dig +time=2 +tries=1 +short -b "+local+" @8.8.8.8 example.com | grep -q ."],stop);
   using var udp=new UdpClient(new IPEndPoint(local,0));
   var query=new byte[]{0x4c,0x59,1,0,0,1,0,0,0,0,0,0,7,(byte)'e',(byte)'x',(byte)'a',(byte)'m',(byte)'p',(byte)'l',(byte)'e',3,(byte)'c',(byte)'o',(byte)'m',0,0,1,0,1};
   using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(2));

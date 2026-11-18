@@ -33,9 +33,8 @@ sealed partial class Runtime
  async Task<object> Doctor(bool deep,CancellationToken stop)
  {
   var items=new List<object>();
-  // Coexist mode has no tunnel and no firewall rules by design: say so instead of reporting them as failures.
-  var coexistNote=new Dictionary<string,string>{["E7"]="共存模式：不建虚拟网卡，你自己的代理照常工作",["P1"]="共存模式：不加防火墙规则，以免拦住你自己的代理",
-   ["P2"]="共存模式：不使用系统防火墙",["P6"]="共存模式：Claude 的网址由出口那边解析，不经过本机",
+  // Coexist mode: the tunnel and firewall rules are the same as in list mode; only the routing note differs.
+  var coexistNote=new Dictionary<string,string>{
    ["P5"]="共存模式：Claude 网页和客户端经 Leyra 出口"+(exitVerified?"（出口 "+exitIp+"），其他流量走你自己的代理":"，正在确认"),["L8"]="共存模式：其他流量本来就走你自己的代理"};
   void Add(string id,string verdict,string detail)
   {
@@ -83,9 +82,10 @@ sealed partial class Runtime
   Add("L1",exitVerified?"info":"fail",exitVerified?"经本机代理取得的出口 IP："+exitIp+(exitGeo is not null&&exitGeoFor==exitIp?"（"+exitGeo.Label+"）":""):"没有取得该请求的公网出口");
   if(guarded)
   {
-   var direct=await DirectTcpReachable(System.Net.Sockets.AddressFamily.InterNetwork,System.Net.IPAddress.Parse("1.0.0.1"),stop);
+   var asUser=coexist||store.Settings.ProxyOnlyListed?store.Owner:(uint?)null;
+   var direct=await DirectTcpReachable(System.Net.Sockets.AddressFamily.InterNetwork,System.Net.IPAddress.Parse("1.0.0.1"),stop,asUser);
    Add("L2",direct?"fail":"pass",direct?"绕开虚拟网卡、直接从物理网卡连到了公网，防护规则未生效":"从物理网卡直接连接公网被拒绝");
-   var dnsLeak=await DirectDnsAnswered(stop);
+   var dnsLeak=await DirectDnsAnswered(stop,asUser);
    Add("L3",dnsLeak?"fail":"pass",dnsLeak?"从物理网卡发出的 DNS 查询得到了回应":"从物理网卡直接发出的 DNS 查询被拒绝");
   }
   else{Add("L2","skipped","防护规则未安装，未做直连实测");Add("L3","skipped","防护规则未安装，未做直连实测");}
@@ -93,7 +93,7 @@ sealed partial class Runtime
   items.AddRange(BrowserChecks());
   if(guarded&&HasGlobalIpv6())
   {
-   var v6=await DirectTcpReachable(System.Net.Sockets.AddressFamily.InterNetworkV6,System.Net.IPAddress.Parse("2606:4700:4700::1001"),stop);
+   var v6=await DirectTcpReachable(System.Net.Sockets.AddressFamily.InterNetworkV6,System.Net.IPAddress.Parse("2606:4700:4700::1001"),stop,coexist||store.Settings.ProxyOnlyListed?store.Owner:null);
    Add("L7",v6?"fail":"pass",v6?"IPv6 可以绕开独享线路直连公网":"电脑有公网 IPv6，直接连接已被拒绝");
   }
   else Add("L7",guarded?"pass":"skipped",guarded?"电脑没有公网 IPv6 地址":"防护规则未安装，未做 IPv6 实测");
