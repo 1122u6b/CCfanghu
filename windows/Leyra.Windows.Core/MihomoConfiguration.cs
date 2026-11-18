@@ -43,17 +43,48 @@ public static class MihomoConfiguration
  /// <summary>Checked, lower-case domains for "only these sites go through the exit"; throws on anything else.</summary>
  public static IReadOnlyList<string> ProxyDomains(IEnumerable<string> input)
  {
-  var list=input.Select(x=>(x??"").Trim().TrimStart('.').ToLowerInvariant()).Where(x=>x.Length>0).Distinct().ToList();
+  var list=input.Select(x=>(x??"").Trim().TrimStart('.').ToLowerInvariant()).Where(x=>x.Length>0).Select(x=>Cidr(x) ?? x).Distinct().ToList();
   if(list.Count is <1 or >64)throw new InvalidDataException("走出口的网站要有 1 到 64 个");
-  foreach(var d in list)if(!DomainPattern.IsMatch(d))throw new InvalidDataException("网址格式不对："+d);
+  foreach(var d in list)if(!DomainPattern.IsMatch(d)&&Cidr(d) is null)throw new InvalidDataException("网址或 IP 格式不对："+d);
   return list;
+ }
+ /// <summary>IP check sites test from other addresses than their own page (Cloudflare trace on 1.1.1.1, Chinese IP
+ /// sites, DNS leak hosts). A customer who lists the check site expects every row on it to show the exit, so its
+ /// helper addresses come along automatically.</summary>
+ static readonly Dictionary<string,string[]> Companions=new()
+ {
+  ["ip.net.coffee"]=["1.1.1.1/32","ip138.com","ip.cn","ipleak.net"],
+ };
+ /// <summary>The customer's list plus the helper addresses of any check site on it.</summary>
+ public static IReadOnlyList<string> Expand(IEnumerable<string> list)
+ {
+  var all=list.ToList();
+  foreach(var (site,extra) in Companions)if(all.Any(d=>d==site||d.EndsWith("."+site,StringComparison.Ordinal)))all.AddRange(extra);
+  return all.Distinct().ToList();
+ }
+ /// <summary>A list line that is an IP address or range ("1.1.1.1", "1.1.1.0/24", IPv6 too), normalised to
+ /// "address/prefix"; null for a site name. Pages often check addresses directly (e.g. https://1.1.1.1/cdn-cgi/trace),
+ /// which name-based rules cannot catch.</summary>
+ public static string? Cidr(string line)
+ {
+  var slash=line.IndexOf('/');var host=slash<0?line:line[..slash];
+  if(!System.Net.IPAddress.TryParse(host,out var ip)||!AddressPolicy.IsLiteral(host))return null;
+  var max=ip.AddressFamily==System.Net.Sockets.AddressFamily.InterNetworkV6?128:32;
+  if(slash<0)return ip+"/"+max;
+  return int.TryParse(line[(slash+1)..],out var prefix)&&prefix>=8&&prefix<=max?System.Net.IPNetwork.Parse(ip+"/"+prefix).ToString():null;
+ }
+ /// <summary>Kernel rule for one list line (site name: it and its subdomains; IP/range: those addresses).</summary>
+ public static string Rule(string line,string target)
+ {
+  var cidr=Cidr(line);
+  return cidr is null?"DOMAIN-SUFFIX,"+line+","+target:(cidr.Contains(':')?"IP-CIDR6,":"IP-CIDR,")+cidr+","+target+",no-resolve";
  }
  /// <param name="proxyOnly">Null: everything goes through the exit (default). A list: only those sites (and their
  /// subdomains) go through the exit, everything else connects directly from this computer. This software's own
  /// checks (exit IP, DNS check, speed test) always go through the exit.</param>
  public static byte[] Build(JsonElement nodes,string controllerSecret,bool protectedMode,PrivateDns? dns,IReadOnlyList<DirectRule> direct,bool mux=false,IReadOnlyList<string>? proxyOnly=null)
  {
-  if(proxyOnly is not null)proxyOnly=ProxyDomains(proxyOnly);
+  if(proxyOnly is not null)proxyOnly=Expand(ProxyDomains(proxyOnly));
   ValidateNodes(nodes);
   if(!Guid.TryParse(controllerSecret,out _))throw new InvalidDataException("控制接口密钥无效");
   if(protectedMode && dns is null)throw new InvalidDataException("完整防护需要已核对的私有 DNS 配置");
@@ -90,7 +121,7 @@ public static class MihomoConfiguration
     // the listed sites and this software's own check names still use the private resolver through the exit.
     dnsConfig["nameserver"]=new[]{"https://223.5.5.5/dns-query","https://1.1.1.1/dns-query"};
     var policy=new Dictionary<string,object>();
-    foreach(var d in ClaudeAlways.Concat(proxyOnly).Concat(SelfChecks).Append(dns.Zone).Distinct())policy["+."+d]=new[]{dns.Resolver.AbsoluteUri+"#出口"};
+    foreach(var d in ClaudeAlways.Concat(proxyOnly).Concat(SelfChecks).Append(dns.Zone).Distinct().Where(d=>Cidr(d) is null))policy["+."+d]=new[]{dns.Resolver.AbsoluteUri+"#出口"};
     dnsConfig["nameserver-policy"]=policy;
    }
    config["dns"]=dnsConfig;
@@ -111,7 +142,7 @@ public static class MihomoConfiguration
   rules.AddRange(gateways.Select(g=>"IP-CIDR"+(g.Contains(':')?"6":"")+","+g+",出口,no-resolve"));
   rules.AddRange(SelfChecks.Select(d=>"DOMAIN-SUFFIX,"+d+",出口"));
   if(dns is not null)rules.Add("DOMAIN-SUFFIX,"+dns.Zone+",出口");
-  rules.AddRange(ClaudeAlways.Concat(proxyOnly).Distinct().Select(d=>"DOMAIN-SUFFIX,"+d+",出口"));
+  rules.AddRange(ClaudeAlways.Concat(proxyOnly).Distinct().Select(d=>Rule(d,"出口")));
   rules.AddRange(RoutingPolicy.Rules(direct).Where(r=>!r.StartsWith("MATCH,",StringComparison.Ordinal)));
   rules.Add("MATCH,DIRECT");
   return rules.ToArray();

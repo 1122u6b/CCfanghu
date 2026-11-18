@@ -1102,7 +1102,13 @@
   };
   A.routeSave = function () {
     var raw = field('routedomains') || '';
-    var list = raw.split(/[\s,，、;；]+/).map(function (x) { return x.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, ''); }).filter(Boolean);
+    // 粘贴整条网址也行：去掉 http(s):// 和路径；「1.1.1.0/24」这样的 IP 网段保留斜杠后面的位数。
+    var list = raw.split(/[\s,，、;；]+/).map(function (x) {
+      x = x.trim().replace(/^https?:\/\//, '');
+      if (/^[0-9a-fA-F.:]+\/\d{1,3}$/.test(x)) return x;
+      x = x.replace(/\/.*$/, '');
+      return (x.match(/:/g) || []).length === 1 ? x.replace(/:\d+$/, '') : x;   // 只给「网址:端口」去端口，IPv6 地址原样保留
+    }).filter(Boolean);
     if (!list.length) { P.toast('至少留一个网站'); return; }
     saveRoute(S.splitRoute.listed, list, '名单已保存，线路正在重建');
   };

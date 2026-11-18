@@ -130,7 +130,7 @@ sealed partial class Runtime:IDisposable
   if(filters.DefaultGuardsInstalled())filters.RemoveOwned();
   try
   {
-   var reject=MihomoConfiguration.ClaudeAlways.Concat(store.Settings.ProxyDomains).Distinct().Select(d=>"DOMAIN-SUFFIX,"+d+",REJECT");
+   var reject=MihomoConfiguration.ClaudeAlways.Concat(MihomoConfiguration.Expand(store.Settings.ProxyDomains)).Distinct().Select(d=>MihomoConfiguration.Rule(d,"REJECT"));
    var hold=new Dictionary<string,object>{{"mixed-port",17890},{"allow-lan",false},{"bind-address","127.0.0.1"},{"mode","rule"},{"log-level","warning"},
     {"external-controller","127.0.0.1:19090"},{"secret",kernel.Secret},{"ipv6",false},
     {"proxies",new object[]{new Dictionary<string,object>{{"name","本机原代理"},{"type",upstream.Type},{"server","127.0.0.1"},{"port",upstream.Port},{"udp",false}}}},

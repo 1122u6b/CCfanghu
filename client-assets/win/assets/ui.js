@@ -1110,7 +1110,7 @@
       (R.listed ? routeEditor(R) : '') + '</div>';
   }
   function routeEditor(R) {
-    return (true ? '<div class="hx-stack" style="padding:0 0 4px"><textarea class="hx-input" data-keep="routedomains" rows="4" aria-label="走出口的网站" placeholder="一行一个网站，例如 claude.ai（自动包含子域名）">' + esc((R.domains || []).join('\n')) + '</textarea>' +
+    return (true ? '<div class="hx-stack" style="padding:0 0 4px"><textarea class="hx-input" data-keep="routedomains" rows="4" aria-label="走出口的网站" placeholder="一行一个网站或 IP，例如 claude.ai（自动包含子域名）、1.1.1.1">' + esc((R.domains || []).join('\n')) + '</textarea>' +
         '<div style="display:flex;gap:8px;justify-content:flex-end">' + btn('text', '恢复默认', 'routeReset') + btn('secondary', '保存名单', 'routeSave') + '</div></div>' : '');
   }
   function settingsPage() {
