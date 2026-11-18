@@ -112,17 +112,17 @@ jobs:
           set -euo pipefail
           key_file="$RUNNER_TEMP/leyra-key"; trap 'rm -f "$key_file"' EXIT; umask 077
           printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
-          code=$(ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
+          code=$(ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@129.226.74.173 \
             'release=$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 "${release}admin.py" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-new --days 1 --note "automated Windows test"')
           [[ "$code" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]
           echo "code=$code" >> "$GITHUB_OUTPUT"
-          ui=$(ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
+          ui=$(ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@129.226.74.173 \
             'release=$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 "${release}admin.py" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-new --days 1 --note "automated UI click-through"')
           [[ "$ui" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]
           echo "ui_code=$ui" >> "$GITHUB_OUTPUT"
           # A temporary SOCKS5 proxy on the server stands in for the customer's own IP (loopback only, 40 minutes).
           port=$((20000 + RANDOM % 20000)); pass=$(openssl rand -hex 12)
-          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
+          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@129.226.74.173 \
             "cat > /tmp/leyra-ci-socks.py && (setsid nohup python3 /tmp/leyra-ci-socks.py $port ci $pass 2400 >/dev/null 2>&1 &) && sleep 1 && ss -ltn | grep -q ':$port '" < deploy/ci_socks5.py
           # GitHub refuses to pass on a URL containing user:password@, so hand over the parts.
           echo "socks_port=$port" >> "$GITHUB_OUTPUT"; echo "socks_pass=$pass" >> "$GITHUB_OUTPUT"
@@ -527,5 +527,5 @@ jobs:
           [[ -z "$UI_CODE" || "$UI_CODE" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]
           key_file="$RUNNER_TEMP/leyra-key"; trap 'rm -f "$key_file"' EXIT; umask 077
           printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
-          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
+          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@129.226.74.173 \
             "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $TEST_CODE; [ -n '$UI_CODE' ] && sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $UI_CODE; pkill -f '[l]eyra-ci-socks.py' || true"

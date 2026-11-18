@@ -54,7 +54,7 @@ jobs:
           umask 077
           printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
           ssh-keygen -y -f "$key_file" > /dev/null
-          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 'sudo -n python3 -' < deploy/inspect_existing_server.py
+          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@129.226.74.173 'sudo -n python3 -' < deploy/inspect_existing_server.py
   exit-latency:
     if: ${{ inputs.allow_hosted_compute == true && inputs.exit_latency == true }}
     runs-on: ubuntu-24.04
@@ -69,7 +69,7 @@ jobs:
           set -euo pipefail
           key_file="$RUNNER_TEMP/leyra-key"; trap 'rm -f "$key_file"' EXIT; umask 077
           printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
-          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 'sudo -n python3 -' < deploy/measure_exit_latency.py
+          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@129.226.74.173 'sudo -n python3 -' < deploy/measure_exit_latency.py
   gateway-log:
     if: ${{ inputs.allow_hosted_compute == true && inputs.gateway_log == true }}
     runs-on: ubuntu-24.04
@@ -84,7 +84,7 @@ jobs:
           set -euo pipefail
           key_file="$RUNNER_TEMP/leyra-key"; trap 'rm -f "$key_file"' EXIT; umask 077
           printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
-          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
+          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@129.226.74.173 \
             "sudo -n journalctl -u leyra-server.service --since '-3h' --no-pager -o short-iso | grep -vE 'gateway request ended: (CancelledError|ConnectionResetError|IncompleteReadError|BrokenPipeError)' | tail -n 200; echo '--- counts ---'; sudo -n journalctl -u leyra-server.service --since '-3h' --no-pager | grep -oE 'upstream failed: [^ ]+ [A-Za-z]+|gateway request ended: [A-Za-z]+|Leyra private gateway started' | sort | uniq -c | sort -rn | head -30"
   device:
     if: ${{ inputs.allow_hosted_compute == true && inputs.new_device_name != '' }}
@@ -109,7 +109,7 @@ jobs:
           [[ "$encoded" =~ ^[A-Za-z0-9+/=]+$ ]]
           remote="release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); name=\$(printf %s '$encoded' | base64 -d); out=\$(mktemp); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 device-new \"\$name\" --out \"\$out\" >/dev/null && sudo -n cat \"\$out\"; sudo -n rm -f \"\$out\""
           mkdir -p device
-          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 "$remote" > device/leyra-device.json
+          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@129.226.74.173 "$remote" > device/leyra-device.json
           python3 -c "import json;d=json.load(open('device/leyra-device.json'))['leyra_server'];assert d['role']=='device' and len(d['device_id'])==32;print('LEYRA_DEVICE_CREATED=YES')"
       - uses: actions/upload-artifact@v4
         with:
@@ -134,7 +134,7 @@ jobs:
           umask 077
           printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
           mkdir -p login
-          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@43.129.187.240 \
+          ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@129.226.74.173 \
             'release=$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 "${release}admin.py" --profile /root/leyra-server-connection.json --connect 127.0.0.1 login-link' > login/link.txt
           grep -qE '^https://leyra\.xin/admin#adm_[A-Za-z0-9_-]{40,80}$' login/link.txt
           { echo '打开下面的链接进入 Leyra 管理后台（7 天内有效，请勿转发）。'; echo '进去后在「安全」页设置管理员账号密码，以后直接打开 https://leyra.xin/admin 登录即可。'; echo; cat login/link.txt; } > login/管理后台登录链接.txt

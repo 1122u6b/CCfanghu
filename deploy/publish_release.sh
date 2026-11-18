@@ -16,7 +16,7 @@ fi
 sha=$(sha256sum "$setup" | cut -d' ' -f1)
 key_file="${RUNNER_TEMP:-/tmp}/leyra-key"; umask 077
 printf '%s\n' "$LEYRA_SSH_KEY" | tr -d '\r' > "$key_file"
-host=ubuntu@43.129.187.240
+host=ubuntu@129.226.74.173
 stage="/tmp/leyra-release-$version-$sha"
 here=$(cd "$(dirname "$0")" && pwd)
 ssh_options=(-T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$here/known_hosts")
