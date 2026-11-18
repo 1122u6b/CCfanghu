@@ -306,12 +306,14 @@ jobs:
           WaitFor 'protected' 150 | Out-Null; Start-Sleep 5   # the previous step just switched exits; let the line settle
           function Route($json) { Ask $json | Out-Null; Start-Sleep 4; return (WaitFor 'protected' 150) }
           $ipAll = SeenIp; Write-Host "   everything through the exit: sites see $ipAll"
-          $s = Route '{"type":"set_route_mode","listed":true,"domains":["ipify.org"]}'
-          $ipListed = SeenIp; Write-Host "   list = ipify.org: it sees $ipListed"
+          # icanhazip.com stands in for a listed site (ipify.org always goes through the exit: the browser check uses it).
+          function SeenIp2 { for ($k = 1; $k -le 3; $k++) { try { return (Invoke-WebRequest https://icanhazip.com -UseBasicParsing -TimeoutSec 25).Content.Trim() } catch { $last = 'error ' + $_.Exception.Message; Start-Sleep 3 } }; return $last }
+          $s = Route '{"type":"set_route_mode","listed":true,"domains":["icanhazip.com"]}'
+          $ipListed = SeenIp2; Write-Host "   list = icanhazip.com: it sees $ipListed"
           if ($s -notmatch 'protected') { $failures += "list mode did not come back protected: $s" }
           $s = Route '{"type":"set_route_mode","listed":true,"domains":["example.com"]}'
-          $ipDirect = SeenIp; $web = try { (Invoke-WebRequest https://www.microsoft.com -UseBasicParsing -TimeoutSec 25).StatusCode } catch { 0 }
-          Write-Host "   list = example.com: ipify (not listed) sees $ipDirect, another site answers $web"
+          $ipDirect = SeenIp2; $web = try { (Invoke-WebRequest https://www.microsoft.com -UseBasicParsing -TimeoutSec 25).StatusCode } catch { 0 }
+          Write-Host "   list = example.com: icanhazip (not listed) sees $ipDirect, another site answers $web"
           $s = Route '{"type":"set_route_mode","listed":false}'
           $ipBack = SeenIp; Write-Host "   list mode off again: sites see $ipBack"
           if ($ipAll -notmatch '^\d+\.\d+\.\d+\.\d+$') { $failures += "could not read the exit IP: $ipAll" }

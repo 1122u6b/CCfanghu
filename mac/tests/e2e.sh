@@ -33,9 +33,11 @@ sudo pfctl -a com.apple/250.LeyraConnect -s rules | grep -q leyra-default-block 
 if curl -s --max-time 8 --interface "$PHYS" https://1.1.1.1 -o /dev/null; then fail "direct connection on $PHYS was not blocked"; else echo "   direct connection on $PHYS blocked"; fi
 
 echo "6. only listed sites through the exit"
-ask '{"type":"set_route_mode","listed":true,"domains":["ipify.org"]}' >/dev/null; sleep 4; wait_for '^protected' 150 >/dev/null || fail "list mode not protected"
-L=$(ip); ask '{"type":"set_route_mode","listed":true,"domains":["example.com"]}' >/dev/null; sleep 4; wait_for '^protected' 150 >/dev/null
-D=$(ip); W=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://www.apple.com/)
+# icanhazip.com stands in for a listed site (ipify.org always goes through the exit: the browser check uses it).
+ip2(){ for k in 1 2 3; do r=$(curl -s --max-time 20 https://icanhazip.com | tr -d '\n') && [[ "$r" =~ ^[0-9.]+$ ]] && { echo "$r"; return; }; sleep 3; done; echo "error"; }
+ask '{"type":"set_route_mode","listed":true,"domains":["icanhazip.com"]}' >/dev/null; sleep 4; wait_for '^protected' 150 >/dev/null || fail "list mode not protected"
+L=$(ip2); ask '{"type":"set_route_mode","listed":true,"domains":["example.com"]}' >/dev/null; sleep 4; wait_for '^protected' 150 >/dev/null
+D=$(ip2); W=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://www.apple.com/)
 ask '{"type":"set_route_mode","listed":false}' >/dev/null; sleep 4; wait_for '^protected' 150 >/dev/null
 B=$(ip); echo "   listed: $L, not listed: $D (other site $W), back: $B"
 [ "$L" = "$EXIT" ] || fail "listed site did not go through the exit: $L"
