@@ -2,6 +2,7 @@
 # Builds Leyra-<version>.pkg on a Mac (GitHub macOS runner). One package for Apple silicon and Intel Macs.
 # Not signed with an Apple developer certificate: binaries get an ad-hoc signature (required on Apple silicon).
 # The repository is public, so the macOS runners used by mac-validation.yml cost nothing.
+# Version comes from windows/Leyra.Windows.Core/ProductInfo.cs (shared by both clients).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 V=$(grep -o 'Version="[^"]*"' windows/Leyra.Windows.Core/ProductInfo.cs | cut -d'"' -f2)
