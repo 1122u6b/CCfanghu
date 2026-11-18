@@ -189,6 +189,8 @@ sealed partial class Runtime
  object[] conflicts=[];DateTimeOffset lastConflictScan=DateTimeOffset.MinValue;
  object[] ScanConflicts()
  {
+  // Coexist mode: the customer's own proxy app is wanted, not a conflict.
+  if(coexist)return [];
   var items=new List<object>(proxy.Conflicts());var own=Path.GetFullPath(kernel.Executable);
   var running=new Dictionary<string,List<string>>(StringComparer.OrdinalIgnoreCase);
   foreach(var p in Process.GetProcesses())

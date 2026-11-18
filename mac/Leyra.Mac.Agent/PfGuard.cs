@@ -74,6 +74,7 @@ sealed class PfGuard:IDisposable
  public void RemoveOwned()
  {
   MacDns.Restore();   // protection off: the Mac's own DNS settings come back with the open network
+  CoexistProxy.Restore();   // and the customer's own system proxy (coexist mode)
   try{Pfctl("-a",Anchor,"-F","rules");}catch(Exception e)when(e is InvalidOperationException or TimeoutException){Program.Log("removing pf rules",e);}
   if(!string.IsNullOrEmpty(token)){try{Pfctl("-X",token);}catch(Exception e)when(e is InvalidOperationException or TimeoutException){}}
   token=null;

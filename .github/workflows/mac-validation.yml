@@ -114,6 +114,9 @@ jobs:
           SOCKS_PORT: ${{ needs.test-code.outputs.socks_port }}
           SOCKS_PASS: ${{ needs.test-code.outputs.socks_pass }}
         run: mac/tests/e2e.sh
+      - name: Coexist with the customer's own proxy app (${{ matrix.chip }})
+        if: matrix.chip == 'intel'
+        run: mac/tests/coexist.sh
       - name: Fresh install state for the click-through (same Mac may activate again with its code)
         if: matrix.chip == 'apple-silicon'
         run: |
