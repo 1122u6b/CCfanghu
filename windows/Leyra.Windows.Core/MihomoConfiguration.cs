@@ -98,7 +98,8 @@ public static class MihomoConfiguration
   else config["dns"]=new {enable=false};
   return JsonSerializer.SerializeToUtf8Bytes(config,new JsonSerializerOptions{WriteIndented=true});
  }
- static readonly string[] SelfChecks=["speed.cloudflare.com","gstatic.com"];
+ // The browser check reads the browser's address from ipify: it must see the exit in every mode.
+ static readonly string[] SelfChecks=["speed.cloudflare.com","gstatic.com","ipify.org"];
  static string[] ListedRules(IEnumerable<string> gateways,IReadOnlyList<DirectRule> direct,IReadOnlyList<string> proxyOnly,PrivateDns? dns)
  {
   var rules=new List<string>();

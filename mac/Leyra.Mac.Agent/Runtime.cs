@@ -111,6 +111,7 @@ sealed partial class Runtime:IDisposable
   }
  }
  // Coexist mode (Mac): the customer's own proxy app stays the way out for everything but the listed sites.
+ string? realIp; // coexist mode: this computer's own address (asked directly), to tell real leaks from the customer's proxy
  bool coexist;CoexistProxy.Upstream? upstream;
  void ApplyGuard(ulong luid)
  {
@@ -145,6 +146,8 @@ sealed partial class Runtime:IDisposable
    var rules=(System.Text.Json.Nodes.JsonArray)built["rules"]!;rules[rules.Count-1]="MATCH,本机原代理";
    await kernel.Start(System.Text.Encoding.UTF8.GetBytes(built.ToJsonString()),ct);
    CoexistProxy.Take();dnsVerified=true;tunnel=0;
+   try{using var direct=new HttpClient(new HttpClientHandler{UseProxy=false}){Timeout=TimeSpan.FromSeconds(10)};var ip=(await direct.GetStringAsync("https://api.ipify.org",ct)).Trim();realIp=System.Net.IPAddress.TryParse(ip,out _)?ip:null;}
+   catch(Exception e)when(e is HttpRequestException or TaskCanceledException){realIp=null;}
   }
   else
   {

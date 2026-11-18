@@ -287,7 +287,11 @@ sealed partial class Runtime
   string exposure="clean";var detail=new List<string>();
   var leaked=candidates.Where(c=>c.Type is "srflx" or "prflx" or "relay"&&AddressPolicy.IsPublic(c.Ip)&&c.Ip!=exitIp).Select(c=>c.Ip).Distinct().ToList();
   if(seenIp is not null&&AddressPolicy.IsPublic(seenIp)&&seenIp!=exitIp)leaked.Add(seenIp);
-  if(leaked.Count>0){exposure="real";detail.Add("看到了非出口的公网地址："+string.Join("、",leaked.Distinct()));}
+  // Coexist mode: addresses of the customer's own proxy are expected; only this computer's real address is a leak.
+  var bypassed=false;
+  if(coexist){bypassed=seenIp is not null&&seenIp!=exitIp&&seenIp!=realIp;leaked=leaked.Where(ip=>realIp is not null&&ip==realIp).ToList();}
+  if(leaked.Count>0){exposure="real";detail.Add("看到了你的真实地址："+string.Join("、",leaked.Distinct()));}
+  else if(bypassed){exposure="unknown";detail.Add("这个浏览器没有经过 Leyra（可能装了代理插件或单独设了代理），在它里面 Claude 不会走你的出口");}
   else if(candidates.Any(c=>AddressPolicy.IsLiteral(c.Ip)&&!AddressPolicy.IsPublic(c.Ip)&&!IPAddress.IsLoopback(IPAddress.Parse(c.Ip)))){exposure="lan";detail.Add("WebRTC 暴露了局域网地址");}
   else detail.Add("WebRTC 没有暴露其他地址");
   if(exposure=="clean"&&(seenIp is null||exitIp.Length==0))exposure="unknown";
