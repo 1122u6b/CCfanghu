@@ -32,6 +32,17 @@ echo "   listed: $L, other site: $O (real $REAL); own proxy handled: $(sort -u $
 grep -q icanhazip $LOG || fail "other sites were not handed to the customer's own proxy"
 grep -q ipify $LOG && fail "the listed site went through the customer's proxy instead of the exit"
 
+echo "3b. Claude always through the exit (not on the list), also while the line is down"
+C=$(curl -s --max-time 25 -x http://127.0.0.1:17890 https://claude.ai/cdn-cgi/trace | sed -n 's/^ip=//p')
+echo "   claude.ai sees $C (exit $L)"; [ "$C" = "$L" ] || fail "Claude did not go through the exit in coexist mode: $C"
+sudo pkill -9 -x mihomo; OTHER=""; end=$((SECONDS+25))
+while [ $SECONDS -lt $end ]; do
+  ip=$(curl -s --max-time 5 -x http://127.0.0.1:17890 https://claude.ai/cdn-cgi/trace | sed -n 's/^ip=//p')
+  [ -n "$ip" ] && [ "$ip" != "$L" ] && OTHER="$OTHER $ip"; sleep 0.5
+done
+echo "   other addresses while the line was down:${OTHER:- none}"; [ -z "$OTHER" ] || fail "while the line was down Claude went out through another address:$OTHER"
+s=$(wait_for '^protected' 150) || fail "coexist protection did not come back after the line broke: $s"
+
 echo "4. the customer's proxy app sets itself back as system proxy: Leyra takes it again"
 echo "$SVC" | while read -r s; do sudo networksetup -setwebproxy "$s" 127.0.0.1 7890; done
 end=$((SECONDS+20)); until proxyof | grep -q "Port: 17890" || [ $SECONDS -gt $end ]; do sleep 2; done

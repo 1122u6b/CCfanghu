@@ -40,7 +40,17 @@ sealed partial class Runtime
    ["P5"]="共存模式：Claude 网页和客户端经 Leyra 出口"+(exitVerified?"（出口 "+exitIp+"），其他流量走你自己的代理":"，正在确认"),["L8"]="共存模式：其他流量本来就走你自己的代理"};
   void Add(string id,string verdict,string detail)
   {
-   if(coexist&&coexistNote.TryGetValue(id,out var note)){verdict=id=="P5"&&exitVerified&&state=="protected"?"pass":"info";detail=note;}
+   if(coexist&&coexistNote.TryGetValue(id,out var note))
+   {
+    verdict=id=="P5"&&exitVerified&&state=="protected"?"pass":"info";detail=note;
+    if(id=="P5")
+    {
+     // Measured, not assumed: where the Claude desktop app is actually connected right now.
+     var direct=ClaudeDirect();
+     if(direct>0){verdict="fail";detail="Claude 客户端有 "+direct+" 条连接没有经过 Leyra，直接连了外网：请完全退出 Claude 再打开";}
+     else detail+=direct==0?"；已实测 Claude 客户端只连 Leyra":"；Claude 客户端现在没在运行";
+    }
+   }
    items.Add(new{id,verdict,detail});
   }
   var guarded=filters.DefaultGuardsInstalled();var live=state=="protected";

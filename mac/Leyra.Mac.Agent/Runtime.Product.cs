@@ -273,6 +273,23 @@ sealed partial class Runtime
   lock(browserResults)browserResults.Remove(browser);
   return new{launch=path,url=probe.Begin(browser)};
  }
+ /// <summary>Coexist mode: the Claude desktop app must only talk to Leyra on 127.0.0.1. Number of its connections that go
+ /// straight to the internet instead (bypassing the exit); -1 when the app is not running.</summary>
+ int ClaudeDirect()
+ {
+  var start=new ProcessStartInfo("/usr/sbin/lsof",["-nP","-a","-c","Claude","-iTCP","-sTCP:ESTABLISHED","-Fn"]){UseShellExecute=false,RedirectStandardOutput=true};
+  string text;using(var p=Process.Start(start)){if(p is null)return -1;text=p.StandardOutput.ReadToEnd();p.WaitForExit(10000);}
+  var running=Process.GetProcesses().Any(p=>{using(p)return p.ProcessName.StartsWith("Claude",StringComparison.Ordinal);});
+  if(!running)return -1;
+  var count=0;
+  foreach(var line in text.Split('\n'))
+  {
+   var i=line.IndexOf("->",StringComparison.Ordinal);if(!line.StartsWith('n')||i<0)continue;
+   var remote=line[(i+2)..];var colon=remote.LastIndexOf(':');var host=(colon>0?remote[..colon]:remote).Trim('[',']');
+   if(AddressPolicy.IsPublic(host))count++;
+  }
+  return count;
+ }
  object BrowserReport(string browser,string? seenIp,IReadOnlyList<(string Ip,string Type)> candidates)
  {
   string exposure="clean";var detail=new List<string>();

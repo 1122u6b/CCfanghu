@@ -340,6 +340,23 @@ jobs:
           if ($ownWeb -ne 200) { $failures += "the customer's own proxy was blocked in coexist mode: $ownWeb" }
           Ask '{"type":"check_conflicts"}' | Out-Null
           if ((Get-Content "C:\LeyraCi\out_$script:n.json" -Raw) -match 'proxy-owner') { $failures += 'coexist mode still asks to quit the customer proxy' }
+          # Claude always through the exit, although the list (ipify.org only) does not name it.
+          $trace = try { (Invoke-WebRequest https://claude.ai/cdn-cgi/trace -Proxy http://127.0.0.1:17890 -UseBasicParsing -TimeoutSec 25).Content } catch { '' }
+          $claudeIp = ([regex]::Match($trace, 'ip=([0-9a-fA-F.:]+)')).Groups[1].Value; Write-Host "   claude.ai sees $claudeIp (exit $ipAll)"
+          if ($claudeIp -ne $ipAll) { $failures += "Claude did not go through the exit in coexist mode: $claudeIp" }
+          # The line breaks (kernel ended): Claude must be refused or still on the exit, never another address.
+          Stop-Process -Name mihomo -Force -ErrorAction SilentlyContinue
+          $seen = @(); $end = [DateTime]::UtcNow.AddSeconds(25)
+          while ([DateTime]::UtcNow -lt $end) {
+            $tr = try { (Invoke-WebRequest https://claude.ai/cdn-cgi/trace -Proxy http://127.0.0.1:17890 -UseBasicParsing -TimeoutSec 5).Content } catch { '' }
+            $ip = ([regex]::Match($tr, 'ip=([0-9a-fA-F.:]+)')).Groups[1].Value; if ($ip) { $seen += $ip }
+            Start-Sleep -Milliseconds 500
+          }
+          $other = $seen | Where-Object { $_ -ne $ipAll } | Select-Object -Unique
+          Write-Host "   while the line was down and back: Claude answered $($seen.Count) times, other addresses: $($other -join ',')"
+          if ($other) { $failures += "while the line was down Claude went out through another address: $($other -join ',')" }
+          $s = WaitFor 'protected' 150
+          if ($s -notmatch 'protected') { $failures += "coexist protection did not come back after the line broke: $s" }
           Set-ItemProperty $is ProxyServer '127.0.0.1:7890'
           $end = [DateTime]::UtcNow.AddSeconds(25); while ((Get-ItemProperty $is).ProxyServer -ne '127.0.0.1:17890' -and [DateTime]::UtcNow -lt $end) { Start-Sleep 2 }
           if ((Get-ItemProperty $is).ProxyServer -ne '127.0.0.1:17890') { $failures += 'Leyra did not take the system proxy back' } else { Write-Host '   taken back after the customer app changed it' }

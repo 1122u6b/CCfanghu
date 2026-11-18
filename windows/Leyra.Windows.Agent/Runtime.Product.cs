@@ -282,6 +282,14 @@ sealed partial class Runtime
   lock(browserResults)browserResults.Remove(browser);
   return new{launch=path,url=probe.Begin(browser)};
  }
+ /// <summary>Coexist mode: the Claude desktop app must only talk to Leyra on 127.0.0.1. Number of its connections that go
+ /// straight to the internet instead (bypassing the exit); -1 when the app is not running.</summary>
+ int ClaudeDirect()
+ {
+  var pids=new HashSet<int>();foreach(var p in Process.GetProcessesByName("Claude"))using(p)pids.Add(p.Id);
+  if(pids.Count==0)return -1;
+  return EstablishedTcp().Count(c=>pids.Contains(c.Pid)&&AddressPolicy.IsPublic((c.Remote.IsIPv4MappedToIPv6?c.Remote.MapToIPv4():c.Remote).ToString()));
+ }
  object BrowserReport(string browser,string? seenIp,IReadOnlyList<(string Ip,string Type)> candidates)
  {
   string exposure="clean";var detail=new List<string>();

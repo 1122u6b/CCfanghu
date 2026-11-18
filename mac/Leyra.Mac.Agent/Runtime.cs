@@ -113,12 +113,32 @@ sealed partial class Runtime:IDisposable
  // Coexist mode (Mac): the customer's own proxy app stays the way out for everything but the listed sites.
  string? realIp; // coexist mode: this computer's own address (asked directly), to tell real leaks from the customer's proxy
  bool coexist;CoexistProxy.Upstream? upstream;
+ /// <summary>Coexist mode while the line is down or being rebuilt: Leyra stays the system proxy with a holding
+ /// configuration — Claude (and the customer's list) is refused, everything else goes on to the customer's own
+ /// proxy. Claude therefore never leaves through anything but the exit. If even this cannot start, the system
+ /// proxy still points at Leyra: Claude stays unreachable rather than using another address.</summary>
+ void HoldCoexist()
+ {
+  if(upstream is null){filters.RemoveOwned();return;}
+  try
+  {
+   var reject=MihomoConfiguration.ClaudeAlways.Concat(store.Settings.ProxyDomains).Distinct().Select(d=>"DOMAIN-SUFFIX,"+d+",REJECT");
+   var hold=new Dictionary<string,object>{{"mixed-port",17890},{"allow-lan",false},{"bind-address","127.0.0.1"},{"mode","rule"},{"log-level","warning"},
+    {"external-controller","127.0.0.1:19090"},{"secret",kernel.Secret},{"ipv6",false},
+    {"proxies",new object[]{new Dictionary<string,object>{{"name","本机原代理"},{"type",upstream.Type},{"server","127.0.0.1"},{"port",upstream.Port},{"udp",false}}}},
+    {"rules",reject.Append("MATCH,本机原代理").ToArray()},{"dns",new{enable=false}},{"tun",new{enable=false}}};
+   using var limit=new CancellationTokenSource(TimeSpan.FromSeconds(15));
+   kernel.Start(JsonSerializer.SerializeToUtf8Bytes(hold),limit.Token).GetAwaiter().GetResult();
+   CoexistProxy.Take();
+  }
+  catch(Exception e)when(e is not OutOfMemoryException){Program.Log("coexist holding configuration",e);}
+ }
  void ApplyGuard(ulong luid)
  {
   if(profile is null)return;
   // No firewall rules in coexist mode: they would cut the customer's own proxy. While the line is down the
   // customer's own proxy settings are back, so their network keeps working (never the bare real network).
-  if(coexist){filters.RemoveOwned();return;}
+  if(coexist){HoldCoexist();return;}
   var executable=File.Exists(kernel.Executable)?kernel.Executable:Environment.ProcessPath!;
   var endpoint=new System.Net.IPEndPoint(IPAddress.Parse(profile.Host),profile.Port);
   filters.Apply(PfPlan.Create([new GatewayEndpoint(endpoint,6)],KernelSession.TunnelName,store.Settings.DirectRules,store.Settings.ProxyOnlyListed));
