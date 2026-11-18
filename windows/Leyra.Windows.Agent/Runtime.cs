@@ -10,7 +10,7 @@ namespace Leyra.Windows.Agent;
 
 sealed partial class Runtime:IDisposable
 {
- readonly SystemProxy proxy;readonly AgentStore store;readonly SemaphoreSlim gate=new(1,1);readonly KernelSession kernel=new();readonly WfpEngine filters=new();readonly OwnerProof ownerProof=new();
+ readonly SystemProxy proxy;readonly CoexistProxy coexistProxy;readonly AgentStore store;readonly SemaphoreSlim gate=new(1,1);readonly KernelSession kernel=new();readonly WfpEngine filters=new();readonly OwnerProof ownerProof=new();
  ServerProfile? profile;PrivateServerClient? cloud;JsonElement nodes=JsonSerializer.SerializeToElement(Array.Empty<object>());
  string state="starting",reason="route",lastError="",exitIp="",selected="",mode="auto";
  int? exitCount;DateTimeOffset exitAskAt=DateTimeOffset.MinValue;
@@ -40,7 +40,7 @@ sealed partial class Runtime:IDisposable
  readonly BrowserProbe probe;DateTimeOffset configAt=DateTimeOffset.MinValue;
  public Runtime(AgentStore store)
  {
-  this.store=store;proxy=new SystemProxy(store.Owner);profile=store.Profile();if(profile is not null)cloud=new PrivateServerClient(profile);
+  this.store=store;proxy=new SystemProxy(store.Owner);coexistProxy=new CoexistProxy(store.Owner);profile=store.Profile();if(profile is not null)cloud=new PrivateServerClient(profile);
   probe=new BrowserProbe(BrowserReport);Publish();
  }
  static JsonElement Json(object value)=>JsonSerializer.SerializeToElement(value);
@@ -78,8 +78,8 @@ sealed partial class Runtime:IDisposable
      }
     }
     if(profile is null){state="not_activated";}
-    else if(await OwnExitMissing(stop)){kernel.Stop();if(filters.DefaultGuardsInstalled())filters.RemoveOwned();configured=false;state="provisioning";reason="own_exit";}
-    else if(!store.Settings.Enabled || store.Settings.PausedUntil>DateTimeOffset.UtcNow.ToUnixTimeSeconds()){kernel.Stop();if(filters.DefaultGuardsInstalled())filters.RemoveOwned();configured=false;state="paused";}
+    else if(await OwnExitMissing(stop)){kernel.Stop();Unguard();configured=false;state="provisioning";reason="own_exit";}
+    else if(!store.Settings.Enabled || store.Settings.PausedUntil>DateTimeOffset.UtcNow.ToUnixTimeSeconds()){kernel.Stop();Unguard();configured=false;state="paused";}
     else if(!kernel.Alive || !configured){if(DateTimeOffset.UtcNow>=retryAt)await StartProtected(stop);}
     else
     {
@@ -111,9 +111,15 @@ sealed partial class Runtime:IDisposable
    try{await Task.Delay(TimeSpan.FromMinutes(10),stop);}catch(OperationCanceledException){return;}
   }
  }
+ // Coexist mode: the customer's own proxy app stays the way out for everything but the listed sites.
+ bool coexist;CoexistProxy.Upstream? upstream;
+ void Unguard(){if(filters.DefaultGuardsInstalled())filters.RemoveOwned();coexistProxy.Restore();}
  void ApplyGuard(ulong luid)
  {
   if(profile is null)return;
+  // No filtering rules in coexist mode: they would cut the customer's own proxy. While the line is down the
+  // customer's own proxy settings are back, so their network keeps working (never the bare real network).
+  if(coexist){Unguard();return;}
   var executable=File.Exists(kernel.Executable)?kernel.Executable:Environment.ProcessPath!;
   var endpoint=new System.Net.IPEndPoint(IPAddress.Parse(profile.Host),profile.Port);
   filters.Apply(WfpPlan.Create(executable,Environment.ProcessPath!,[new GatewayEndpoint(endpoint,6)],[endpoint],luid,store.Settings.DirectRules,store.Settings.ProxyOnlyListed));
@@ -121,6 +127,7 @@ sealed partial class Runtime:IDisposable
  async Task StartProtected(CancellationToken stop)
  {
   if(profile is null || cloud is null)return;
+  upstream=coexistProxy.Find();coexist=upstream is not null;
   state="starting";dnsVerified=false;exitVerified=false;Publish();ApplyGuard(0);
   if(startCancel.IsCancellationRequested){startCancel.Dispose();startCancel=new();}
   using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop,startCancel.Token);deadline.CancelAfter(TimeSpan.FromSeconds(90));var ct=deadline.Token;
@@ -132,10 +139,22 @@ sealed partial class Runtime:IDisposable
   var dns=PrivateDns.Parse(await cloud.RpcAsync(new{type="dns_config"},ct),profile);
   // The gateway accepts multiplexed connections: new connections then cost one round trip to Hong Kong.
   var mux=config.TryGetProperty("mux",out var muxKind)&&muxKind.ValueKind==JsonValueKind.String&&muxKind.GetString()=="yamux";
+  if(coexist&&upstream is not null)
+  {
+   // Local proxy only: listed sites through the exit, everything else to the customer's own proxy.
+   var built=System.Text.Json.Nodes.JsonNode.Parse(MihomoConfiguration.Build(nodes,kernel.Secret,false,null,store.Settings.DirectRules,mux,store.Settings.ProxyDomains))!.AsObject();
+   ((System.Text.Json.Nodes.JsonArray)built["proxies"]!).Add(new System.Text.Json.Nodes.JsonObject{["name"]="本机原代理",["type"]=upstream.Type,["server"]="127.0.0.1",["port"]=upstream.Port,["udp"]=false});
+   var rules=(System.Text.Json.Nodes.JsonArray)built["rules"]!;rules[rules.Count-1]="MATCH,本机原代理";
+   await kernel.Start(System.Text.Encoding.UTF8.GetBytes(built.ToJsonString()),ct);
+   coexistProxy.Take();dnsVerified=true;tunnel=0;
+  }
+  else
+  {
   await kernel.Start(MihomoConfiguration.Build(nodes,kernel.Secret,true,dns,store.Settings.DirectRules,mux,store.Settings.ProxyOnlyListed?store.Settings.ProxyDomains:null),ct);
   for(var i=0;i<40;i++){tunnel=KernelSession.Tunnel();if(tunnel!=0)break;await Task.Delay(200,ct);}
   if(tunnel==0)throw new InvalidOperationException("没有找到已启动的本机 TUN 接口");
   ApplyGuard(tunnel);await VerifyDns(ct);
+  }
   for(var attempt=1;;attempt++)
   {
    try{exitIp=await ObserveExit(ct);exitVerified=true;break;}
@@ -286,7 +305,14 @@ sealed partial class Runtime:IDisposable
  async Task Health(CancellationToken stop)
  {
   if(cloud is null)throw new InvalidOperationException("尚未连接服务器");
-  if(!kernel.Alive || KernelSession.Tunnel()!=tunnel || !filters.DefaultGuardsInstalled())throw new InvalidOperationException("防护组件或本机规则发生变化");
+  if(coexist)
+  {
+   if(!kernel.Alive)throw new InvalidOperationException("网络组件已退出");
+   // The customer's proxy app may set the system proxy back to itself, or clear it when it quits: take it again
+   // at once, so the listed sites never leave through anything but the exit.
+   if(!coexistProxy.Holding()){coexistProxy.Take();Record("repair","系统代理被其他软件改动，已接回 Leyra");}
+  }
+  else if(!kernel.Alive || KernelSession.Tunnel()!=tunnel || !filters.DefaultGuardsInstalled())throw new InvalidOperationException("防护组件或本机规则发生变化");
   using(var local=CancellationTokenSource.CreateLinkedTokenSource(stop))
   {
    local.CancelAfter(TimeSpan.FromSeconds(4));
@@ -294,8 +320,12 @@ sealed partial class Runtime:IDisposable
    catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidDataException or JsonException){/* 读流量只是显示用，下次再读 */}
   }
   heartbeat=DateTimeOffset.UtcNow;lastHealth=heartbeat;
+  if(coexist){if(!exitVerified)throw new InvalidOperationException("还没有确认 Claude 走你的出口");}
+  else
+  {
   var evidence=new ProtectionEvidence(kernel.Alive,tunnel!=0,filters.DefaultGuardsInstalled(),dnsVerified,exitVerified,heartbeat);
   if(evidence.Assess(heartbeat)!=ProtectionPhase.Protected)throw new InvalidOperationException("本机防护证据不完整");
+  }
   state="protected";failures=0;if(triedExits.Count>0)triedExits.Clear();
  }
  object BuildStatus()
@@ -379,7 +409,7 @@ sealed partial class Runtime:IDisposable
     case "trial_quit":
      // Trial over and the customer chose to quit: stop taking over the network until a code is entered.
      store.Settings.Enabled=false;store.Settings.QuitPause=true;store.Settings.PausedUntil=0;store.Save();
-     kernel.Stop();filters.RemoveOwned();configured=false;state="paused";Record("paused","quit");return new{saved=true};
+     kernel.Stop();Unguard();configured=false;state="paused";Record("paused","quit");return new{saved=true};
     case "consent":store.Settings.ConsentVersion=request.GetProperty("version").GetInt32();store.Save();return new{saved=true};
     case "proxy_off":return proxy.Disable();
     case "proxy_undo":return proxy.Undo();
@@ -389,7 +419,7 @@ sealed partial class Runtime:IDisposable
     case "pause":
      NeedOwner(request);var minutes=request.GetProperty("minutes").GetInt32();if(minutes is <1 or >1440)throw new InvalidDataException("暂停时间无效");
      store.Settings.QuitPause=Text(request,"reason")=="quit";store.Settings.Enabled=!store.Settings.QuitPause;store.Settings.PausedUntil=DateTimeOffset.UtcNow.AddMinutes(minutes).ToUnixTimeSeconds();store.Save();
-     kernel.Stop();filters.RemoveOwned();configured=false;state="paused";Record("paused",store.Settings.QuitPause?"quit":minutes.ToString());return new{saved=true};
+     kernel.Stop();Unguard();configured=false;state="paused";Record("paused",store.Settings.QuitPause?"quit":minutes.ToString());return new{saved=true};
     case "refresh":case "restart_kernel":retryAt=DateTimeOffset.MinValue;configured=false;kernel.Stop();ApplyGuard(0);state="starting";return new{saved=true};
     case "pick_line":
      var id=int.Parse(Text(request,"id"));if(id<1||id>nodes.GetArrayLength())throw new InvalidDataException("线路编号无效");
@@ -435,7 +465,7 @@ sealed partial class Runtime:IDisposable
     case "own_exit":case "store_exit":return await AddExit(request,stop);
     case "block_before_ready":
      if(!Bool(request,"on"))NeedOwner(request);
-     if(Bool(request,"on")){ApplyGuard(0);state="blocked";}else{filters.RemoveOwned();state="unprotected";}return new{saved=true};
+     if(Bool(request,"on")){ApplyGuard(0);state="blocked";}else{Unguard();state="unprotected";}return new{saved=true};
     case "speed_test":return await MeasureSpeed(stop);
     default:throw new InvalidOperationException("此后台功能尚未接入："+type);
    }

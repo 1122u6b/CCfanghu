@@ -319,6 +319,37 @@ jobs:
           if ($ipDirect -notmatch '^\d+\.\d+\.\d+\.\d+$' -or $ipDirect -eq $ipAll) { $failures += "a site not on the list did not connect directly: $ipDirect" }
           if ($web -ne 200) { $failures += "direct connections were blocked in list mode: $web" }
           if ($s -notmatch 'protected' -or $ipBack -ne $ipAll) { $failures += "switching back to everything through the exit failed: $s / $ipBack" }
+          Write-Host '   coexist: the customer keeps their own proxy app on; Claude (the list) goes through the Leyra exit'
+          $is = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
+          $ownLog = "$env:RUNNER_TEMP\own-proxy.log"; Set-Content $ownLog ''
+          $own = Start-Process -FilePath (Get-Command python).Source -ArgumentList 'mac/tests/local_proxy.py','7890',$ownLog -PassThru -WindowStyle Hidden
+          Start-Sleep 2
+          Set-ItemProperty $is ProxyEnable 1; Set-ItemProperty $is ProxyServer '127.0.0.1:7890'
+          $s = Route '{"type":"set_route_mode","listed":false,"domains":["ipify.org"]}'
+          if ($s -notmatch 'protected') { $failures += "coexist mode did not come up protected: $s" }
+          $server = (Get-ItemProperty $is).ProxyServer; Write-Host "   system proxy now: $server"
+          if ($server -ne '127.0.0.1:17890') { $failures += "the system proxy was not put in front of the customer's proxy: $server" }
+          $L = try { (Invoke-WebRequest https://api.ipify.org -Proxy http://127.0.0.1:17890 -UseBasicParsing -TimeoutSec 25).Content.Trim() } catch { 'error ' + $_.Exception.Message }
+          $O = try { (Invoke-WebRequest https://icanhazip.com -Proxy http://127.0.0.1:17890 -UseBasicParsing -TimeoutSec 25).StatusCode } catch { 0 }
+          $ownWeb = try { (Invoke-WebRequest https://www.microsoft.com -Proxy http://127.0.0.1:7890 -UseBasicParsing -TimeoutSec 25).StatusCode } catch { 0 }
+          $handled = (Get-Content $ownLog) -join ' '
+          Write-Host "   listed site sees $L; other site $O; own proxy on its own $ownWeb; own proxy handled: $handled"
+          if ($L -ne $ipAll) { $failures += "in coexist mode the listed site did not go through the exit: $L vs $ipAll" }
+          if ($handled -notmatch 'icanhazip') { $failures += 'in coexist mode other sites were not handed to the customer proxy' }
+          if ($handled -match 'ipify') { $failures += 'in coexist mode the listed site went through the customer proxy' }
+          if ($ownWeb -ne 200) { $failures += "the customer's own proxy was blocked in coexist mode: $ownWeb" }
+          Ask '{"type":"check_conflicts"}' | Out-Null
+          if ((Get-Content "C:\LeyraCi\out_$script:n.json" -Raw) -match 'proxy-owner') { $failures += 'coexist mode still asks to quit the customer proxy' }
+          Set-ItemProperty $is ProxyServer '127.0.0.1:7890'
+          $end = [DateTime]::UtcNow.AddSeconds(25); while ((Get-ItemProperty $is).ProxyServer -ne '127.0.0.1:17890' -and [DateTime]::UtcNow -lt $end) { Start-Sleep 2 }
+          if ((Get-ItemProperty $is).ProxyServer -ne '127.0.0.1:17890') { $failures += 'Leyra did not take the system proxy back' } else { Write-Host '   taken back after the customer app changed it' }
+          Ask '{"type":"pause","minutes":10}' | Out-Null; Start-Sleep 3
+          $after = (Get-ItemProperty $is).ProxyServer; Write-Host "   after pause: $after"
+          if ($after -ne '127.0.0.1:7890') { $failures += "the customer's system proxy was not given back on pause: $after" }
+          Stop-Process -Id $own.Id -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty $is ProxyEnable 0; Remove-ItemProperty $is ProxyServer -ErrorAction SilentlyContinue
+          $s = Route '{"type":"resume"}'
+          if ($s -notmatch 'protected') { $failures += "normal protection did not come back after coexist: $s" }
           Write-Host '   another proxy app turns on the system proxy: it is named, and 帮我退出 really ends it'
           $py = (Get-Command python).Source
           $fake = Start-Process -FilePath $py -ArgumentList '-m','http.server','18888','--bind','127.0.0.1' -PassThru -WindowStyle Hidden

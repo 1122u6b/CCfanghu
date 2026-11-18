@@ -34,7 +34,15 @@ sealed partial class Runtime
  async Task<object> Doctor(bool deep,CancellationToken stop)
  {
   var items=new List<object>();
-  void Add(string id,string verdict,string detail)=>items.Add(new{id,verdict,detail});
+  // Coexist mode has no tunnel and no filtering rules by design: say so instead of reporting them as failures.
+  var coexistNote=new Dictionary<string,string>{["E7"]="共存模式：不建虚拟网卡，你自己的代理照常工作",["P1"]="共存模式：不加过滤规则，以免拦住你自己的代理",
+   ["P6"]="共存模式：Claude 的网址由出口那边解析，不经过本机",
+   ["P5"]="共存模式：Claude 网页和客户端经 Leyra 出口"+(exitVerified?"（出口 "+exitIp+"），其他流量走你自己的代理":"，正在确认"),["L8"]="共存模式：其他流量本来就走你自己的代理"};
+  void Add(string id,string verdict,string detail)
+  {
+   if(coexist&&coexistNote.TryGetValue(id,out var note)){verdict=id=="P5"&&exitVerified&&state=="protected"?"pass":"info";detail=note;}
+   items.Add(new{id,verdict,detail});
+  }
   var guarded=filters.DefaultGuardsInstalled();var live=state=="protected";
   Add("E1",Environment.OSVersion.Version.Build>=17763?"pass":"warn",System.Runtime.InteropServices.RuntimeInformation.OSDescription+" / "+System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
   Add("E2",System.Security.Principal.WindowsIdentity.GetCurrent().IsSystem?"pass":"fail","Windows 后台服务身份");

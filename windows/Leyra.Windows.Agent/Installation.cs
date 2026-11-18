@@ -114,6 +114,9 @@ static class Installation
   if(File.Exists(Path.Combine(AgentStore.Root,"owner.sid"))){var store=new AgentStore();store.Settings.Enabled=false;store.Settings.PausedUntil=0;store.Settings.QuitPause=false;store.Save();}
   Stop();
   using(var engine=new WfpEngine())engine.RemoveOwned();
+  // Coexist mode: give the customer's own system proxy back.
+  try{var sid=new System.Security.Principal.SecurityIdentifier(File.ReadAllText(Path.Combine(AgentStore.Root,"owner.sid")).Trim());new CoexistProxy(sid).Restore();}
+  catch(Exception e)when(e is IOException or ArgumentException or InvalidOperationException or UnauthorizedAccessException){}
 
  }
  static string InstallRoot()
