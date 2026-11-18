@@ -61,9 +61,10 @@ jobs:
           echo "socks_port=$port" >> "$GITHUB_OUTPUT"; echo "socks_pass=$pass" >> "$GITHUB_OUTPUT"
   build:
     if: ${{ inputs.allow_hosted_compute == true || (github.event_name == 'push' && contains(github.event.head_commit.message, '[mac-ci]')) }}
-    # Intel host (plenty of capacity): the package is cross-built for both chips here, so the scarce Apple-silicon
-    # runners are kept for the install tests only. Apple-silicon runner shortages kept cancelling the build.
-    runs-on: macos-13
+    # Current Intel image (the one the Intel install test uses): the package is cross-built for both chips here, so
+    # the scarce Apple-silicon runners are kept for the install tests only. macos-13 is being retired and sat queued
+    # for hours; Apple-silicon shortages kept cancelling the build.
+    runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
