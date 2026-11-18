@@ -202,4 +202,5 @@ jobs:
           ssh -T -F /dev/null -i "$key_file" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$GITHUB_WORKSPACE/deploy/known_hosts" ubuntu@129.226.74.173 \
             "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $TEST_CODE; [ -n '$UI_CODE' ] && sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $UI_CODE; pkill -f \"[l]eyra-ci-socks.py $SOCKS_PORT \" || true"
 
-# Re-run triggers a fresh test code via the test-code job (do not use rerun-failed-jobs: it revokes the code without re-issuing).
+
+# fresh run 20261118T2322 (capacity retry; rerun-failed-jobs would revoke the code, so each attempt is a new run)
