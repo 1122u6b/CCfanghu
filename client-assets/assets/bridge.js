@@ -264,6 +264,7 @@
     }
     // 刚替用户关掉系统代理：两分钟里横幅给「撤销」。
     S.proxyUndo = !!st.proxy_undo && Date.now() - proxyOffAt < PROXY_UNDO_MS && !proxyUndoHidden;
+    S.coexist = !!st.coexist;   // 共存模式：名单里的走 Leyra 出口，其他走客户自己的代理
     applyUpdate(st);
     // 后台运行没允许（E10）：显示「请在系统设置里允许」页；允许了回到首页。
     var bgBad = (st.checks || []).some(function (c) { return c.id === 'E10' && c.verdict === 'fail'; });
@@ -1078,8 +1079,20 @@
     return call(req).then(function (r) {
       S.splitRoute = { listed: !!r.listed, domains: r.domains || [], loaded: true };
       var el = document.querySelector('[data-keep="routedomains"]'); if (el) el.value = S.splitRoute.domains.join('\n');  // 显示整理后的名单
-      P.toast(done); P.render(); })
+      P.toast(done); P.render(); whenApplied(); })
       .catch(function (e) { P.toast(msg(e)); });
+  }
+  // 名单保存后线路会重建：等它重新连好，告诉客户刷新网页即可，并自动重新检查一遍。
+  var applyTimer = null;
+  function whenApplied() {
+    clearInterval(applyTimer); var t0 = Date.now(), seenDown = false;
+    applyTimer = setInterval(function () {
+      if (S.status !== 'ok') seenDown = true;
+      if ((seenDown || Date.now() - t0 > 8000) && S.status === 'ok') {
+        clearInterval(applyTimer); P.toast('已生效：名单里的网站现在走你的出口，刷新网页即可');
+        if (A.checkAgain) A.checkAgain();
+      } else if (Date.now() - t0 > 150000) { clearInterval(applyTimer); P.toast('线路还在重新连接，稍后会自动生效', 'info'); }
+    }, 1000);
   }
   A.routeListed = function () {
     var on = !S.splitRoute.listed;

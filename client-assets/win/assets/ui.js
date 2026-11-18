@@ -1101,11 +1101,17 @@
   function setGroup(title, sub, inner, cls) { return '<div class="p-sec p-setgroup' + (cls || '') + '"><div class="p-grouph"><h2>' + title + '</h2>' + (sub ? '<span>' + sub + '</span>' : '') + '</div>' + inner + '</div>'; }
   function routeCard() {
     var R = S.splitRoute || { listed: false, domains: [] };
+    // 共存模式（开着客户自己的代理）：名单里的走 Leyra 出口，其他交给客户自己的代理；名单一直可以改。
+    if (S.coexist) return '<div class="hx-card p-setcard"><div class="hx-setrow"><div class="l"><span>走 Leyra 出口的网站</span><small>' +
+      '共存模式：检测到你开着自己的代理。名单里的网站走 Leyra 出口，其他照常走你自己的代理。加好后点「保存名单」，生效后刷新网页即可</small></div></div>' + routeEditor(R) + '</div>';
     return '<div class="hx-card p-setcard"><div class="hx-setrow"><div class="l"><span>只让名单里的网站走出口</span><small>' +
       (R.listed ? '已开启：名单外的网站和应用直连，速度和平时一样，但会看到你的真实 IP' : '关闭时所有流量都走出口（最安全）；开启后只有名单里的网站走出口，其他直连更快') +
       '</small></div>' + sw(!!R.listed, 'routeListed', '只让名单里的网站走出口') + '</div>' +
-      (R.listed ? '<div class="hx-stack" style="padding:0 0 4px"><textarea class="hx-input" data-keep="routedomains" rows="4" aria-label="走出口的网站" placeholder="一行一个网站，例如 claude.ai（自动包含子域名）">' + esc((R.domains || []).join('\n')) + '</textarea>' +
-        '<div style="display:flex;gap:8px;justify-content:flex-end">' + btn('text', '恢复默认', 'routeReset') + btn('secondary', '保存名单', 'routeSave') + '</div></div>' : '') + '</div>';
+      (R.listed ? routeEditor(R) : '') + '</div>';
+  }
+  function routeEditor(R) {
+    return (true ? '<div class="hx-stack" style="padding:0 0 4px"><textarea class="hx-input" data-keep="routedomains" rows="4" aria-label="走出口的网站" placeholder="一行一个网站，例如 claude.ai（自动包含子域名）">' + esc((R.domains || []).join('\n')) + '</textarea>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end">' + btn('text', '恢复默认', 'routeReset') + btn('secondary', '保存名单', 'routeSave') + '</div></div>' : '');
   }
   function settingsPage() {
     return '<div class="p-pagehead"><div class="t"><h1>设置</h1></div></div>' +
