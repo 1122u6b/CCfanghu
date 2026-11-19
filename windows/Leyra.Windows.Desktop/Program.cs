@@ -14,12 +14,27 @@ namespace Leyra.Windows.Desktop;
 static class Program
 {
  [STAThread]
- static void Main()
+ static void Main(string[] args)
  {
+  // One window per signed-in user. Started again (desktop icon while it already runs from sign-in): bring the
+  // running one forward and leave. After an update the new version waits for the old one to close first.
+  using var single=new Mutex(false,@"Local\LeyraConnect.Desktop");
+  bool owned;
+  try{owned=single.WaitOne(args.Contains("--relaunch")?TimeSpan.FromSeconds(20):TimeSpan.Zero);}
+  catch(AbandonedMutexException){owned=true;}
+  if(!owned)
+  {
+   try{using var other=EventWaitHandle.OpenExisting(@"Local\LeyraConnect.Desktop.Show");other.Set();}
+   catch(Exception e)when(e is WaitHandleCannotBeOpenedException or UnauthorizedAccessException){}
+   return;
+  }
+  using var show=new EventWaitHandle(false,EventResetMode.AutoReset,@"Local\LeyraConnect.Desktop.Show");
   ApplicationConfiguration.Initialize();
   Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
   Application.ThreadException+=(_,e)=>MessageBox.Show(e.Exception.Message,"Leyra",MessageBoxButtons.OK,MessageBoxIcon.Error);
-  Application.Run(new MainWindow());
+  // --background: started with Windows sign-in, only the tray icon appears (the window opens from it).
+  Application.Run(new MainWindow(args.Contains("--background"),show));
+  single.ReleaseMutex();
  }
 }
 
@@ -32,7 +47,7 @@ sealed class MainWindow:Form
  readonly SemaphoreSlim requests=new(4,4);
  string? ownerProof;int authenticating;
  bool quitting;
- public MainWindow()
+ public MainWindow(bool background,EventWaitHandle show)
  {
   Icon=Icon.ExtractAssociatedIcon(Environment.ProcessPath!)??SystemIcons.Shield;tray.Icon=Icon;
   Text="Leyra";Width=1120;Height=820;MinimumSize=new Size(900,650);StartPosition=FormStartPosition.CenterScreen;
@@ -44,6 +59,13 @@ sealed class MainWindow:Form
   menu.Items.Add("退出界面（后台继续运行）",null,(_,_)=>Quit());
   tray.ContextMenuStrip=menu;tray.DoubleClick+=(_,_)=>ShowMain();
   Shown+=async(_,_)=>await InitializeBrowser();
+  if(background)
+  {
+   // The page still loads (it keeps the tray up to date); only the window stays out of sight.
+   Opacity=0;ShowInTaskbar=false;
+   Shown+=(_,_)=>{Hide();Opacity=1;ShowInTaskbar=true;};
+  }
+  ThreadPool.RegisterWaitForSingleObject(show,(_,_)=>{if(!quitting&&IsHandleCreated)BeginInvoke(new Action(ShowMain));},null,-1,false);
   FormClosing+=(_,e)=>{if(!quitting&&e.CloseReason==CloseReason.UserClosing){e.Cancel=true;Hide();return;}quitting=true;tray.Visible=false;tray.Dispose();};
  }
  void ShowMain(){Show();WindowState=FormWindowState.Normal;Activate();}
@@ -206,7 +228,9 @@ sealed class MainWindow:Form
     if(versions is null||versions.Name!="versions")return Result(new{relaunched=false});
     var newest=versions.EnumerateDirectories().Where(d=>File.Exists(Path.Combine(d.FullName,"LeyraConnect.exe"))&&Version.TryParse(d.Name.Split('-')[0],out _)).OrderByDescending(d=>Version.Parse(d.Name.Split('-')[0])).FirstOrDefault();
     if(newest is null||newest.FullName.Equals(current.FullName,StringComparison.OrdinalIgnoreCase)||Version.Parse(newest.Name.Split('-')[0])<=Version.Parse(ProductInfo.Version.Split('-')[0]))return Result(new{relaunched=false});
-    Process.Start(new ProcessStartInfo(Path.Combine(newest.FullName,"LeyraConnect.exe")){UseShellExecute=false})?.Dispose();
+    var next=new ProcessStartInfo(Path.Combine(newest.FullName,"LeyraConnect.exe")){UseShellExecute=false};next.ArgumentList.Add("--relaunch");
+    if(!Visible)next.ArgumentList.Add("--background");
+    Process.Start(next)?.Dispose();
     BeginInvoke(new Action(Quit));return Result(new{relaunched=true});
    }
    // Security-sensitive operations stay in the authenticated service boundary.

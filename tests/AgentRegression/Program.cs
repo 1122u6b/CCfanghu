@@ -69,6 +69,17 @@ using(var stopped=new CancellationTokenSource()){
  Check(fallbackCalls==calls,"stopping protection cancels observation without starting another check");
 }
 
+// 「下次开机时更新」: installs only right after the computer starts, only a newer version.
+{
+ var decide=type.GetMethod("BootUpdate",BindingFlags.Static|BindingFlags.NonPublic)!;
+ string D(string? v,string cur,long ms)=>(string)decide.Invoke(null,[v,cur,ms])!;
+ Check(D(null,"0.4.19",1000)=="none","nothing put off: nothing happens at startup");
+ Check(D("0.4.20","0.4.19",2*60*1000)=="install","computer just started: the put-off version is installed");
+ Check(D("0.4.20","0.4.19",3*60*60*1000)=="wait","service restarted hours after startup: waits for the real next start");
+ Check(D("0.4.19","0.4.19",1000)=="drop","already updated by hand: the reminder is dropped");
+ Check(D("0.4.18","0.4.19",1000)=="drop","older version is never installed");
+}
+
 sealed class SlowDownload:Stream
 {
  bool sent;
@@ -77,3 +88,4 @@ sealed class SlowDownload:Stream
  public override long Length=>throw new NotSupportedException();public override long Position{get=>throw new NotSupportedException();set=>throw new NotSupportedException();}
  public override int Read(byte[] buffer,int offset,int count)=>throw new NotSupportedException();public override void Flush()=>throw new NotSupportedException();public override long Seek(long offset,SeekOrigin origin)=>throw new NotSupportedException();public override void SetLength(long value)=>throw new NotSupportedException();public override void Write(byte[] buffer,int offset,int count)=>throw new NotSupportedException();
 }
+

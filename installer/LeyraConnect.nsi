@@ -123,6 +123,9 @@ Section "安装" SEC_MAIN
  CreateShortcut "$DESKTOP\Leyra.lnk" "$INSTDIR\versions\${VERSION}\LeyraConnect.exe"
  CreateShortcut "$SMPROGRAMS\Leyra\Leyra.lnk" "$INSTDIR\versions\${VERSION}\LeyraConnect.exe"
  CreateShortcut "$SMPROGRAMS\Leyra\网络恢复工具（管理员）.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" '-NoProfile -Command "Start-Process -FilePath $\"$INSTDIR\versions\${VERSION}\Leyra.Agent.exe$\" -ArgumentList $\"--recover$\" -Verb RunAs"'
+ ; Starts with every Windows sign-in, quietly in the tray (protection itself runs as a service either way).
+ ; Rewritten by each update so it always points at the installed version; turned off in Windows Settings > Startup apps.
+ WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "Leyra" '"$INSTDIR\versions\${VERSION}\LeyraConnect.exe" --background'
  WriteUninstaller "$INSTDIR\Uninstall.exe"
  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect" "DisplayName" "Leyra"
  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\LEYRAConnect" "DisplayVersion" "${VERSION}"
@@ -143,6 +146,7 @@ Section "Uninstall"
   Abort
  ${EndIf}
  Delete "$DESKTOP\Leyra.lnk"
+ DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "Leyra"
  RMDir /r "$SMPROGRAMS\Leyra"
  ; Older side-by-side versions left after automatic updates are removed together.
  RMDir /r "$INSTDIR\versions"

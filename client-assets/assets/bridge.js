@@ -315,9 +315,11 @@
     // 守护程序已经是新版本、界面还是旧的（Windows 自动升级后）：请 App 壳从新版本目录打开新界面（docs/01 §5.10）。
     if (st.version && appVersion && st.version !== appVersion) relaunchNew();
     if (st.update) S.newVersion = st.update;
+    // 已选「下次开机时更新」的版本（后台服务记着）不再提示，重开界面也一样。
+    if (st.update_at_boot) later = st.update_at_boot;
     if (!S.busy.update) S.alerts.update = !!st.update && st.update !== later;
     // 新版本下载好了（docs/01 §5.10）：每个版本只弹一次窗，「立即更新」「下次开机时更新」；不点的横幅一直在。
-    if (st.update && !S.busy.update && store('cc.update.popped') !== st.update) { store('cc.update.popped', st.update); P.updatePopup(); }
+    if (st.update && st.update !== later && !S.busy.update && store('cc.update.popped') !== st.update) { store('cc.update.popped', st.update); P.updatePopup(); }
     // 免责声明（docs/01 §4 第 3 步）：同意过的版本比现在的低就整页拦着；旧守护程序不报这一项，不拦。
     S.consentVer = st.consent_version == null ? null : st.consent_version;
   }
@@ -351,7 +353,13 @@
       }, 1000);
     }).catch(function (e) { S.busy.update = null; P.render(); P.toast('没能更新：' + msg(e), 'info'); });
   };
-  A.updateLater = function () { later = S.newVersion; S.alerts.update = false; P.render(); P.toast('将在下次开机时更新', 'clock'); };
+  // 「下次开机时更新」：交给后台服务记住，下次开机它自己装好，不再提示。
+  A.updateLater = function () {
+    var v = S.newVersion;
+    call({ type: 'update_at_boot' }).then(function () {
+      later = v; S.alerts.update = false; P.render(); P.toast('下次开机时自动更新到 ' + v + '，不用再点', 'clock');
+    }).catch(function (e) { P.toast('没记下来：' + msg(e) + '。可以点「立即更新」', 'info'); });
+  };
   A.checkUpdate = function () {
     if (S.alerts.update) { A.go('overview'); return; }
     S.busy.upd = { text: '正在检查' }; P.render();

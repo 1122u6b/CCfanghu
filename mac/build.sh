@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 V=$(grep -o 'Version="[^"]*"' windows/Leyra.Windows.Core/ProductInfo.cs | cut -d'"' -f2)
 OUT="$PWD/mac/out"; rm -rf "$OUT"; ROOT="$OUT/root"; SUP="$ROOT/Library/Application Support/Leyra"
-mkdir -p "$ROOT/Applications" "$ROOT/Library/LaunchDaemons" "$SUP"
+mkdir -p "$ROOT/Applications" "$ROOT/Library/LaunchDaemons" "$ROOT/Library/LaunchAgents" "$SUP"
 MIHOMO=v1.19.33
 for pair in "osx-arm64 agent-arm64 darwin-arm64" "osx-x64 agent-x64 darwin-amd64-compatible"; do
   set -- $pair
@@ -21,6 +21,7 @@ for pair in "osx-arm64 agent-arm64 darwin-arm64" "osx-x64 agent-x64 darwin-amd64
   rm -f "$SUP/$2"/*.pdb
 done
 cp mac/packaging/xin.leyra.agent.plist "$ROOT/Library/LaunchDaemons/"
+cp mac/packaging/xin.leyra.app.plist "$ROOT/Library/LaunchAgents/"
 APP="$ROOT/Applications/Leyra.app"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 swiftc -O -target arm64-apple-macos12 mac/LeyraApp/main.swift -o "$OUT/Leyra-arm64"
 swiftc -O -target x86_64-apple-macos12 mac/LeyraApp/main.swift -o "$OUT/Leyra-x86_64"

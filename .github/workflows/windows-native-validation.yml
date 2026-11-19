@@ -177,6 +177,10 @@ jobs:
             if (-not (Test-Path "$version\$f")) { throw "Missing installed file: $f" }
           }
           if (-not (Test-Path "$root\Uninstall.exe")) { throw 'Uninstaller missing' }
+          # Opens at every Windows sign-in, quietly in the tray, from the installed version.
+          $run = (Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).Leyra
+          Write-Host "start at sign-in: $run"
+          if ($run -ne "`"$version\LeyraConnect.exe`" --background") { throw "Not set to start at sign-in from the installed version: $run" }
           Start-Sleep -Seconds 5
           $svc = Get-Service LeyraConnect
           Write-Host "Service status: $($svc.Status), start type: $($svc.StartType)"
@@ -503,6 +507,7 @@ jobs:
           }
           if (Get-Service LeyraConnect -ErrorAction SilentlyContinue) { throw 'Service still registered after uninstall' }
           if (Test-Path "$root\versions") { throw 'Program files left after uninstall' }
+          if ((Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).Leyra) { throw 'Start at sign-in left after uninstall' }
           if (Test-Path "$env:ProgramData\LeyraConnect") { throw 'Activation data left after uninstall' }
           $tz = (Get-TimeZone).Id; Write-Host "timezone after uninstall: $tz"
           if ($tz -ne 'UTC') { throw "Timezone not restored after uninstall: $tz" }

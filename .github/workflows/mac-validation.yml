@@ -111,6 +111,14 @@ jobs:
           sleep 5
           sudo launchctl print system/xin.leyra.agent | head -20
           ls -la /Applications/Leyra.app/Contents/MacOS "/Library/Application Support/Leyra/agent"
+          # Opens at every login, quietly in the menu bar: the login item is installed, and the app starts that way and keeps running.
+          plutil -lint /Library/LaunchAgents/xin.leyra.app.plist
+          [ "$(stat -f '%Su:%Sg %Lp' /Library/LaunchAgents/xin.leyra.app.plist)" = "root:wheel 644" ] || { echo "login item missing or wrong owner/permissions"; exit 1; }
+          [ "$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:1' /Library/LaunchAgents/xin.leyra.app.plist)" = "--background" ] || { echo "login item does not start quietly"; exit 1; }
+          /Applications/Leyra.app/Contents/MacOS/Leyra --background >/tmp/leyra-app.log 2>&1 &
+          APP=$!; sleep 8
+          kill -0 "$APP" || { echo "the app did not keep running when started at login"; cat /tmp/leyra-app.log; exit 1; }
+          echo "app started at login and kept running (pid $APP)"; kill "$APP" || true
       - name: Customer flow (${{ matrix.chip }})
         env:
           TEST_CODE: ${{ needs.test-code.outputs[matrix.code_key] }}
@@ -203,4 +211,4 @@ jobs:
             "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $TEST_CODE; [ -n '$UI_CODE' ] && sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $UI_CODE; pkill -f \"[l]eyra-ci-socks.py $SOCKS_PORT \" || true"
 
 
-# fresh run 20261119T010512 (0.4.19: traffic counting, per-exit address, paste; each attempt is a new run so a new test code is issued)
+# fresh run 20261119T015255 (0.4.20: start at login, install put-off update at next start; each attempt is a new run)

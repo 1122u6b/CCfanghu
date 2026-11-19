@@ -169,6 +169,35 @@ sealed partial class Runtime
   using var file=File.OpenRead(path);if(file.Length!=size)return false;
   return CryptographicOperations.FixedTimeEquals(SHA256.HashData(file),Convert.FromHexString(digest));
  }
+ // 「下次开机时更新」：记住这个已核对的版本，下次开机时自动装。
+ object UpdateAtBoot()
+ {
+  var version=updateReady??throw new InvalidOperationException("没有已下载并核对的新版本");
+  store.Settings.UpdateAtBoot=version;store.Settings.UpdateAtBootDigest=updateDigest;store.Save();
+  Record("update_at_boot",version);return new{saved=true,version};
+ }
+ // Only right after the computer starts (not when this service merely restarts): install the version the
+ // customer put off until the next start, if it is still newer and its file still matches what was checked.
+ // none: nothing put off. wait: this service restarted without the computer starting (keep it for the real start).
+ // drop: already on that version or newer. install: the computer just started.
+ static string BootUpdate(string? version,string current,long sinceStartMs)=>
+  version is null?"none":sinceStartMs>15*60*1000?"wait":ProductInfo.Compare(version,current)<=0?"drop":"install";
+ void InstallAtBoot()
+ {
+  var version=store.Settings.UpdateAtBoot;
+  var decision=BootUpdate(version,Program.Version,Environment.TickCount64);
+  if(decision is "none" or "wait")return;
+  store.Settings.UpdateAtBoot=null;var digest=store.Settings.UpdateAtBootDigest;store.Settings.UpdateAtBootDigest="";store.Save();
+  if(decision=="drop")return;
+  try
+  {
+   updateReady=version;updateDigest=digest;InstallUpdate(); // recorded in recent activity as "update"
+  }
+  catch(Exception e)when(e is IOException or InvalidDataException or InvalidOperationException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+  {
+   updateReady=null;Program.Log("update at startup skipped",e);
+  }
+ }
  object InstallUpdate()
  {
   var version=updateReady??throw new InvalidOperationException("没有已下载并核对的新版本");

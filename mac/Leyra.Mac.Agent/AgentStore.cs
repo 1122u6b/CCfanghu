@@ -21,6 +21,9 @@ sealed class AgentSettings
  // Off: everything goes through the exit. On: only ProxyDomains (and subdomains) do; other sites connect directly.
  public bool ProxyOnlyListed{get;set;}
  public List<string> ProxyDomains{get;set;}=[..Leyra.Windows.Core.MihomoConfiguration.DefaultProxyDomains];
+ // 「下次开机时更新」：已下载并核对过的新版本，下次开机本服务启动时自动安装（不再提示）。
+ public string? UpdateAtBoot{get;set;}
+ public string UpdateAtBootDigest{get;set;}="";
 }
 sealed class AgentStore
 {

@@ -6,6 +6,8 @@ if [ "$(/usr/bin/uname -m)" = "arm64" ]; then SRC="agent-arm64"; else SRC="agent
 rm -rf "$BASE/agent"; mv "$BASE/$SRC" "$BASE/agent"; rm -rf "$BASE/agent-arm64" "$BASE/agent-x64"
 chown -R root:wheel "$BASE"; chmod -R go-w "$BASE"
 chown root:wheel /Library/LaunchDaemons/xin.leyra.agent.plist; chmod 644 /Library/LaunchDaemons/xin.leyra.agent.plist
+# Opens the window app (menu bar only) at each login; takes effect from the next login.
+chown root:wheel /Library/LaunchAgents/xin.leyra.app.plist; chmod 644 /Library/LaunchAgents/xin.leyra.app.plist
 # The Mac user who installed Leyra is the one its window may talk to.
 OWNER=$(/usr/bin/stat -f %u /dev/console)
 if [ "$OWNER" = "0" ] && [ -n "${LEYRA_OWNER_UID:-}" ]; then OWNER="$LEYRA_OWNER_UID"; fi

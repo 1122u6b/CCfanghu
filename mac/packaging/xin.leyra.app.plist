@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Opens Leyra at every login, quietly in the menu bar (protection itself runs as a system service either way).
+     Listed in System Settings > General > Login Items, where it can be turned off. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>xin.leyra.app</string>
+  <key>ProgramArguments</key>
+  <array><string>/Applications/Leyra.app/Contents/MacOS/Leyra</string><string>--background</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>ProcessType</key><string>Interactive</string>
+</dict>
+</plist>

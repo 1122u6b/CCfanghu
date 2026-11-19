@@ -105,11 +105,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         window.contentView = web; window.delegate = self; window.center(); window.isReleasedWhenClosed = false
         let assets = Bundle.main.resourceURL!.appendingPathComponent("client-assets")
         web.loadFileURL(assets.appendingPathComponent("win/index.html"), allowingReadAccessTo: assets)
-        window.makeKeyAndOrderFront(nil)
+        // --background: opened at login, only the menu bar icon appears (the window opens from it).
+        let background = CommandLine.arguments.contains("--background")
+        if !background { window.makeKeyAndOrderFront(nil) }
         setupMainMenu()
         setupStatusItem()
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
-        NSApp.activate(ignoringOtherApps: true)
+        if !background { NSApp.activate(ignoringOtherApps: true) }
     }
 
     /// Copy, paste, select all and undo only work in a Mac app when its menu bar has an Edit menu with these
