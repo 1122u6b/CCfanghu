@@ -105,3 +105,83 @@ for n, path in enumerate(sorted(glob.glob('/var/lib/leyra-connect/devices-v1/*/'
     report('Computer %d (device %s…): server → its SOCKS5 exit → website' % (n, os.path.basename(path.rstrip('/'))[:6]), rounds)
     for e in errors:
         print('   failed round: ' + e)
+
+
+# ---- Exits that need the protocol kernel (vless, vmess, trojan, ss, hysteria2, tuic): every exit of every
+# computer, not only the one in use. A throwaway kernel on loopback dials each one; prints whether the exit's
+# address answers at all, whether a website can be reached through it, and the kernel's reason when not.
+# Addresses, user ids and keys are never printed.
+import json, re, subprocess, tempfile  # noqa: E402
+
+KERNEL = os.path.join(sorted(glob.glob('/opt/leyra-connect/releases/*/'))[-1], 'kernel', 'mihomo')
+MASK = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b|\[[0-9a-fA-F:]+\]|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b', re.I)
+
+
+def masked(text):
+    return MASK.sub('<addr>', text)
+
+
+def via_local(port):
+    s = socket.create_connection(('127.0.0.1', port), timeout=20)
+    s.settimeout(20)
+    s.sendall(b'\x05\x01\x00')
+    if s.recv(2) != b'\x05\x00':
+        raise RuntimeError('local listener refused')
+    host = TARGET[0].encode()
+    t = time.perf_counter()
+    s.sendall(b'\x05\x01\x00\x03' + bytes([len(host)]) + host + struct.pack('!H', TARGET[1]))
+    head = s.recv(10)
+    if len(head) < 2 or head[1] != 0:
+        raise RuntimeError('exit could not reach the website (reply %s)' % (head[1] if len(head) > 1 else 'none'))
+    t_connect = ms(t)
+    t_tls, t_first = https_after(s, TARGET[0])
+    return t_connect, t_tls, t_first
+
+
+if os.path.exists(KERNEL):
+    print('\nProtocol exits (vless / vmess / trojan / ss / hysteria2 / tuic), every exit of every computer:')
+    for n, path in enumerate(sorted(glob.glob('/var/lib/leyra-connect/devices-v1/*/')), 1):
+        try:
+            m = Management(path)
+            with m.db() as db:
+                rows = [(r['id'], json.loads(r['node'])) for r in db.execute('SELECT id,node FROM exits ORDER BY id')]
+        except Exception:
+            continue
+        for exit_id, nodes in rows:
+            nodes = nodes if isinstance(nodes, list) else [nodes]
+            for i, node in enumerate(x for x in nodes if isinstance(x, dict) and x.get('type') not in (None, 'socks5', 'http')):
+                label = 'Computer %d (device %s…) exit %s line %d [%s%s]' % (n, os.path.basename(path.rstrip('/'))[:6], exit_id, i + 1, node.get('type'),
+                                                                        ' reality' if node.get('reality-opts') else ' tls' if node.get('tls') else '')
+                print(label)
+                try:
+                    t = time.perf_counter()
+                    socket.create_connection((node['server'], int(node['port'])), timeout=10).close()
+                    print('   server → exit address TCP: answers in %.0f ms' % ms(t))
+                except Exception as e:
+                    print('   server → exit address TCP: NO ANSWER (%s)' % type(e).__name__)
+                with tempfile.TemporaryDirectory() as d:
+                    port = 29000 + n * 10 + i
+                    p = dict(node, name='x')
+                    conf = {'mode': 'rule', 'log-level': 'warning', 'ipv6': True, 'proxies': [p],
+                            'listeners': [{'name': 'in', 'type': 'socks', 'listen': '127.0.0.1', 'port': port, 'udp': False, 'proxy': 'x'}],
+                            'rules': ['MATCH,REJECT']}
+                    with open(os.path.join(d, 'c.json'), 'w') as f:
+                        json.dump(conf, f)
+                    k = subprocess.Popen([KERNEL, '-d', d, '-f', os.path.join(d, 'c.json')], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    try:
+                        time.sleep(1.5)
+                        for _ in range(3):
+                            try:
+                                c, tl, fb = via_local(port)
+                                print('   through the exit to a website: OK  connect %.0f ms, TLS %.0f ms, first byte %.0f ms' % (c, tl, fb))
+                            except Exception as e:
+                                print('   through the exit to a website: FAILED (%s %s)' % (type(e).__name__, masked(str(e))[:80]))
+                    finally:
+                        k.terminate()
+                        try:
+                            out = k.communicate(timeout=5)[0]
+                        except subprocess.TimeoutExpired:
+                            k.kill(); out = k.communicate()[0]
+                    reasons = sorted({masked(re.sub(r'^.*msg="|"$', '', x))[:160] for x in out.splitlines() if 'level=warning' in x or 'level=error' in x})
+                    for r in reasons[:4]:
+                        print('   kernel says: ' + r)
