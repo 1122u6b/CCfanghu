@@ -63,6 +63,16 @@ T1=$(date +%s); s=$(state); echo "   switched back in $((T1-T0)) s, state: $s"
 P=$(ip); [ "$P" = "$EXIT" ] || fail "after switching, traffic does not go through the exit: $P"
 SECOND=$(other); [ -n "$SECOND" ] && ask "{\"type\":\"delete_exit\",\"id\":$SECOND}" >/dev/null
 s=$(state); [[ "$s" == protected* ]] || fail "deleting an exit not in use dropped protection: $s"
+echo "   本机直连: this Mac dials the exit itself. The test exit only exists on the server, so here it cannot connect:"
+echo "   the real address must stay hidden, and going back through Hong Kong must recover"
+CUR=$(python3 ask.py '{"type":"account"}' --full | python3 -c 'import json,sys;l=json.load(sys.stdin)["value"]["exits"]["list"];print([x["id"] for x in l if x["current"]][0])')
+ask "{\"type\":\"set_exit_direct\",\"id\":$CUR,\"direct\":true}" >/dev/null || fail "could not switch the exit to direct dialing"
+sleep 15; s=$(state); echo "   dialing an unreachable exit directly: $s"
+[[ "$s" == protected* ]] && fail "protected through an exit that cannot be reached: $s"
+for i in 1 2 3; do P=$(curl -s --max-time 6 https://api.ipify.org || true); [ -n "$P" ] && fail "something got out while the only exit was unreachable: $P"; done
+ask "{\"type\":\"set_exit_direct\",\"id\":$CUR,\"direct\":false}" >/dev/null || fail "could not switch back through Hong Kong"
+s=$(wait_for '^protected' 150) || fail "not protected again after switching back through Hong Kong: $s"
+P=$(ip); [ "$P" = "$EXIT" ] || fail "after switching back traffic does not go through the exit: $P"; echo "   back through Hong Kong: $s, address $P"
 
 echo "7. pause: rules removed, normal network back"
 ask '{"type":"pause","minutes":10}' >/dev/null || ask '{"type":"pause","reason":"quit"}' >/dev/null

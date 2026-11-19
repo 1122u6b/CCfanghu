@@ -217,3 +217,81 @@ class ExitAddressThroughTheExit(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ClientDirectExit(unittest.IsolatedAsyncioTestCase):
+    """「本机直连」: for nodes that only take connections from mainland China, the computer dials the exit itself."""
+    async def asyncSetUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.gateway = Gateway({'data_dir': self.tmp.name, 'cert': 'x', 'key': 'x', 'public_host': '203.0.113.1', 'port': 24443,
+                                'client_user': 'owner', 'client_password': 'owner-pass', 'api_token': 'owner-api', 'fingerprint': 'f',
+                                'upstream': {'type': 'socks5', 'server': '203.0.113.9', 'port': 1080}})
+        self.dev = self.gateway.devices.issue('A'); self.device = self.gateway.devices.authenticate(self.dev['token'])
+    async def asyncTearDown(self): self.tmp.cleanup()
+    def rpc(self, req): return self.gateway.devices.device_rpc(self.gateway.management, self.device, req)
+    async def config(self):
+        import json
+        raw = b'GET /api/v1/config HTTP/1.1\r\nAuthorization: Bearer ' + self.dev['token'].encode() + b'\r\n\r\n'
+        r = asyncio.StreamReader(); r.feed_data(raw); r.feed_eof(); w = MemoryWriter()
+        await self.gateway.handle(r, w)
+        head, _, body = bytes(w.data).partition(b'\r\n\r\n')
+        return int(head.split(b' ')[1]), json.loads(body)
+
+    async def test_direct_exit_hands_its_own_nodes_to_the_computer(self):
+        vless = 'vless://11111111-2222-3333-4444-555555555555@localhost:10023?type=tcp&security=reality&pbk=PUBKEY&fp=chrome&sni=www.example.com&sid=ab12&flow=xtls-rprx-vision#node'
+        identity = self.rpc({'type': 'import_exit_links', 'links': vless, 'name': 'vps'})['id']
+        code, conf = await self.config()
+        self.assertEqual(code, 200); self.assertFalse(conf['direct_exit'])
+        self.assertEqual(conf['proxies'][0]['server'], '203.0.113.1')          # through Hong Kong by default
+        self.assertEqual(self.rpc({'type': 'set_exit_direct', 'id': identity, 'direct': True}), {'id': identity, 'direct': True, 'current': True})
+        code, conf = await self.config()
+        self.assertEqual(code, 200); self.assertTrue(conf['direct_exit']); self.assertIsNone(conf['mux'])
+        node = conf['proxies'][0]
+        self.assertEqual(node['type'], 'vless'); self.assertIn(node['server'], ('127.0.0.1', '::1'))   # a name became an address
+        self.assertEqual(node['servername'], 'www.example.com')                                       # TLS name kept
+        self.assertEqual(node['reality-opts']['public-key'], 'PUBKEY')
+        self.assertTrue(self.rpc({'type': 'exits'})['items'][0]['direct'])
+        # Back through Hong Kong.
+        self.rpc({'type': 'set_exit_direct', 'id': identity, 'direct': False})
+        self.assertFalse((await self.config())[1]['direct_exit'])
+
+    async def test_name_without_tls_server_name_keeps_the_original_name(self):
+        link = 'trojan://secret@localhost:443#t'
+        identity = self.rpc({'type': 'import_exit_links', 'links': link, 'name': 't', 'direct': True})['id']
+        node = (await self.config())[1]['proxies'][0]
+        self.assertEqual(node['sni'], 'localhost')
+        self.assertTrue(self.rpc({'type': 'exits'})['items'][0]['direct'])
+        self.assertEqual(identity, self.rpc({'type': 'exits'})['selected'])
+
+    async def test_unresolvable_direct_exit_is_reported_not_replaced_by_hong_kong(self):
+        identity = self.rpc({'type': 'store_exit', 'name': 'x', 'node': {'type': 'socks5', 'server': 'no-such-host.invalid', 'port': 1080}})['id']
+        self.rpc({'type': 'select_exit', 'id': identity}); self.rpc({'type': 'set_exit_direct', 'id': identity, 'direct': True})
+        code, body = await self.config()
+        self.assertEqual(code, 502); self.assertIn('解析失败', body['detail'])
+
+    async def test_plugin_nodes_cannot_be_dialed_by_the_computer(self):
+        from management import ManagementError
+        identity = self.rpc({'type': 'store_exit', 'name': 'ss', 'node': {'type': 'ss', 'server': '203.0.113.5', 'port': 8388, 'cipher': 'aes-128-gcm', 'password': 'p', 'plugin': 'obfs', 'plugin-opts': {'mode': 'tls'}}})['id']
+        with self.assertRaises(ManagementError):
+            self.rpc({'type': 'set_exit_direct', 'id': identity, 'direct': True})
+        self.assertFalse(self.rpc({'type': 'exits'})['items'][0]['direct'])
+
+    async def test_computer_reports_traffic_only_for_its_own_dialed_exit(self):
+        identity = self.rpc({'type': 'store_exit', 'name': 'x', 'node': {'type': 'socks5', 'server': '203.0.113.5', 'port': 1080}})['id']
+        self.rpc({'type': 'select_exit', 'id': identity})
+        self.assertEqual(self.rpc({'type': 'report_traffic', 'bytes': 5000}), {'counted': False})   # the gateway counts this one
+        self.rpc({'type': 'set_exit_direct', 'id': identity, 'direct': True})
+        self.assertEqual(self.rpc({'type': 'report_traffic', 'bytes': 5000}), {'counted': True})
+        self.assertEqual(self.rpc({'type': 'account'})['traffic_used_bytes'], 5000)
+        from management import ManagementError
+        for bad in (-1, 'x', 10**15):
+            with self.assertRaises(ManagementError): self.rpc({'type': 'report_traffic', 'bytes': bad})
+
+    async def test_server_does_not_try_to_measure_exits_the_computer_dials(self):
+        identity = self.rpc({'type': 'store_exit', 'name': 'x', 'node': {'type': 'socks5', 'server': '203.0.113.5', 'port': 1080}})['id']
+        self.rpc({'type': 'set_exit_direct', 'id': identity, 'direct': True})
+        import json
+        body = json.dumps({'type': 'exits'}).encode()
+        raw = b'POST /api/v1/rpc HTTP/1.1\r\nAuthorization: Bearer ' + self.dev['token'].encode() + b'\r\nContent-Length: ' + str(len(body)).encode() + b'\r\n\r\n' + body
+        r = asyncio.StreamReader(); r.feed_data(raw); r.feed_eof(); await self.gateway.handle(r, MemoryWriter())
+        self.assertEqual(self.gateway.probe_tasks, set())

@@ -652,8 +652,11 @@
         return '<div class="p-exit" aria-current="' + cur + '"><button class="pick" role="radio" aria-checked="' + cur + '" data-act="pickExit:' + i + '"' + (b ? ' disabled' : '') + '><span class="rad" aria-hidden="true"></span><span class="t">' +
           '<b>' + esc(e.name) + (cur ? ' <span class="hx-mark">当前</span>' : '') + '</b>' + (e.err ? '<small style="color:var(--danger)" title="服务器经这个出口访问网站没成功">' + I('warning', 14) + ' ' + e.err + '</small>' : '<small>' + e.ip + '</small>') +
           '<small>' + e.city + ' · ' + e.n + ' 条线路</small></span>' + (e.sig == null ? '' : sig(e.sig)) + '</button>' +
-          '<div class="foot"><span class="tag' + (e.own ? ' own' : '') + '">' + (e.own ? '你自己加的' + (e.sub ? ' · 订阅' : '') : '我们分配的') + '</span>' +
-          (e.own ? '<span class="acts">' + btn('text', '更换链接', 'exitRelink:' + i, b ? ' disabled' : '') + btn('text', '删除', 'exitDel:' + i, b || last ? ' disabled title="至少留一个出口"' : '') + '</span>' : '') + '</div></div>';
+          // 自己加的出口：标签写走法（经香港中转 / 本机直连），可以一键换；服务器连不通它时「改本机直连」用醒目颜色
+          '<div class="foot"><span class="tag' + (e.own ? ' own' : '') + '" title="' + (e.direct ? '这台电脑直接连这个出口（适合只允许国内连接的节点）' : '经香港服务器中转到这个出口') + '">' +
+          (e.own ? (S.exits === 'soft' ? (e.direct ? '本机直连' : '经香港中转') : '你自己加的' + (e.direct ? ' · 本机直连' : '')) + (e.sub ? ' · 订阅' : '') : '我们分配的') + '</span>' +
+          (e.own ? '<span class="acts">' + btn('text', e.direct ? '改经香港' : '改本机直连', 'exitDirect:' + i, (b ? ' disabled' : '') + (e.err && !e.direct ? ' style="color:var(--accent);font-weight:600"' : '') + ' title="' + (e.direct ? '改回经香港服务器中转' : '由这台电脑直接连这个出口，卖家的节点只允许国内连接时用') + '"') +
+          btn('text', '更换链接', 'exitRelink:' + i, b ? ' disabled' : '') + btn('text', '删除', 'exitDel:' + i, b || last ? ' disabled title="至少留一个出口"' : '') + '</span>' : '') + '</div></div>';
       }).join('') +
       (own < EXIT_MAX_OWN ? '<button class="p-exit add" data-act="exitAdd"' + (b ? ' disabled' : '') + '><b>' + I('plus', 16) + '添加出口</b><small>粘贴链接或订阅，最多 ' + EXIT_MAX_OWN + ' 个</small></button>' : '') + '</div>' +
       '<p class="p-sub p-exitnote">你自己加的出口好不好用由出口本身决定' + (S.exits === 'old' ? '；我们分配的出口有问题找客服' : '') + '。' +
@@ -1313,11 +1316,13 @@
         '<p>' + (re ? '粘贴新的链接或订阅地址，换好后这个出口的线路跟着更新。' : '粘贴卖家给你的链接（一行一条）或一行订阅地址，加好后在出口里点它就能切过去。') + '出口好不好用由出口本身决定。</p>' +
         (re ? '' : '<label class="hx-field"><span>名称</span><input class="hx-input" data-keep="exitname" id="f-exitname" placeholder="自己起个名字，例如「我自己的 VPS」" data-autofocus></label>') +
         '<label class="hx-field"><span class="p-sronly">链接或订阅地址</span><textarea class="hx-textarea' + (D.err ? ' is-error' : '') + '" data-keep="exitlinks" id="f-exitlinks" rows="5" placeholder="每行一条链接，或一行订阅地址"' + (re ? ' data-autofocus' : '') + '></textarea>' + (D.err ? '<span class="hx-help is-error">' + I('warning', 16) + D.err + '</span>' : '') + '</label>' +
+        (re ? '' : '<label class="p-check lx-direct"><input type="checkbox" data-keep="exitdirect"> 本机直连<span class="p-sub">（卖家的节点只允许国内连接时勾选：由这台电脑直接连，不经香港）</span></label>' + '') +
         '<div class="acts">' + (D.busy ? '<span class="p-sub">正在读链接、下订阅，要几秒…</span>' : btn('text', I('paste', 16) + '粘贴', 'pasteField:exitlinks', ' title="把复制好的链接或订阅地址放进上面的框"') + btn('secondary', '取消', 'close') + btn('primary', re ? '更换' : '添加', 'exitAddGo')) + '</div></div>';
     } else if (D.type === 'ownexit') {
       h = '<div class="hx-dialog' + k + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">' + (S.ownExit === 'connected' ? '更换出口' : '接入你的出口') + '</h3>' +
         '<p>粘贴卖家给你的链接（一行一条）或一行订阅地址。出口好不好用由你的出口决定。</p>' +
         '<label class="hx-field"><span class="p-sronly">链接或订阅地址</span><textarea class="hx-textarea' + (D.err ? ' is-error' : '') + '" data-keep="ownexit" id="f-ownexit" rows="5" placeholder="每行一条链接，或一行订阅地址" data-autofocus></textarea>' + (D.err ? '<span class="hx-help is-error">' + I('warning', 16) + D.err + '</span>' : '') + '</label>' +
+        '<label class="p-check lx-direct"><input type="checkbox" data-keep="ownexitdirect"> 本机直连<span class="p-sub">（卖家的节点只允许国内连接时勾选：由这台电脑直接连，不经香港）</span></label>' +
         '<div class="acts">' + (D.busy ? '<span class="p-sub">正在接入，读链接、下订阅要几秒…</span>' : btn('text', I('paste', 16) + '粘贴', 'pasteField:ownexit', ' title="把复制好的链接或订阅地址放进上面的框"') + btn('secondary', '取消', 'close') + btn('primary', '接入', 'ownExitUse')) + '</div></div>';
     } else if (D.type === 'restoreCode') {
       h = '<div class="hx-dialog' + k + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">用原授权码恢复</h3><p>输入这台电脑原来的授权码，接回原来的账户。</p>' +

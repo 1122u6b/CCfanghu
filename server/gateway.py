@@ -213,6 +213,27 @@ class Gateway:
             kernel=[n for n in selected if isinstance(n,dict) and n.get('type') not in UPSTREAM_TYPES]
             if kernel:groups.append([validate_node(n) for n in kernel])
         return groups
+    async def client_direct_nodes(self,device):
+        """「本机直连」: the selected exit's own nodes for the computer to dial. Names become addresses here (the
+        computer's firewall lets its kernel reach exactly these), and the name stays the TLS server name."""
+        nodes=await asyncio.to_thread(device.management.selected_direct_nodes)
+        if not nodes:return None
+        loop=asyncio.get_running_loop();result=[]
+        for i,raw in enumerate(nodes[:32]):
+            n=dict(validate_node(raw));host=n['server']
+            try:ipaddress.ip_address(host)
+            except ValueError:
+                infos=await asyncio.wait_for(loop.getaddrinfo(host,n['port'],type=socket.SOCK_STREAM),10)
+                v4=[x[4][0] for x in infos if x[0]==socket.AF_INET];n['server']=(v4 or [infos[0][4][0]])[0]
+                kind=n.get('type')
+                if kind in ('vless','vmess') and n.get('tls') and not n.get('servername'):n['servername']=host
+                if kind in ('trojan','hysteria2','tuic') and not n.get('sni'):n['sni']=host
+                if n.get('network')=='ws':
+                    opts=dict(n.get('ws-opts') or {});headers=dict(opts.get('headers') or {})
+                    if not headers.get('Host'):headers['Host']=host;opts['headers']=headers;n['ws-opts']=opts
+            n['name']=str(raw.get('name') or n.get('type') or '出口')[:60] or '出口'
+            result.append(n)
+        return result
     def node(self,device=None):
         return {'name':'自建前置 · 住宅出口','type':'socks5','server':self.config['public_host'],'port':int(self.config['port']),'username':device.id if device else self.config['client_user'],'password':device.secret if device else self.config['client_password'],'tls':True,'fingerprint':self.config['fingerprint'],'udp':False}
     async def response(self,w,status,obj):
@@ -287,7 +308,14 @@ class Gateway:
                 try:await asyncio.to_thread(device.management.set_selected_exit_ip,str(observed))
                 except Exception as e:print('exit address not saved: '+type(e).__name__,flush=True)
             return await self.response(w,200,{'observed_source':str(observed),'scope':'this authenticated TLS connection only'})
-        if method=='GET' and path=='/api/v1/config':return await self.response(w,200,{'proxies':[self.node(device)],'mux':'yamux' if self.mux_enabled() else None,'license_required':False,'identity':{'role':'owner' if is_admin else 'device','id':None if is_admin else device.id}})
+        if method=='GET' and path=='/api/v1/config':
+            direct=None
+            if device is not None:
+                try:direct=await self.client_direct_nodes(device)
+                except Exception as e:
+                    print('own exit for direct dialing not ready: '+type(e).__name__,flush=True)
+                    return await self.response(w,502,{'error':'exit unavailable','detail':'本机直连的出口地址解析失败'})
+            return await self.response(w,200,{'proxies':direct or [self.node(device)],'mux':None if direct else 'yamux' if self.mux_enabled() else None,'direct_exit':bool(direct),'license_required':False,'identity':{'role':'owner' if is_admin else 'device','id':None if is_admin else device.id}})
         if method=='POST' and path=='/api/v1/rpc':
             n=int(h.get('content-length','0'))
             if not 0<n<=(2*1024*1024 if is_admin else 131072):return await self.response(w,413,{'error':'invalid content length'})
@@ -326,8 +354,9 @@ class Gateway:
             except (ValueError,TypeError,KeyError):return await self.response(w,400,{'error':'invalid management request'})
             if device is not None and isinstance(result,dict):
                 kind=request.get('type')
-                if kind in ('import_exit_links','store_exit','update_exit') and isinstance(result.get('id'),int):self.probe_exits_later(device,[result['id']])
-                elif kind=='exits':self.probe_exits_later(device,[x['id'] for x in result.get('items',[]) if not x.get('exit_ip')])
+                # Exits the computer dials itself are measured by the computer (the server may not be let in).
+                if kind in ('import_exit_links','store_exit','update_exit') and isinstance(result.get('id'),int) and not device.management.is_client_direct(result['id']):self.probe_exits_later(device,[result['id']])
+                elif kind=='exits':self.probe_exits_later(device,[x['id'] for x in result.get('items',[]) if not x.get('exit_ip') and not x.get('direct')])
             return await self.response(w,200,result)
         if method=='POST' and path=='/api/v1/own-exit':
             n=int(h.get('content-length','0'))

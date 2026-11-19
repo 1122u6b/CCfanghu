@@ -1018,3 +1018,7 @@ b, strong { font-weight: 500; }
 .lx-qqcard .lx-qqrow .hx-btn { flex: none; }
 .lx-qqcard .lab .lx-qqcopy { margin-left: auto; min-height: 0; padding: 0 2px; gap: 4px; }
 .lx-qqcard .lx-qqrow .val { overflow: visible; text-overflow: clip; white-space: nowrap; }
+
+/* 添加出口弹窗：本机直连选项 */
+.lx-direct { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
+.lx-direct .p-sub { font-size: 12px; }

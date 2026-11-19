@@ -222,7 +222,7 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,tar
                    'ticket_reply','ticket_rate','upload_chunk','ticket_image','help','exits','store_exit',
                    'select_exit','delete_exit','direct_rules','ai_accounts','ai_secrets','ai_report',
                    'add_direct_rule','remove_direct_rule','set_direct_note','dns_config','dns_probe_begin','dns_probe_result','ai_login_begin','ai_login_poll','ai_login_cancel',
-                   'update_exit','update_manifest','update_chunk','import_exit_links','license_renew','ip_geo'}
+                   'update_exit','update_manifest','update_chunk','import_exit_links','license_renew','ip_geo','set_exit_direct','report_traffic'}
         if kind not in allowed:
             raise ManagementError('device is not allowed to perform this command')
         if kind == 'ip_geo':

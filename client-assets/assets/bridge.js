@@ -927,9 +927,11 @@
     var o = { id: e.id, own: !!e.own, sub: !!e.sub, n: e.lines || 0, current: !!e.current, raw: { name: e.name || '', location: e.location || '', ip: e.exit_ip || '', err: e.exit_ip_error || '' } };
     // 服务器经这个出口测不通时的原因（「连不上出口地址」「出口连上了但不转发流量」…），出口一通就没了。
     o.err = esc(o.raw.err);
+    // 本机直连：这台电脑直接连这个出口（卖家节点只允许国内连接时用），不经香港中转。
+    o.direct = !!e.direct;
     o.name = o.raw.name;
     o.city = esc(o.raw.location || '—');
-    Object.defineProperty(o, 'ip', { enumerable: true, get: function () { return esc(o.raw.ip || (o.current && curIp !== '-' ? curIp : '—')); } });
+    Object.defineProperty(o, 'ip', { enumerable: true, get: function () { return esc(o.raw.ip || (o.current && curIp !== '-' ? curIp : o.direct ? '选用后显示 IP' : '—')); } });
     Object.defineProperty(o, 'sig', { enumerable: true, get: function () { var r = ROUTES[S.route]; return o.current && S.status === 'ok' && r && typeof r.sig === 'number' ? r.sig : null; } });
     return o;
   }
@@ -973,7 +975,7 @@
     if (!links) { D.err = '请粘贴链接或订阅地址'; P.render(); return; }
     var req = { type: 'own_exit', links: links };
     if (re) req.exit_id = re.id;
-    else { req.add = true; req.name = field('exitname') || '我的出口 ' + (EXITS.filter(function (e) { return e.own; }).length + 1); }
+    else { req.add = true; req.name = field('exitname') || '我的出口 ' + (EXITS.filter(function (e) { return e.own; }).length + 1); if (field('exitdirect') === true) req.direct = true; }
     D.busy = true; D.err = ''; P.render();
     call(req).then(function (r) {
       if (S.dialog === D) S.dialog = null;
@@ -982,6 +984,18 @@
       P.toast(re ? '「' + exitName(re) + '」的链接换好了：' + n + ' 条线路' + sk : '出口加好了：' + n + ' 条线路' + sk + '，点它就能切过去');
       loadAccount(); poll();
     }).catch(function (err) { if (S.dialog === D) { D.busy = false; D.err = esc(msg(err)); P.render(); } });
+  };
+  // 本机直连 ⇄ 经香港中转：正在用的出口改了走法，防护会重新建一次线路（几秒，期间真实 IP 照样挡住）。
+  A.exitDirect = function (i) {
+    var e = shownExits()[+i];
+    if (!e || !e.own || S.busy.route) return;
+    var to = !e.direct;
+    S.busy.route = { text: to ? '正在把「' + exitName(e) + '」改为本机直连' : '正在把「' + exitName(e) + '」改为经香港中转' }; P.render();
+    call({ type: 'set_exit_direct', id: e.id, direct: to }).then(function () {
+      delete S.busy.route; e.direct = to; P.render();
+      P.toast(to ? '「' + exitName(e) + '」改为本机直连：这台电脑直接连它，不经香港' : '「' + exitName(e) + '」改为经香港中转');
+      histAt = 0; loadAccount(); poll();
+    }).catch(function (err) { delete S.busy.route; P.render(); P.toast(esc(msg(err)), 'info'); });
   };
   // 删除自己加的出口：照原型先确认；删的是正在用的，服务端先切到另一个（回新的当前出口）。
   A.exitDel = function (i) {
@@ -1068,7 +1082,9 @@
     var v = field('ownexit');
     if (!v) { S.dialog.err = '请粘贴卖家给你的链接或订阅地址'; P.render(); return; }
     S.dialog.busy = true; S.dialog.err = ''; P.render();
-    call({ type: 'own_exit', links: v }).then(function (r) {
+    var req = { type: 'own_exit', links: v };
+    if (field('ownexitdirect') === true) req.direct = true;
+    call(req).then(function (r) {
       var skipped = (r && r.skipped) || [];
       S.dialog = null;
       P.toast('出口接上了：' + ((r && r.lines) || 0) + ' 条线路' + (skipped.length ? '，跳过 ' + skipped.length + ' 条（' + esc(skipped[0]) + (skipped.length > 1 ? ' 等' : '') + '）' : ''));

@@ -158,7 +158,7 @@ sealed partial class Runtime:IDisposable
   if(coexist){HoldCoexist();return;}
   var executable=File.Exists(kernel.Executable)?kernel.Executable:Environment.ProcessPath!;
   var endpoint=new System.Net.IPEndPoint(IPAddress.Parse(profile.Host),profile.Port);
-  filters.Apply(WfpPlan.Create(executable,Environment.ProcessPath!,[new GatewayEndpoint(endpoint,6)],[endpoint],luid,store.Settings.DirectRules,store.Settings.ProxyOnlyListed));
+  filters.Apply(WfpPlan.Create(executable,Environment.ProcessPath!,[new GatewayEndpoint(endpoint,6),..directEndpoints],[endpoint],luid,store.Settings.DirectRules,store.Settings.ProxyOnlyListed));
  }
  async Task StartProtected(CancellationToken stop)
  {
@@ -168,6 +168,9 @@ sealed partial class Runtime:IDisposable
   if(startCancel.IsCancellationRequested){startCancel.Dispose();startCancel=new();}
   using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop,startCancel.Token);deadline.CancelAfter(TimeSpan.FromSeconds(90));var ct=deadline.Token;
   var config=await cloud.SendAsync("/api/v1/config",cancellation:ct);nodes=config.GetProperty("proxies").Clone();configAt=DateTimeOffset.UtcNow;
+  // 「本机直连」: the server handed this exit's own nodes; the firewall lets the kernel reach exactly their addresses.
+  directExit=config.TryGetProperty("direct_exit",out var de)&&de.ValueKind==JsonValueKind.True;
+  directEndpoints=directExit?nodes.EnumerateArray().Select(n=>new GatewayEndpoint(new System.Net.IPEndPoint(IPAddress.Parse(Text(n,"server")),n.GetProperty("port").GetInt32()),(byte)(Text(n,"type") is "hysteria2" or "tuic"?17:6))).Distinct().Take(32).ToArray():[];
   if(!config.TryGetProperty("identity",out var identity)||Text(identity,"role")!="device"||Text(identity,"id")!=profile.DeviceId)throw new InvalidDataException("服务器没有返回当前设备的独立身份");
   MihomoConfiguration.ValidateNodes(nodes);
   try{NoteExpiry(await cloud.RpcAsync(new{type="account"},ct));}catch(Exception e)when(e is not OperationCanceledException){Program.Log("reading the authorization expiry",e);}
@@ -264,6 +267,33 @@ sealed partial class Runtime:IDisposable
   triedExits.Clear();
   Record("blocked",reason);Program.Log("protection blocked",e);
  }
+ // ---------- 「本机直连」的流量：网关看不到，本机数好了报给服务器（「本月流量」照样显示） ----------
+ bool directExit;GatewayEndpoint[] directEndpoints=[];
+ long trafficLastTotal=-1,trafficPending;Dictionary<string,long> directConns=new();DateTimeOffset trafficReadAt,trafficSentAt;Task? trafficSend;
+ static long Num(JsonElement value,string field)=>value.TryGetProperty(field,out var v)&&v.TryGetInt64(out var n)?n:0;
+ // Every 5 s: everything the kernel moved, minus what went straight out (local network, sites not on the list).
+ // Sent once a minute in the background; what could not be sent is kept for the next time.
+ async Task CountDirectTraffic(CancellationToken stop)
+ {
+  if(!directExit){trafficLastTotal=-1;directConns.Clear();return;}
+  var now=DateTimeOffset.UtcNow;if(now<trafficReadAt)return;trafficReadAt=now.AddSeconds(5);
+  var snap=await kernel.Get("connections",stop);
+  var total=Num(snap,"uploadTotal")+Num(snap,"downloadTotal");long straight=0;var seen=new Dictionary<string,long>();
+  if(snap.TryGetProperty("connections",out var list)&&list.ValueKind==JsonValueKind.Array)
+   foreach(var c in list.EnumerateArray())
+   {
+    if(!c.TryGetProperty("chains",out var chains)||chains.ValueKind!=JsonValueKind.Array||!chains.EnumerateArray().Any(x=>x.ValueKind==JsonValueKind.String&&x.GetString() is "DIRECT" or "REJECT"))continue;
+    var id=Text(c,"id");var bytes=Num(c,"upload")+Num(c,"download");seen[id]=bytes;straight+=bytes-(directConns.TryGetValue(id,out var was)?Math.Min(was,bytes):0);
+   }
+  directConns=seen;
+  if(trafficLastTotal>=0)Interlocked.Add(ref trafficPending,Math.Max(0,(total>=trafficLastTotal?total-trafficLastTotal:total)-straight)); // the kernel restarted: its count began again
+  trafficLastTotal=total;
+  if(Interlocked.Read(ref trafficPending)>0&&now>=trafficSentAt&&(trafficSend is null||trafficSend.IsCompleted))
+  {
+   trafficSentAt=now.AddSeconds(60);var send=Math.Min(Interlocked.Read(ref trafficPending),100L*1024*1024*1024);
+   trafficSend=Task.Run(async()=>{try{await Remote(new{type="report_traffic",bytes=send},CancellationToken.None);Interlocked.Add(ref trafficPending,-send);}catch(Exception e){Program.Log("traffic report",e);}});
+  }
+ }
  // ---------- 换出口：不重建防护 ----------
  // Every exit is reached through the same Leyra gateway, which picks the customer's selected exit for each new
  // connection, so nothing on this computer has to be rebuilt: close the connections opened before the switch
@@ -273,6 +303,13 @@ sealed partial class Runtime:IDisposable
  {
   exitCount=null;exitAskAt=DateTimeOffset.MinValue;
   if(!configured||state!="protected"){configured=false;retryAt=DateTimeOffset.MinValue;return;}
+  // Switching between an exit reached through Hong Kong and one this computer dials itself changes the line: rebuild.
+  try
+  {
+   var fresh=await cloud!.SendAsync("/api/v1/config",cancellation:stop);
+   if(fresh.GetProperty("proxies").GetRawText()!=nodes.GetRawText()){configured=false;retryAt=DateTimeOffset.MinValue;return;}
+  }
+  catch(Exception e)when(e is not OperationCanceledException||!stop.IsCancellationRequested){Program.Log("reading the line for the new exit",e);configured=false;retryAt=DateTimeOffset.MinValue;return;}
   var generation=DateTimeOffset.UtcNow;configAt=generation; // checks still running for the old exit are discarded
   exitVerified=false;
   try
@@ -382,7 +419,7 @@ sealed partial class Runtime:IDisposable
   using(var local=CancellationTokenSource.CreateLinkedTokenSource(stop))
   {
    local.CancelAfter(TimeSpan.FromSeconds(4));
-   try{var traffic=await kernel.Rates(local.Token);up=traffic.Up;down=traffic.Down;if(down>=2048)lastTraffic=DateTimeOffset.UtcNow;var proxies=await kernel.Get("proxies/"+Uri.EscapeDataString("出口"),local.Token);selected=Text(proxies,"now");}
+   try{var traffic=await kernel.Rates(local.Token);up=traffic.Up;down=traffic.Down;if(down>=2048)lastTraffic=DateTimeOffset.UtcNow;var proxies=await kernel.Get("proxies/"+Uri.EscapeDataString("出口"),local.Token);selected=Text(proxies,"now");await CountDirectTraffic(local.Token);}
    catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidDataException or JsonException){/* 读流量只是显示用，下次再读 */}
   }
   heartbeat=DateTimeOffset.UtcNow;lastHealth=heartbeat;
@@ -532,6 +569,7 @@ sealed partial class Runtime:IDisposable
     case "ai_secrets":if(state!="protected")throw new InvalidOperationException("请先恢复防护，再显示登录信息");return await Remote(request,stop);
     case "new_ticket":case "ticket_reply":case "ticket_rate":case "upload_chunk":case "ticket_image":case "messages":case "mark_read":case "set_contact":case "help":case "ai_accounts":case "ai_report":return await Remote(request,stop);
     case "select_exit":{var result=await Remote(request,stop);await ExitChanged(stop);return result;}
+    case "set_exit_direct":{var result=await Remote(request,stop);if(Bool(result,"current"))await ExitChanged(stop);return result;}
     case "delete_exit":
      {
       // Only deleting the exit in use changes where traffic goes.

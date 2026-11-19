@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
             if 'exit_ip_at' not in cols:db.execute('ALTER TABLE exits ADD COLUMN exit_ip_at INTEGER')
             # Why the last address check through the exit failed (shown on the exit card), cleared when it works.
             if 'exit_probe_error' not in cols:db.execute('ALTER TABLE exits ADD COLUMN exit_probe_error TEXT')
+            # 「本机直连」: the computer dials this exit itself (for nodes that only take connections from mainland China).
+            if 'client_direct' not in cols:db.execute('ALTER TABLE exits ADD COLUMN client_direct INTEGER NOT NULL DEFAULT 0')
             # Messages can carry a link (e.g. to renew) and a tag so automatic reminders are sent only once.
             cols={r[1] for r in db.execute('PRAGMA table_info(messages)')}
             if 'link' not in cols:db.execute('ALTER TABLE messages ADD COLUMN link TEXT')
@@ -114,6 +116,24 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
             row=db.execute('SELECT node FROM exits WHERE id=?',(int(identity),)).fetchone()
         if not row:return None
         value=json.loads(row[0]);return value if isinstance(value,list) else [value]
+    # Settings the computer's kernel refuses; such a node cannot be dialed by the computer itself.
+    CLIENT_FORBIDDEN={'plugin','plugin-opts','smux','dialer-proxy','proxy','certificate','private-key','ca','ca-str'}
+    @classmethod
+    def check_client_direct(cls,nodes):
+        for n in nodes:
+            if any(k in cls.CLIENT_FORBIDDEN for k in n):raise ManagementError('这个出口用了插件设置，不能本机直连，只能经香港中转')
+    def selected_direct_nodes(self):
+        """The selected exit's nodes when the computer dials it itself, else None."""
+        with self.db() as db:
+            identity=self.get(db,'selected_exit')
+            if identity is None:return None
+            row=db.execute('SELECT node,client_direct FROM exits WHERE id=?',(identity,)).fetchone()
+        if not row or not row['client_direct']:return None
+        value=json.loads(row['node']);return value if isinstance(value,list) else [value]
+    def is_client_direct(self,identity):
+        with self.db() as db:
+            row=db.execute('SELECT client_direct FROM exits WHERE id=?',(int(identity),)).fetchone()
+        return bool(row and row[0])
     def exits_without_ip(self):
         with self.db() as db:return [r[0] for r in db.execute("SELECT id FROM exits WHERE exit_ip IS NULL OR exit_ip='' ORDER BY id")]
     def ticket(self,db,identity):
@@ -349,7 +369,7 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
             if kind=='exits':
                 def summary(r):
                     nodes=json.loads(r['node']);nodes=nodes if isinstance(nodes,list) else [nodes]
-                    return {'id':r['id'],'name':r['name'],'created_at':r['created_at'],'lines':len(nodes),'types':sorted({n.get('type','socks5') for n in nodes}),'exit_ip':r['exit_ip'] or '','exit_ip_at':r['exit_ip_at'],'exit_ip_error':r['exit_probe_error'] or ''}
+                    return {'id':r['id'],'name':r['name'],'created_at':r['created_at'],'lines':len(nodes),'types':sorted({n.get('type','socks5') for n in nodes}),'exit_ip':r['exit_ip'] or '','exit_ip_at':r['exit_ip_at'],'exit_ip_error':r['exit_probe_error'] or '','direct':bool(r['client_direct'])}
                 return {'items':[summary(r) for r in db.execute('SELECT * FROM exits ORDER BY id')],'selected':self.get(db,'selected_exit')}
             if kind=='store_exit':
                 nodes=exit_nodes(req.get('nodes',req.get('node',{})))
@@ -361,12 +381,17 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
                 except LinkError as e:raise ManagementError(str(e)) from None
                 if not nodes:raise ManagementError('没有可用的出口：'+(skipped[0] if skipped else '请粘贴链接或订阅地址'))
                 nodes=exit_nodes(nodes)
+                direct=req.get('direct')
+                if direct is not None and not isinstance(direct,bool):raise ManagementError('invalid direct flag')
+                if direct:self.check_client_direct(nodes)
                 if req.get('exit_id') is not None:
                     identity=int(req['exit_id'])
                     if db.execute('UPDATE exits SET node=?,exit_ip=NULL,exit_ip_at=NULL,exit_probe_error=NULL WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
                 else:
                     if db.execute('SELECT COUNT(*) FROM exits').fetchone()[0]>=20:raise ManagementError('maximum 20 exits')
                     identity=db.execute('INSERT INTO exits(name,node,created_at) VALUES (?,?,?)',(text(req.get('name') or '我的出口',80,True),json.dumps(nodes),now)).lastrowid
+                if direct is not None:db.execute('UPDATE exits SET client_direct=? WHERE id=?',(int(direct),identity))
+                elif db.execute('SELECT client_direct FROM exits WHERE id=?',(identity,)).fetchone()[0]:self.check_client_direct(nodes)
                 self.put(db,'selected_exit',identity)
                 return {'id':identity,'lines':len(nodes),'skipped':skipped,'types':sorted({n['type'] for n in nodes})}
             if kind=='update_exit':
@@ -374,6 +399,24 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
                 if db.execute('UPDATE exits SET node=?,exit_ip=NULL,exit_ip_at=NULL,exit_probe_error=NULL WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
                 if req.get('name') is not None:db.execute('UPDATE exits SET name=? WHERE id=?',(text(req.get('name'),80,True),identity))
                 return {'id':identity,'lines':len(nodes),'saved':True}
+            if kind=='set_exit_direct':
+                identity=int(req.get('id',0));direct=req.get('direct')
+                if not isinstance(direct,bool):raise ManagementError('invalid direct flag')
+                row=db.execute('SELECT node FROM exits WHERE id=?',(identity,)).fetchone()
+                if not row:raise ManagementError('exit not found')
+                nodes=json.loads(row[0]);nodes=nodes if isinstance(nodes,list) else [nodes]
+                if direct:self.check_client_direct(nodes)
+                db.execute('UPDATE exits SET client_direct=?,exit_probe_error=NULL WHERE id=?',(int(direct),identity))
+                return {'id':identity,'direct':direct,'current':self.get(db,'selected_exit')==identity}
+            if kind=='report_traffic':
+                # Bytes the computer counted itself while dialing its own exit (the gateway never saw them).
+                count=req.get('bytes')
+                if not isinstance(count,int) or not 0<=count<=100*1024**3:raise ManagementError('invalid byte count')
+                identity=self.get(db,'selected_exit')
+                row=db.execute('SELECT client_direct FROM exits WHERE id=?',(identity,)).fetchone() if identity is not None else None
+                if not row or not row[0]:return {'counted':False}
+                db.execute('INSERT INTO traffic VALUES (?,?) ON CONFLICT(day) DO UPDATE SET bytes=bytes+excluded.bytes',(self.china_day(),count))
+                return {'counted':True}
             if kind=='select_exit':
                 identity=int(req.get('id',0));row=db.execute('SELECT node FROM exits WHERE id=?',(identity,)).fetchone()
                 if not row:raise ManagementError('exit not found')
