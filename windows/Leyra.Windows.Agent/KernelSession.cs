@@ -57,6 +57,12 @@ sealed class KernelSession:IDisposable
   while((n=await stream.ReadAsync(bytes,stop))>0){if(memory.Length+n>2*1024*1024)throw new InvalidDataException("网络控制响应过大");memory.Write(bytes,0,n);}
   using var doc=JsonDocument.Parse(memory.ToArray());return doc.RootElement.Clone();
  }
+ // Ends every open connection (new ones are opened again by the programs, through the current exit).
+ public async Task CloseConnections(CancellationToken stop)
+ {
+  using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(4));
+  using var response=await controller.DeleteAsync("connections",deadline.Token);response.EnsureSuccessStatusCode();
+ }
  public async Task Select(string name,CancellationToken stop)
  {
   using var request=new HttpRequestMessage(HttpMethod.Put,"proxies/"+Uri.EscapeDataString("出口")){Content=new StringContent(JsonSerializer.Serialize(new{name}),System.Text.Encoding.UTF8,"application/json")};

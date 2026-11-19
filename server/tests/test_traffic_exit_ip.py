@@ -171,7 +171,48 @@ class ExitAddressThroughTheExit(unittest.IsolatedAsyncioTestCase):
         dead = rpc({'type': 'store_exit', 'name': 'dead', 'node': {'type': 'socks5', 'server': '127.0.0.1', 'port': 9}})['id']
         await self.gateway.probe_exit(device, dead)
         self.assertEqual(rpc({'type': 'exits'})['items'][0]['exit_ip'], '')
+        self.assertEqual(rpc({'type': 'exits'})['items'][0]['exit_ip_error'], '连不上出口地址')
         self.assertIn((device.id, dead), self.gateway.exit_probe_tried)
+
+    async def test_exit_that_takes_the_connection_but_passes_nothing_says_so(self):
+        # Like an expired node: accepts the SOCKS5 CONNECT, then never forwards a byte.
+        async def silent(r, w):
+            try:
+                head = await r.readexactly(2); await r.readexactly(head[1]); w.write(b'\x05\x00')
+                req = await r.readexactly(4)
+                await r.readexactly(4 if req[3] == 1 else (await r.readexactly(1))[0]); await r.readexactly(2)
+                w.write(b'\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00'); await w.drain()
+                await asyncio.sleep(30)
+            except (asyncio.IncompleteReadError, ConnectionError, asyncio.CancelledError):
+                pass
+            finally:
+                w.close()
+        stuck = await asyncio.start_server(silent, '127.0.0.1', 0)
+        try:
+            self.gateway.exit_probe_wait = 1
+            issued = self.gateway.devices.issue('A'); device = self.gateway.devices.authenticate(issued['token'])
+            rpc = lambda req: self.gateway.devices.device_rpc(self.gateway.management, device, req)
+            identity = rpc({'type': 'store_exit', 'name': 'stuck', 'node': {'type': 'socks5', 'server': '127.0.0.1', 'port': stuck.sockets[0].getsockname()[1]}})['id']
+            await self.gateway.probe_exit(device, identity)
+            item = rpc({'type': 'exits'})['items'][0]
+            self.assertEqual(item['exit_ip'], ''); self.assertEqual(item['exit_ip_error'], '出口连上了但不转发流量')
+            # Works again later: the address is shown and the problem note is gone.
+            rpc({'type': 'update_exit', 'id': identity, 'node': {'type': 'socks5', 'server': '127.0.0.1', 'port': self.exit_port}})
+            self.gateway.exit_probe_tried.clear(); await self.gateway.probe_exit(device, identity)
+            item = rpc({'type': 'exits'})['items'][0]
+            self.assertEqual(item['exit_ip'], '127.0.0.1'); self.assertEqual(item['exit_ip_error'], '')
+        finally:
+            stuck.close()
+
+    async def test_background_checks_are_kept_until_they_finish(self):
+        issued = self.gateway.devices.issue('A'); device = self.gateway.devices.authenticate(issued['token'])
+        rpc = lambda req: self.gateway.devices.device_rpc(self.gateway.management, device, req)
+        identity = rpc({'type': 'store_exit', 'name': 'vps', 'node': {'type': 'socks5', 'server': '127.0.0.1', 'port': self.exit_port}})['id']
+        self.gateway.probe_exits_later(device, [identity])
+        self.assertEqual(len(self.gateway.probe_tasks), 1)
+        await asyncio.gather(*list(self.gateway.probe_tasks))
+        self.assertEqual(self.gateway.probe_tasks, set())
+        self.assertEqual(rpc({'type': 'exits'})['items'][0]['exit_ip'], '127.0.0.1')
 
 
 if __name__ == '__main__':

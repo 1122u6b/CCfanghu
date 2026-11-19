@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
             cols={r[1] for r in db.execute('PRAGMA table_info(exits)')}
             if 'exit_ip' not in cols:db.execute('ALTER TABLE exits ADD COLUMN exit_ip TEXT')
             if 'exit_ip_at' not in cols:db.execute('ALTER TABLE exits ADD COLUMN exit_ip_at INTEGER')
+            # Why the last address check through the exit failed (shown on the exit card), cleared when it works.
+            if 'exit_probe_error' not in cols:db.execute('ALTER TABLE exits ADD COLUMN exit_probe_error TEXT')
             # Messages can carry a link (e.g. to renew) and a tag so automatic reminders are sent only once.
             cols={r[1] for r in db.execute('PRAGMA table_info(messages)')}
             if 'link' not in cols:db.execute('ALTER TABLE messages ADD COLUMN link TEXT')
@@ -100,11 +102,13 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
         return {'traffic_used_bytes':sum(days),'traffic_limit_bytes':None,'traffic_reset_at':reset,'traffic_days_from':first.isoformat(),'traffic_days':days}
     # ---- the address each exit shows to websites ----
     def set_exit_ip(self,identity,ip):
-        with self.db() as db:db.execute('UPDATE exits SET exit_ip=?,exit_ip_at=? WHERE id=?',(str(ip),int(time.time()),int(identity)))
+        with self.db() as db:db.execute('UPDATE exits SET exit_ip=?,exit_ip_at=?,exit_probe_error=NULL WHERE id=?',(str(ip),int(time.time()),int(identity)))
+    def set_exit_probe_failed(self,identity,reason):
+        with self.db() as db:db.execute('UPDATE exits SET exit_probe_error=? WHERE id=?',(str(reason)[:80],int(identity)))
     def set_selected_exit_ip(self,ip):
         with self.db() as db:
             identity=self.get(db,'selected_exit')
-            if identity is not None:db.execute('UPDATE exits SET exit_ip=?,exit_ip_at=? WHERE id=?',(str(ip),int(time.time()),int(identity)))
+            if identity is not None:db.execute('UPDATE exits SET exit_ip=?,exit_ip_at=?,exit_probe_error=NULL WHERE id=?',(str(ip),int(time.time()),int(identity)))
     def exit_nodes_of(self,identity):
         with self.db() as db:
             row=db.execute('SELECT node FROM exits WHERE id=?',(int(identity),)).fetchone()
@@ -345,7 +349,7 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
             if kind=='exits':
                 def summary(r):
                     nodes=json.loads(r['node']);nodes=nodes if isinstance(nodes,list) else [nodes]
-                    return {'id':r['id'],'name':r['name'],'created_at':r['created_at'],'lines':len(nodes),'types':sorted({n.get('type','socks5') for n in nodes}),'exit_ip':r['exit_ip'] or '','exit_ip_at':r['exit_ip_at']}
+                    return {'id':r['id'],'name':r['name'],'created_at':r['created_at'],'lines':len(nodes),'types':sorted({n.get('type','socks5') for n in nodes}),'exit_ip':r['exit_ip'] or '','exit_ip_at':r['exit_ip_at'],'exit_ip_error':r['exit_probe_error'] or ''}
                 return {'items':[summary(r) for r in db.execute('SELECT * FROM exits ORDER BY id')],'selected':self.get(db,'selected_exit')}
             if kind=='store_exit':
                 nodes=exit_nodes(req.get('nodes',req.get('node',{})))
@@ -359,7 +363,7 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
                 nodes=exit_nodes(nodes)
                 if req.get('exit_id') is not None:
                     identity=int(req['exit_id'])
-                    if db.execute('UPDATE exits SET node=?,exit_ip=NULL,exit_ip_at=NULL WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
+                    if db.execute('UPDATE exits SET node=?,exit_ip=NULL,exit_ip_at=NULL,exit_probe_error=NULL WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
                 else:
                     if db.execute('SELECT COUNT(*) FROM exits').fetchone()[0]>=20:raise ManagementError('maximum 20 exits')
                     identity=db.execute('INSERT INTO exits(name,node,created_at) VALUES (?,?,?)',(text(req.get('name') or '我的出口',80,True),json.dumps(nodes),now)).lastrowid
@@ -367,7 +371,7 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
                 return {'id':identity,'lines':len(nodes),'skipped':skipped,'types':sorted({n['type'] for n in nodes})}
             if kind=='update_exit':
                 identity=int(req.get('id',0));nodes=exit_nodes(req.get('nodes',req.get('node',{})))
-                if db.execute('UPDATE exits SET node=?,exit_ip=NULL,exit_ip_at=NULL WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
+                if db.execute('UPDATE exits SET node=?,exit_ip=NULL,exit_ip_at=NULL,exit_probe_error=NULL WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
                 if req.get('name') is not None:db.execute('UPDATE exits SET name=? WHERE id=?',(text(req.get('name'),80,True),identity))
                 return {'id':identity,'lines':len(nodes),'saved':True}
             if kind=='select_exit':

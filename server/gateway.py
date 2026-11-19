@@ -180,7 +180,7 @@ class Gateway:
         # Bytes through each computer's exit not yet written to its store (flushed every minute).
         self.traffic_pending={}
         # Exit address checks: nonce -> waiting future; (computer, exit) -> last attempt.
-        self.exit_probes={};self.exit_probe_tried={}
+        self.exit_probes={};self.exit_probe_tried={};self.probe_tasks=set();self.exit_probe_wait=15
         from upstream_kernel import KernelUpstreams,find_binary
         binary=config.get('kernel_binary') or find_binary()
         self.kernel=KernelUpstreams(Path(self.management.root)/'upstream-kernel',Path(binary) if binary else None)
@@ -426,20 +426,32 @@ class Gateway:
             dial=await self.dial_list([validate_node(n) for n in nodes])
             r,w=await asyncio.wait_for(connect_any(dial,(self.config['public_host'],int(self.config['port']))),25)
             context=ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT);context.check_hostname=False;context.verify_mode=ssl.CERT_NONE
-            await asyncio.wait_for(w.start_tls(context),15)
+            await asyncio.wait_for(w.start_tls(context),self.exit_probe_wait)
             w.write(('GET /api/v1/exit-probe/'+nonce+' HTTP/1.1\r\nHost: exit-probe\r\nConnection: close\r\n\r\n').encode());await w.drain()
-            observed=await asyncio.wait_for(future,15)
+            observed=await asyncio.wait_for(future,self.exit_probe_wait)
             await asyncio.to_thread(device.management.set_exit_ip,exit_id,observed)
             self.exit_probe_tried.pop(key,None)
-        except Exception as e:print('exit address check failed: '+type(e).__name__,flush=True)
+        except Exception as e:
+            print('exit address check failed: '+type(e).__name__,flush=True)
+            # Plain words for the exit card. Connected but nothing came back: the exit takes the connection
+            # and does not pass traffic on (expired node, or one that only accepts connections from certain places).
+            reason=('出口连上了但不转发流量' if isinstance(e,(TimeoutError,asyncio.TimeoutError,ConnectionResetError,asyncio.IncompleteReadError)) and w is not None
+                    else '出口拒绝了账号或密码' if 'authentication' in str(e) or 'password' in str(e)
+                    else '连不上出口地址')
+            try:await asyncio.to_thread(device.management.set_exit_probe_failed,exit_id,reason)
+            except Exception as e2:print('exit check result not saved: '+type(e2).__name__,flush=True)
         finally:
             self.exit_probes.pop(nonce,None)
             if w is not None:
+                # A half-started TLS connection can wait forever to close: give it a few seconds, then drop it.
                 w.close()
-                with contextlib.suppress(Exception):await w.wait_closed()
+                with contextlib.suppress(Exception):await asyncio.wait_for(w.wait_closed(),3)
+                if w.transport is not None:w.transport.abort()
     def probe_exits_later(self,device,ids):
         loop=asyncio.get_running_loop()
-        for i in ids[:8]:loop.create_task(self.probe_exit(device,i))
+        for i in ids[:8]:
+            # Keep a reference until it finishes: the event loop alone would let a running check be collected.
+            task=loop.create_task(self.probe_exit(device,i));self.probe_tasks.add(task);task.add_done_callback(self.probe_tasks.discard)
     def device_ok(self,device):
         # One database check per computer every 5 s, shared by all its connections
         # (hundreds of connections each checking every second slowed the gateway down).

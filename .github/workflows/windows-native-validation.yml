@@ -311,6 +311,20 @@ jobs:
           if ($s -notmatch 'protected' -or $nowExit -ne $goodExit) { $failures += "did not switch back to the working exit by itself: $s (using $nowExit)" }
           if (-not $switched) { $failures += 'the automatic exit switch was not recorded in recent activity' }
           if ($badExit) { Ask ('{"type":"delete_exit","id":' + $badExit + '}') | Out-Null }
+          Write-Host '   switching between working exits is quick and protection never drops (no rebuild)'
+          if ((Ask ('{"type":"own_exit","links":"' + $link + '","name":"第二个出口"}')) -ne 0) { $failures += 'could not add a second working exit' }
+          $second = (Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value.id
+          $s = Get-Content $stateFile -Raw; if ($s -notmatch 'protected') { $failures += "adding a working exit dropped protection: $s" }
+          $t0 = Get-Date
+          if ((Ask ('{"type":"select_exit","id":' + $goodExit + '}')) -ne 0) { $failures += 'switching back to the first exit failed' }
+          $took = ((Get-Date) - $t0).TotalSeconds; $s = Get-Content $stateFile -Raw
+          Write-Host "   switched back in $([int]$took) s (with test tool overhead), state: $s"
+          if ($s -notmatch 'protected') { $failures += "switching exits dropped protection: $s" }
+          if ($took -gt 25) { $failures += "switching exits took $([int]$took) s" }
+          Ask '{"type":"history"}' | Out-Null
+          if ((Get-Content "C:\LeyraCi\out_$script:n.json" -Raw) -notmatch 'exit_switched') { $failures += 'the exit switch was not recorded' }
+          if ($second) { Ask ('{"type":"delete_exit","id":' + $second + '}') | Out-Null }
+          $s = Get-Content $stateFile -Raw; if ($s -notmatch 'protected') { $failures += "deleting an exit not in use dropped protection: $s" }
           Write-Host '   only listed sites go through the exit, the rest connects directly (and back to everything through the exit)'
           function SeenIp {
             for ($k = 1; $k -le 3; $k++) {

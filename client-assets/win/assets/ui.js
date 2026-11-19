@@ -488,8 +488,10 @@
   }
   function qqCard() {
     var c = qqChan(); if (!c) return '';
-    return '<div class="hx-card hx-data lx-qqcard"><div class="lab">' + I('chat', 16) + (c[2] === 'qqgroup' ? '售后 QQ 群' : esc(c[3] || '售后')) + '</div>' +
-      '<div class="lx-qqrow"><b class="val hx-num" data-ctx="copy:' + c[1] + '">' + c[1] + '</b><button class="hx-btn hx-btn-secondary hx-btn-sm" data-hx-copy="' + c[1] + '">' + I('copy', 14) + '复制群号</button></div>' +
+    // 复制按钮放在标题行右边，群号独占一行，窄卡片里也完整显示。
+    return '<div class="hx-card hx-data lx-qqcard"><div class="lab">' + I('chat', 16) + (c[2] === 'qqgroup' ? '售后 QQ 群' : esc(c[3] || '售后')) +
+      '<button class="hx-btn hx-btn-text hx-btn-sm lx-qqcopy" data-hx-copy="' + c[1] + '" aria-label="复制群号 ' + c[1] + '">' + I('copy', 14) + '复制群号</button></div>' +
+      '<div class="lx-qqrow"><b class="val hx-num" data-ctx="copy:' + c[1] + '">' + c[1] + '</b></div>' +
       '<div class="sub">' + [c[3], c[4]].filter(Boolean).join(' · ') + '</div></div>';
   }
   function supportCard(prep) {
@@ -616,9 +618,10 @@
     var cAccount = '<button class="hx-card hx-data p-cardbtn" data-act="go:profile"><div class="lab">' + I('calendar', 16) + '账户' + I('chevron', 16, 'go') + '</div><div class="val txt">' + (exp ? '已到期' : S.trial ? (S.trial === 'on' ? trialLeft() : '已到期') : byo() && S.licensePermanent === true ? '永久使用' : S.exp.date === '—' ? '—' : '还有 ' + nodeLeft() + ' 天') + '</div><div class="sub">' + (exp ? suiteWord() + ' ' + S.exp.date + '已到期' : S.trial ? '免费试用 · ' + S.trialEnd.date + (S.trial === 'on' ? '到期' : '') : byo() && S.licensePermanent === true ? '一次买断 · 永久授权' : S.exp.date === '—' ? '到期日还没拿到' : suiteWord() + ' ' + nodeDate() + '到期') + '</div></button>';
     // 本月流量是服务器在转发时实际数的（经出口的上下行合计，按自然月清零），自己加的 VPS 出口也算。
     if (side) return '<div class="p-sec p-pmgrid">' + supportCard(st !== 'pm') + '<div class="p-datagrid two">' + cRoute + cTraffic + cAccount + activityCard(2, true) + '</div></div>';
-    // 已保护、暂停、启动中：一排放当前线路、本月流量、账户，有售后 QQ 群再加一张（窄窗口自动两张一行）
+    // 已保护、暂停、启动中：第一排当前线路、本月流量、账户；第二排最近动态（宽）和售后 QQ 群（窄，群号完整显示）。窄窗口上下排。
     var qq = qqCard();
-    return '<div class="p-sec"><div class="p-datagrid' + (qq ? '' : ' three') + '">' + cRoute + cTraffic + cAccount + qq + '</div></div><div class="p-sec">' + activityCard(3) + '</div>';
+    return '<div class="p-sec"><div class="p-datagrid three">' + cRoute + cTraffic + cAccount + '</div></div>' +
+      '<div class="p-sec' + (qq ? ' p-ovwrow' : '') + '">' + activityCard(3) + qq + '</div>';
   }
   /* 最近动态（01 §5.13）：最近几条，「全部」跳线路页的最近事件；矮窗口里只显示 2 条 */
   function activityCard(n, compact) {
@@ -647,7 +650,7 @@
       '<div class="p-exits" role="radiogroup" aria-label="出口">' + L.map(function (e, i) {
         var cur = i === S.exit, last = S.exits === 'soft' && own <= 1;
         return '<div class="p-exit" aria-current="' + cur + '"><button class="pick" role="radio" aria-checked="' + cur + '" data-act="pickExit:' + i + '"' + (b ? ' disabled' : '') + '><span class="rad" aria-hidden="true"></span><span class="t">' +
-          '<b>' + esc(e.name) + (cur ? ' <span class="hx-mark">当前</span>' : '') + '</b><small>' + e.ip + '</small>' +
+          '<b>' + esc(e.name) + (cur ? ' <span class="hx-mark">当前</span>' : '') + '</b>' + (e.err ? '<small style="color:var(--danger)" title="服务器经这个出口访问网站没成功">' + I('warning', 14) + ' ' + e.err + '</small>' : '<small>' + e.ip + '</small>') +
           '<small>' + e.city + ' · ' + e.n + ' 条线路</small></span>' + (e.sig == null ? '' : sig(e.sig)) + '</button>' +
           '<div class="foot"><span class="tag' + (e.own ? ' own' : '') + '">' + (e.own ? '你自己加的' + (e.sub ? ' · 订阅' : '') : '我们分配的') + '</span>' +
           (e.own ? '<span class="acts">' + btn('text', '更换链接', 'exitRelink:' + i, b ? ' disabled' : '') + btn('text', '删除', 'exitDel:' + i, b || last ? ' disabled title="至少留一个出口"' : '') + '</span>' : '') + '</div></div>';

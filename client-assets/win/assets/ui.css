@@ -389,6 +389,9 @@ b, strong { font-weight: 500; }
 .p-datagrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .p-datagrid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .p-datagrid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+/* 首页第二排：最近动态占三分之二，售后 QQ 群占三分之一 */
+.p-ovwrow { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 10px; align-items: stretch; }
+.p-ovwrow > .hx-card { min-width: 0; }
 /* 最近动态（01 §5.13） */
 .p-activity { padding: 12px 16px 6px; min-width: 0; }
 .p-activity .p-cardhead { margin-bottom: 2px; }
@@ -891,7 +894,8 @@ b, strong { font-weight: 500; }
 @media (prefers-reduced-motion: reduce) { .p-popup.pin { animation: none; } }
 /* 窗口窄：四张卡还是一排，字收小；再窄才两排。窗口矮：路径图和卡片收紧、大白话那句不显示，最小窗口带公告也不用滚动。 */
 @container (max-width: 690px) { .p-pmgrid { grid-template-columns: minmax(0, 1fr); } .p-datagrid { gap: 8px; } .p-datagrid .hx-card { padding: 12px; } .hx-data .lab { font-size: 12px; } .hx-data .val { font-size: 16px; line-height: 24px; } .hx-data .val.ip { font-size: 14px; letter-spacing: -0.02em; } .hx-data .sub { font-size: 12px; } }
-@container (max-width: 540px) { .p-datagrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container (max-width: 540px) { .p-datagrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .p-datagrid.three > :last-child { grid-column: 1 / -1; } }
+@container (max-width: 760px) { .p-ovwrow { grid-template-columns: minmax(0, 1fr); } }
 @container (max-height: 520px) { .p-activity .p-events li:nth-child(n+3) { display: none; } .p-activity .p-events li:nth-child(2) { border-bottom: 0; } }
 @container (max-height: 600px) { .p-status { padding-bottom: 6px; } .p-status .hx-status { gap: 6px; padding-top: 0; } .hx-sg svg.ring { width: 100px; height: 100px; } .hx-status h2 { font-size: 20px; line-height: 28px; margin-bottom: 0; } .p-ovw .hx-status p:has(+ .p-guard) { display: none; } .p-path { margin-bottom: 2px; } .p-path .nd .ic { width: 40px; height: 40px; margin-bottom: 4px; border-radius: 12px; } .p-datagrid .hx-card { padding: 10px 12px; } .p-banner { margin-bottom: 6px; } }
 /* 窗口大：概览跟着放大，不留一大片空白（断网时内容多，放大得晚一些） */
@@ -1012,3 +1016,5 @@ b, strong { font-weight: 500; }
 .lx-qqcard .lx-qqrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 2px 0; }
 .lx-qqcard .lx-qqrow .val { font-size: 20px; line-height: 28px; letter-spacing: .5px; }
 .lx-qqcard .lx-qqrow .hx-btn { flex: none; }
+.lx-qqcard .lab .lx-qqcopy { margin-left: auto; min-height: 0; padding: 0 2px; gap: 4px; }
+.lx-qqcard .lx-qqrow .val { overflow: visible; text-overflow: clip; white-space: nowrap; }

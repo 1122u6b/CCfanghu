@@ -410,6 +410,9 @@
     if (e.kind === 'protected') return prev && (prev.kind === 'paused' || prev.kind === 'blocked') ? '防护恢复' : '已保护';
     if (e.kind === 'check') return +e.detail ? '安全检查 ' + (+e.detail) + ' 项要处理' : '安全检查一切正常';
     if (e.kind === 'update') return '更新到 ' + esc(e.detail);
+    if (e.kind === 'update_ready') return '新版本 ' + esc(e.detail) + ' 已下载好';
+    if (e.kind === 'update_at_boot') return '下次开机时自动更新到 ' + esc(e.detail);
+    if (e.kind === 'exit_switched') return '已换出口，网站现在看到 ' + esc(e.detail);
     // 自动修复（docs/01 §5.14）：「暂停了冲突软件检测」「进入安全模式，辅助功能先暂停」。
     if (e.kind === 'repair') return '自动修复：' + esc(e.detail);
     return '已断网 · ' + (shortOf(REASON[e.detail]) || '线路连不上');
@@ -921,7 +924,9 @@
   function shownExits() { return S.exits === 'soft' ? EXITS.filter(function (e) { return e.own; }) : EXITS; }
   function curExit() { return S.exits ? shownExits()[S.exit] || null : null; }
   function exitOf(e) {
-    var o = { id: e.id, own: !!e.own, sub: !!e.sub, n: e.lines || 0, current: !!e.current, raw: { name: e.name || '', location: e.location || '', ip: e.exit_ip || '' } };
+    var o = { id: e.id, own: !!e.own, sub: !!e.sub, n: e.lines || 0, current: !!e.current, raw: { name: e.name || '', location: e.location || '', ip: e.exit_ip || '', err: e.exit_ip_error || '' } };
+    // 服务器经这个出口测不通时的原因（「连不上出口地址」「出口连上了但不转发流量」…），出口一通就没了。
+    o.err = esc(o.raw.err);
     o.name = o.raw.name;
     o.city = esc(o.raw.location || '—');
     Object.defineProperty(o, 'ip', { enumerable: true, get: function () { return esc(o.raw.ip || (o.current && curIp !== '-' ? curIp : '—')); } });

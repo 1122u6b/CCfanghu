@@ -264,6 +264,32 @@ sealed partial class Runtime:IDisposable
   triedExits.Clear();
   Record("blocked",reason);Program.Log("protection blocked",e);
  }
+ // ---------- 换出口：不重建防护 ----------
+ // Every exit is reached through the same Leyra gateway, which picks the customer's selected exit for each new
+ // connection, so nothing on this computer has to be rebuilt: close the connections opened before the switch
+ // (they still use the old exit) and confirm the new exit. Blocking rules stay on throughout; the gateway never
+ // falls back to a direct connection. If the new exit does not answer, rebuild as before (failover takes over).
+ async Task ExitChanged(CancellationToken stop)
+ {
+  exitCount=null;exitAskAt=DateTimeOffset.MinValue;
+  if(!configured||state!="protected"){configured=false;retryAt=DateTimeOffset.MinValue;return;}
+  var generation=DateTimeOffset.UtcNow;configAt=generation; // checks still running for the old exit are discarded
+  exitVerified=false;
+  try
+  {
+   await kernel.CloseConnections(stop);
+   using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(20));
+   var observed=await ObserveExit(deadline.Token);
+   if(configAt!=generation||!configured)return;
+   exitIp=observed;exitVerified=true;netFailures=0;nextNetProbe=DateTimeOffset.UtcNow.AddSeconds(30);triedExits.Clear();
+   Record("exit_switched",observed);Publish();
+  }
+  catch(Exception e)when(e is not OperationCanceledException||!stop.IsCancellationRequested)
+  {
+   if(configAt!=generation)return;
+   Program.Log("new exit did not answer, rebuilding the line",e);configured=false;retryAt=DateTimeOffset.MinValue;
+  }
+ }
  // ---------- 出口自动切换：当前出口连不上时换到客户自己添加的下一个出口 ----------
  bool failoverRequested;readonly HashSet<int> triedExits=new();DateTimeOffset failoverPausedUntil=DateTimeOffset.MinValue;
  async Task Failover(CancellationToken stop)
@@ -505,7 +531,15 @@ sealed partial class Runtime:IDisposable
     case "tickets":var tickets=await Remote(request,stop);return new{items=tickets.GetProperty("items").Clone(),images=true};
     case "ai_secrets":if(state!="protected")throw new InvalidOperationException("请先恢复防护，再显示登录信息");return await Remote(request,stop);
     case "new_ticket":case "ticket_reply":case "ticket_rate":case "upload_chunk":case "ticket_image":case "messages":case "mark_read":case "set_contact":case "help":case "ai_accounts":case "ai_report":return await Remote(request,stop);
-    case "select_exit":case "delete_exit":var result=await Remote(request,stop);configured=false;exitCount=null;exitAskAt=DateTimeOffset.MinValue;return result;
+    case "select_exit":{var result=await Remote(request,stop);await ExitChanged(stop);return result;}
+    case "delete_exit":
+     {
+      // Only deleting the exit in use changes where traffic goes.
+      var before=await Remote(new{type="exits"},stop);var wasCurrent=before.GetProperty("selected").ValueKind==JsonValueKind.Number&&request.TryGetProperty("id",out var del)&&del.TryGetInt32(out var delId)&&before.GetProperty("selected").GetInt32()==delId;
+      var result=await Remote(request,stop);exitCount=null;exitAskAt=DateTimeOffset.MinValue;
+      if(wasCurrent)await ExitChanged(stop);
+      return result;
+     }
     case "report_bad_line":return await Remote(new{type="new_ticket",kind=1,title="线路问题",body="客户反馈当前线路不可用，请检查服务端出口。"},stop);
     case "install_update":return InstallUpdate();
     case "update_at_boot":return UpdateAtBoot();

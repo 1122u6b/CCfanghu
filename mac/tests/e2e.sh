@@ -51,6 +51,18 @@ echo "   traffic counted by the server: $USED bytes, resets at $RESET, exit addr
 [[ "$USED" =~ ^[0-9]+$ && "$USED" -gt 0 ]] || fail "server did not count the traffic through the exit: $USED"
 [[ "$RESET" =~ ^[0-9]+$ ]] || fail "traffic reset date missing: $RESET"
 [[ ",$EIPS," == *",$EXIT,"* ]] || fail "the exit does not show its own address: $EIPS (expected $EXIT)"
+echo "   switching between working exits is quick and protection never drops (no rebuild)"
+ask "{\"type\":\"own_exit\",\"links\":\"socks5://ci:$SOCKS_PASS@127.0.0.1:$SOCKS_PORT\",\"name\":\"second\"}" >/dev/null || fail "could not add a second working exit"
+s=$(state); [[ "$s" == protected* ]] || fail "adding a working exit dropped protection: $s"
+other(){ python3 ask.py '{"type":"account"}' --full | python3 -c 'import json,sys;l=json.load(sys.stdin)["value"]["exits"]["list"];print(([x["id"] for x in l if not x["current"]] or [""])[0])'; }
+FIRST=$(other); T0=$(date +%s)
+ask "{\"type\":\"select_exit\",\"id\":$FIRST}" >/dev/null || fail "switching back to the first exit failed"
+T1=$(date +%s); s=$(state); echo "   switched back in $((T1-T0)) s, state: $s"
+[[ "$s" == protected* ]] || fail "switching exits dropped protection: $s"
+[ $((T1-T0)) -le 25 ] || fail "switching exits took $((T1-T0)) s"
+P=$(ip); [ "$P" = "$EXIT" ] || fail "after switching, traffic does not go through the exit: $P"
+SECOND=$(other); [ -n "$SECOND" ] && ask "{\"type\":\"delete_exit\",\"id\":$SECOND}" >/dev/null
+s=$(state); [[ "$s" == protected* ]] || fail "deleting an exit not in use dropped protection: $s"
 
 echo "7. pause: rules removed, normal network back"
 ask '{"type":"pause","minutes":10}' >/dev/null || ask '{"type":"pause","reason":"quit"}' >/dev/null
