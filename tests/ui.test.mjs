@@ -193,3 +193,21 @@ test('overview shows the traffic the server counted and each exit shows its own 
   // the support group number is never cut short on the overview
  }finally{await cleanup(w);}
 });
+
+test('timezone prompt waits for the automatic change and closes itself once the zones match',async()=>{
+ let zone={system:'UTC',exit:'Asia/Hong_Kong',matches:false,can_change:true,dismissed:false,location:'中国香港'};
+ const w=await setup((command,args)=>command==='daemon'&&args.request.type==='timezone'?zone:command==='daemon'&&args.request.type==='account'?{activated:true,account_id:5,suite:{kind:'soft'},own_exit:'connected',exits:{list:[]},channels:[]}:command==='daemon'&&args.request.type==='status'?{protection:{state:'protected'}}:{});
+ try{
+  await settle();render(w,'overview');w.__proto.S.dialog=null;
+  // right after protection the service is about to change the zone itself: no prompt yet
+  await w.CC_RELOAD_ZONE();
+  assert.equal(w.__proto.S.dialog,null,'no prompt while the automatic change is still due');
+  // a prompt that is open closes by itself once the computer matches the exit
+  w.__proto.S.dialog={type:'tz'};zone={...zone,system:'Asia/Shanghai',matches:true};
+  await w.CC_RELOAD_ZONE();
+  assert.equal(w.__proto.S.dialog,null,'prompt closed once the zones match');
+  // other dialogs are left alone
+  w.__proto.S.dialog={type:'addexit'};await w.CC_RELOAD_ZONE();
+  assert.equal(w.__proto.S.dialog.type,'addexit');
+ }finally{await cleanup(w);}
+});

@@ -1420,7 +1420,7 @@
   };
   function zoneName(iana) { var z = iana && ZONES[iana]; return z ? z[0] : ''; }
   function zoneCity(iana) { var z = iana && ZONES[iana]; return z ? z[1] : ''; }
-  var zone = null, zonePrompted = {};
+  var zone = null, zonePrompted = {}, zoneMismatchSince = {};
   function applyZone(z) {
     zone = z;
     // 出口所在地：后台登记的 > 当前线路的地区 > 按出口时区猜的城市；都没有就不提。
@@ -1432,12 +1432,16 @@
     S.tzChanged = !!z.matches;
     if (results.C1) results.C1 = { id: 'C1', verdict: !z.exit ? 'skipped' : z.matches ? 'pass' : 'warn', detail: !z.exit ? (z.lookup_loading ? '正在查询出口所在地的时区' : z.lookup_error || '尚未取得出口时区，暂时无法比对') : z.matches ? '电脑时区已和出口所在地一致（' + z.exit + '）' : '电脑时区和出口所在地（' + z.exit + '）不一致' };
     if (S.wizard && S.wizard.tz !== 'kept') S.wizard.tz = z.matches ? 'changed' : S.wizard.tz;
-    // 不一致、这个出口没点过「暂不」：弹一次（每个出口这次打开只弹一次）。
-    if (z.exit && !z.matches && !z.dismissed && z.can_change && !zonePrompted[z.exit] && !S.dialog && S.screen === 'main') {
+    // 已经一致了（后台刚自动改好）：还开着的「时区不一致」窗口自己关掉。
+    if (z.matches && S.dialog && S.dialog.type === 'tz') S.dialog = null;
+    // 不一致、这个出口没点过「暂不」：后台会在几秒内自动改成出口所在地，过 20 秒还不一致（自动改没成）才弹一次。
+    if (z.exit && !z.matches) { if (!zoneMismatchSince[z.exit]) zoneMismatchSince[z.exit] = Date.now(); } else if (z.exit) delete zoneMismatchSince[z.exit];
+    if (z.exit && !z.matches && !z.dismissed && z.can_change && !zonePrompted[z.exit] && !S.dialog && S.screen === 'main' && Date.now() - zoneMismatchSince[z.exit] >= 20000) {
       zonePrompted[z.exit] = true;
       S.dialog = { type: 'tz' };
     }
   }
+  window.CC_RELOAD_ZONE = function () { return loadZone(); };
   function loadZone() {
     return call({ type: 'timezone' }).then(function (z) { applyZone(z); if (!busy()) P.render(); }).catch(function () {});
   }
