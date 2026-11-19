@@ -44,6 +44,13 @@ B=$(ip); echo "   listed: $L, not listed: $D (other site $W), back: $B"
 [[ "$D" =~ ^[0-9.]+$ && "$D" != "$EXIT" ]] || fail "unlisted site did not connect directly: $D"
 [ "$W" = "200" ] || [ "$W" = "301" ] || fail "direct connections blocked in list mode: $W"
 [ "$B" = "$EXIT" ] || fail "back to everything through the exit failed: $B"
+# Traffic through the exit is counted by the server (saved once a minute) and the exit shows its own address.
+acct(){ python3 ask.py '{"type":"account"}' --full 2>/dev/null | python3 -c 'import json,sys;v=json.loads(sys.stdin.read() or "{}").get("value",{});print(v.get("traffic_used_bytes"),v.get("traffic_reset_at"),",".join((x.get("exit_ip") or "-") for x in v.get("exits",{}).get("list",[])))' 2>/dev/null; }
+for i in $(seq 1 20); do read -r USED RESET EIPS <<<"$(acct)"; [[ "$USED" =~ ^[0-9]+$ && "$USED" -gt 0 ]] && break; sleep 6; done
+echo "   traffic counted by the server: $USED bytes, resets at $RESET, exit addresses: $EIPS"
+[[ "$USED" =~ ^[0-9]+$ && "$USED" -gt 0 ]] || fail "server did not count the traffic through the exit: $USED"
+[[ "$RESET" =~ ^[0-9]+$ ]] || fail "traffic reset date missing: $RESET"
+[[ ",$EIPS," == *",$EXIT,"* ]] || fail "the exit does not show its own address: $EIPS (expected $EXIT)"
 
 echo "7. pause: rules removed, normal network back"
 ask '{"type":"pause","minutes":10}' >/dev/null || ask '{"type":"pause","reason":"quit"}' >/dev/null

@@ -161,6 +161,7 @@ class _Stream:
                     if w.can_write_eof(): w.write_eof()
                 return
             w.write(data); await asyncio.wait_for(w.drain(), 60)
+            self.session.count(len(data))
             self.queued -= len(data); self.unacked += len(data)
             if self.unacked >= 128 * 1024 or (self.queue.empty() and self.unacked >= 16 * 1024):
                 give, self.unacked = self.unacked, 0
@@ -179,6 +180,7 @@ class _Stream:
                     continue
                 if not data: break
                 self.last = time.monotonic()
+                self.session.count(len(data))
                 view = memoryview(data)
                 while view:
                     while self.send_window <= 0:
@@ -193,8 +195,8 @@ class MuxSession:
     """One multiplexed connection from one computer. `open_upstream(target)` -> (reader, writer) via the
     computer's own exit; `take_slot()` / `give_slot()` count connections against the device's limit."""
 
-    def __init__(self, reader, writer, open_upstream, take_slot=lambda: True, give_slot=lambda: None):
-        self.r = reader; self.w = writer; self.open_upstream = open_upstream
+    def __init__(self, reader, writer, open_upstream, take_slot=lambda: True, give_slot=lambda: None, count=lambda n: None):
+        self.r = reader; self.w = writer; self.open_upstream = open_upstream; self.count = count
         self.take_slot = take_slot; self.give_slot = give_slot
         self.streams = {}; self.write_lock = asyncio.Lock(); self.closed = False
         self.ping_id = 0x4C000000; self.pong = asyncio.Event()

@@ -614,10 +614,11 @@
       '<button class="hx-card hx-data p-cardbtn" data-act="go:routes"><div class="lab">' + I('signal', 16) + '当前线路' + I('chevron', 16, 'go') + '</div><div class="val txt">' + (st === 'pm' ? '未连接' : r.n === '-' ? (st === 'down' ? '—' : '还没有线路') : '线路 ' + r.n) + '</div><div class="sub">' + (st === 'pm' ? '网络已断开' : r.n === '-' ? (st === 'down' ? '恢复防护后显示' : '开通后自动接入') : [r.tag, typeof r.ms === 'number' ? r.ms + ' ms' : ''].filter(Boolean).join(' · ')) + '</div></button>';
     var cTraffic = '<div class="hx-card hx-data"><div class="lab">' + I('download', 16) + '本月流量</div><div class="val">' + trafficVal(full) + '</div>' + tr + '<div class="sub"' + (full ? ' style="color:var(--danger)"' : '') + '>' + (full ? '已用完 · ' + INFO.reset + '重置' : '下次重置 ' + INFO.reset) + '</div></div>';
     var cAccount = '<button class="hx-card hx-data p-cardbtn" data-act="go:profile"><div class="lab">' + I('calendar', 16) + '账户' + I('chevron', 16, 'go') + '</div><div class="val txt">' + (exp ? '已到期' : S.trial ? (S.trial === 'on' ? trialLeft() : '已到期') : byo() && S.licensePermanent === true ? '永久使用' : S.exp.date === '—' ? '—' : '还有 ' + nodeLeft() + ' 天') + '</div><div class="sub">' + (exp ? suiteWord() + ' ' + S.exp.date + '已到期' : S.trial ? '免费试用 · ' + S.trialEnd.date + (S.trial === 'on' ? '到期' : '') : byo() && S.licensePermanent === true ? '一次买断 · 永久授权' : S.exp.date === '—' ? '到期日还没拿到' : suiteWord() + ' ' + nodeDate() + '到期') + '</div></button>';
-    if (side) return '<div class="p-sec p-pmgrid">' + supportCard(st !== 'pm') + '<div class="p-datagrid two">' + cRoute + cAccount + activityCard(2, true) + '</div></div>';
-    // 已保护、暂停、启动中：线路和出口已经在上面的数据格里，第三张放售后 QQ 群（01 §6.4）
-    // 不统计流量：下面一排只放账户和售后 QQ 群两张，留足空间。
-    return '<div class="p-sec"><div class="p-datagrid two">' + cAccount + (qqCard() || cTraffic) + '</div></div><div class="p-sec">' + activityCard(3) + '</div>';
+    // 本月流量是服务器在转发时实际数的（经出口的上下行合计，按自然月清零），自己加的 VPS 出口也算。
+    if (side) return '<div class="p-sec p-pmgrid">' + supportCard(st !== 'pm') + '<div class="p-datagrid two">' + cRoute + cTraffic + cAccount + activityCard(2, true) + '</div></div>';
+    // 已保护、暂停、启动中：一排放当前线路、本月流量、账户，有售后 QQ 群再加一张（窄窗口自动两张一行）
+    var qq = qqCard();
+    return '<div class="p-sec"><div class="p-datagrid' + (qq ? '' : ' three') + '">' + cRoute + cTraffic + cAccount + qq + '</div></div><div class="p-sec">' + activityCard(3) + '</div>';
   }
   /* 最近动态（01 §5.13）：最近几条，「全部」跳线路页的最近事件；矮窗口里只显示 2 条 */
   function activityCard(n, compact) {
@@ -629,7 +630,8 @@
   /* 流量卡的大数字：「38.2 / 200 GB」小字写上限；不限流量时只有已用 */
   function trafficVal(full) {
     var u = full ? INFO.limit : INFO.used;
-    if (unlimited()) return / GB$/.test(INFO.used) ? INFO.used.replace(/ GB$/, '') + '<small>GB · 不限</small>' : INFO.used + '<small>不限</small>';
+    var m = /^([\d.]+) ([KMG]B)$/.exec(INFO.used);
+    if (unlimited()) return m ? m[1] + '<small>' + m[2] + ' · 不限</small>' : INFO.used + '<small>不限</small>';
     if (/ GB$/.test(INFO.limit)) return u.replace(/ GB$/, '') + '<small>/ ' + INFO.limit + '</small>';
     return u + (INFO.limit === '不限' ? '<small>不限流量</small>' : '');
   }
@@ -1308,12 +1310,12 @@
         '<p>' + (re ? '粘贴新的链接或订阅地址，换好后这个出口的线路跟着更新。' : '粘贴卖家给你的链接（一行一条）或一行订阅地址，加好后在出口里点它就能切过去。') + '出口好不好用由出口本身决定。</p>' +
         (re ? '' : '<label class="hx-field"><span>名称</span><input class="hx-input" data-keep="exitname" id="f-exitname" placeholder="自己起个名字，例如「我自己的 VPS」" data-autofocus></label>') +
         '<label class="hx-field"><span class="p-sronly">链接或订阅地址</span><textarea class="hx-textarea' + (D.err ? ' is-error' : '') + '" data-keep="exitlinks" id="f-exitlinks" rows="5" placeholder="每行一条链接，或一行订阅地址"' + (re ? ' data-autofocus' : '') + '></textarea>' + (D.err ? '<span class="hx-help is-error">' + I('warning', 16) + D.err + '</span>' : '') + '</label>' +
-        '<div class="acts">' + (D.busy ? '<span class="p-sub">正在读链接、下订阅，要几秒…</span>' : btn('secondary', '取消', 'close') + btn('primary', re ? '更换' : '添加', 'exitAddGo')) + '</div></div>';
+        '<div class="acts">' + (D.busy ? '<span class="p-sub">正在读链接、下订阅，要几秒…</span>' : btn('text', I('paste', 16) + '粘贴', 'pasteField:exitlinks', ' title="把复制好的链接或订阅地址放进上面的框"') + btn('secondary', '取消', 'close') + btn('primary', re ? '更换' : '添加', 'exitAddGo')) + '</div></div>';
     } else if (D.type === 'ownexit') {
       h = '<div class="hx-dialog' + k + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">' + (S.ownExit === 'connected' ? '更换出口' : '接入你的出口') + '</h3>' +
         '<p>粘贴卖家给你的链接（一行一条）或一行订阅地址。出口好不好用由你的出口决定。</p>' +
         '<label class="hx-field"><span class="p-sronly">链接或订阅地址</span><textarea class="hx-textarea' + (D.err ? ' is-error' : '') + '" data-keep="ownexit" id="f-ownexit" rows="5" placeholder="每行一条链接，或一行订阅地址" data-autofocus></textarea>' + (D.err ? '<span class="hx-help is-error">' + I('warning', 16) + D.err + '</span>' : '') + '</label>' +
-        '<div class="acts">' + (D.busy ? '<span class="p-sub">正在接入，读链接、下订阅要几秒…</span>' : btn('secondary', '取消', 'close') + btn('primary', '接入', 'ownExitUse')) + '</div></div>';
+        '<div class="acts">' + (D.busy ? '<span class="p-sub">正在接入，读链接、下订阅要几秒…</span>' : btn('text', I('paste', 16) + '粘贴', 'pasteField:ownexit', ' title="把复制好的链接或订阅地址放进上面的框"') + btn('secondary', '取消', 'close') + btn('primary', '接入', 'ownExitUse')) + '</div></div>';
     } else if (D.type === 'restoreCode') {
       h = '<div class="hx-dialog' + k + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">用原授权码恢复</h3><p>输入这台电脑原来的授权码，接回原来的账户。</p>' +
         '<label class="hx-field"><span class="p-sronly">授权码</span><input class="hx-input' + (D.err ? ' is-error' : '') + '" data-keep="restore-code" id="f-restore-code" placeholder="例如 K7QM-29XF-H4TD-8NWP" data-autofocus>' + (D.err ? '<span class="hx-help is-error">' + I('warning', 16) + D.err + '</span>' : '') + '</label>' +
@@ -1454,7 +1456,8 @@
   }
   /* 网页自带的右键菜单不要（输入框里的保留）；能复制的东西和线路行给自己的菜单，选中了文字给「复制」 */
   function onContext(e) {
-    if (e.target.closest('input, textarea')) return;
+    var field = e.target.closest('input, textarea');
+    if (field) { if (!/^(checkbox|radio|range|button|submit)$/.test(field.type)) fieldMenu(e, field); return; }
     e.preventDefault();
     var win = e.target.closest('.p-win'), el = e.target.closest('[data-ctx]'), items = el ? ctxItems(el) : null;
     var selText = window.getSelection ? String(getSelection()).trim() : '';
@@ -1463,6 +1466,57 @@
     var r = win.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
     S.ctx = { x: Math.max(0, Math.min(x, r.width - 190)), y: Math.max(0, Math.min(y, r.height - items.length * 30 - 16)), items: items };
     render();
+  }
+
+  /* 输入框的右键菜单：剪切、复制、粘贴、全选（Windows 关掉了网页自带的菜单，Mac 也用同一套）。
+     粘贴由软件自己读剪贴板，不依赖网页的剪贴板权限。 */
+  function fieldMenu(e, field) {
+    e.preventDefault();
+    var win = e.target.closest('.p-win'); if (!win) return;
+    var ro = field.readOnly || field.disabled, start = field.selectionStart, end = field.selectionEnd, has = start != null && start !== end;
+    S.ctxField = { key: field.getAttribute('data-keep'), el: field, start: start, end: end, text: has ? field.value.slice(start, end) : '' };
+    var items = [];
+    if (has && !ro) items.push(['剪切', 'ctxCut', 'cut']);
+    if (has) items.push(['复制', 'ctxFieldCopy', 'copy']);
+    if (!ro) items.push(['粘贴', 'ctxPaste', 'paste']);
+    if (items.length) items.push('-');
+    items.push(['全选', 'ctxSelectAll', 'selectall']);
+    var r = win.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    S.ctx = { x: Math.max(0, Math.min(x, r.width - 190)), y: Math.max(0, Math.min(y, r.height - items.length * 30 - 16)), items: items };
+    render();
+  }
+  function readClipboard() {
+    var T = window.__TAURI__;
+    if (T && T.core && T.core.invoke) return T.core.invoke('read_clipboard').then(function (r) { return (r && r.text) || ''; });
+    if (navigator.clipboard && navigator.clipboard.readText) return navigator.clipboard.readText();
+    return Promise.reject(new Error('no clipboard'));
+  }
+  // 把文字放进输入框（替换选中的部分），并通知界面内容变了。
+  function putText(el, t, start, end) {
+    var v = el.value;
+    if (start == null || start > v.length) start = end = v.length;
+    if (end == null || end < start) end = start;
+    var max = el.maxLength > 0 ? el.maxLength : Infinity;
+    el.value = (v.slice(0, start) + t + v.slice(end)).slice(0, max);
+    var pos = Math.min(start + t.length, el.value.length);
+    el.focus(); try { el.setSelectionRange(pos, pos); } catch (e) { }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  function fieldOf(F) { return F ? (F.key ? root.querySelector('[data-keep="' + F.key + '"]') : (F.el && root.contains(F.el) ? F.el : null)) : null; }
+  function pasteInto(F) {
+    return readClipboard().then(function (t) {
+      var el = fieldOf(F); if (!el) return;
+      if (!t) { toast('剪贴板里没有文字，先复制卖家给你的链接', 'info'); return; }
+      putText(el, t.replace(/\r\n?/g, '\n'), F.start, F.end);
+    }, function () { toast('读不到剪贴板，请在输入框里按 ' + (/Mac/.test(navigator.platform) ? '⌘V' : 'Ctrl+V') + ' 粘贴', 'info'); });
+  }
+  function fieldAct(op) {
+    var F = S.ctxField; S.ctxField = null; render();
+    var el = fieldOf(F); if (!el) return;
+    if (op === 'all') { el.focus(); try { el.select(); } catch (e) { } return; }
+    if (op === 'paste') { pasteInto(F); return; }
+    if (F.text && navigator.clipboard) { try { navigator.clipboard.writeText(F.text).catch(function () { }); } catch (e) { } }
+    if (op === 'cut') putText(el, '', F.start, F.end);
   }
 
   /* ---------------- 网络恢复工具 ---------------- */
@@ -1963,6 +2017,12 @@
     trayToggle: function () { S.tray = !S.tray; render(); },
     trayRefresh: function () { run('tray', [['正在重新评估线路质量', 2]]); },
     trayQuit: function () { S.tray = false; toast('界面已退出，防护照常运行', 'info'); },
+    ctxCut: function () { fieldAct('cut'); },
+    ctxFieldCopy: function () { fieldAct('copy'); },
+    ctxPaste: function () { fieldAct('paste'); },
+    ctxSelectAll: function () { fieldAct('all'); },
+    // 弹窗里「粘贴」按钮：把剪贴板里的链接放进输入框
+    pasteField: function (key) { var el = root.querySelector('[data-keep="' + key + '"]'); if (el) pasteInto({ key: key, start: el.selectionStart, end: el.selectionEnd }); },
     ctxCopy: function () { var t = S.ctxCopy; S.ctxCopy = null; if (t && navigator.clipboard) { try { navigator.clipboard.writeText(t).catch(function () { }); } catch (e) { } } toast('已复制'); },
     winW: function (w) { S.winW = +w; render(); },
     openMain: function () { S.tray = false; render(); var w = root.querySelector('.p-win'); if (w) { w.scrollIntoView({ block: 'center', behavior: 'smooth' }); } },

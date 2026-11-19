@@ -172,3 +172,21 @@ test('renewal dialog and support QQ group are available',async()=>{
  }finally{await cleanup(w);}
 });
 
+
+test('overview shows the traffic the server counted and each exit shows its own address',async()=>{
+ const account={activated:true,account_id:5,suite:{kind:'soft'},own_exit:'connected',channels:[],current_exit:2,
+  exits:{list:[{id:1,name:'我的ip',own:true,lines:1,current:false,location:'',exit_ip:'203.0.113.7'},{id:2,name:'我的vps',own:true,lines:1,current:true,location:'',exit_ip:'198.51.100.2'}],can_add:true,max_own:5},
+  traffic_used_bytes:35*1048576,traffic_limit_bytes:null,traffic_reset_at:Math.floor(Date.now()/1000)+5*86400,traffic_days_from:'2026-11-01',traffic_days:[35*1048576]};
+ const w=await setup((command,args)=>command==='daemon'&&args.request.type==='account'?account:command==='daemon'&&args.request.type==='status'?{protection:{state:'provisioning'}}:{});
+ try{
+  await settle();
+  const home=render(w,'overview');
+  assert.match(home,/本月流量/);assert.match(home,/35\s*MB · 不限/);assert.match(home,/当前线路/);
+  for(const status of ['ok','prep']){
+   w.__proto.S.status=status;w.__proto.render();
+   assert.match(w.document.body.textContent,/本月流量35\s*MB/,'traffic card while '+status);
+  }
+  const routes=render(w,'routes');
+  assert.match(routes,/203\.0\.113\.7/);assert.match(routes,/198\.51\.100\.2/);
+ }finally{await cleanup(w);}
+});

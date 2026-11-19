@@ -279,6 +279,12 @@ jobs:
           Ask '{"type":"account"}' | Out-Null
           $acct = Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json
           if ($null -eq $acct.reply.value.exits.list -or -not $acct.reply.value.exits.can_add) { $failures += 'account exits are not {list, can_add}' }
+          Write-Host '   the server counts the traffic through the exit (saved once a minute) and the exit shows its own address'
+          $used = $acct.reply.value.traffic_used_bytes; $curIp = ($acct.reply.value.exits.list | Where-Object { $_.current } | Select-Object -First 1).exit_ip
+          Write-Host "   traffic this month: $used bytes, resets at $($acct.reply.value.traffic_reset_at), current exit address: $curIp"
+          if (-not ($used -gt 0)) { $failures += "server did not count the traffic through the exit: $used" }
+          if (-not ($acct.reply.value.traffic_reset_at -gt 0)) { $failures += 'traffic reset date missing' }
+          if ($curIp -notmatch '^\d+\.\d+\.\d+\.\d+$') { $failures += "the exit in use does not show its address: $curIp" }
           Write-Host '   full security check while protected'
           Ask '{"type":"doctor"}' | Out-Null; Copy-Item "C:\LeyraCi\out_$script:n.json" doctor.json -ErrorAction SilentlyContinue
           Write-Host '   the exit in use stops working: Leyra switches to the customer''s other exit by itself'
@@ -286,6 +292,11 @@ jobs:
           $goodExit = ((Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value.exits.list | Where-Object { $_.current } | Select-Object -First 1).id
           if ((Ask '{"type":"own_exit","links":"socks5://ci:wrong@127.0.0.1:1","name":"坏的出口"}') -ne 0) { $failures += 'could not add the second (broken) exit' }
           $badExit = (Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value.id
+          # The working exit is no longer the current one, yet it keeps showing its own address.
+          Ask '{"type":"account"}' | Out-Null
+          $other = (Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value.exits.list | Where-Object { $_.id -eq $goodExit } | Select-Object -First 1
+          Write-Host "   working exit while another one is selected: current=$($other.current) address=$($other.exit_ip)"
+          if ($other.current -or $other.exit_ip -notmatch '^\d+\.\d+\.\d+\.\d+$') { $failures += "an exit that is not in use does not show its own address: $($other.exit_ip)" }
           Start-Sleep 6
           $s = WaitFor 'protected' 150; Write-Host "   state: $s"
           Ask '{"type":"account"}' | Out-Null

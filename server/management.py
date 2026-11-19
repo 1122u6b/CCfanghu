@@ -1,7 +1,7 @@
 """Single-owner management store behind the gateway's existing TLS/Bearer authentication.
 No authorization codes, subscriptions, third-party accounts, or demo records are created.
 """
-import base64, contextlib, json, os, re, secrets, sqlite3, time
+import base64, contextlib, datetime, json, os, re, secrets, sqlite3, time
 from pathlib import Path
 
 class ManagementError(ValueError):pass
@@ -9,6 +9,8 @@ class ManagementError(ValueError):pass
 UPDATE_MAX=400*1024*1024
 UPDATE_CHUNK=786432
 VERSION_PATTERN=r'[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(?:-[A-Za-z0-9.]{1,24})?'
+# Traffic months and days follow China time (no daylight saving), the customers' own calendar.
+CHINA=datetime.timezone(datetime.timedelta(hours=8))
 
 def exit_nodes(value):
     """Exits hold one or more upstream nodes; the gateway fails over in order."""
@@ -50,7 +52,12 @@ CREATE TABLE IF NOT EXISTS replies(id INTEGER PRIMARY KEY,ticket INTEGER NOT NUL
 CREATE TABLE IF NOT EXISTS uploads(id TEXT PRIMARY KEY,data BLOB NOT NULL,at INTEGER NOT NULL,used INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS attachments(id TEXT PRIMARY KEY,ticket INTEGER NOT NULL,data BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS direct_rules(cidr TEXT PRIMARY KEY,note TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL,secret TEXT NOT NULL);''')
+CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL,secret TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);''')
+            # Each exit remembers the address the internet sees for it (measured by the gateway through that exit).
+            cols={r[1] for r in db.execute('PRAGMA table_info(exits)')}
+            if 'exit_ip' not in cols:db.execute('ALTER TABLE exits ADD COLUMN exit_ip TEXT')
+            if 'exit_ip_at' not in cols:db.execute('ALTER TABLE exits ADD COLUMN exit_ip_at INTEGER')
             # Messages can carry a link (e.g. to renew) and a tag so automatic reminders are sent only once.
             cols={r[1] for r in db.execute('PRAGMA table_info(messages)')}
             if 'link' not in cols:db.execute('ALTER TABLE messages ADD COLUMN link TEXT')
@@ -76,6 +83,35 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
     def get(self,db,key,default=None):
         r=db.execute('SELECT value FROM settings WHERE key=?',(key,)).fetchone();return json.loads(r[0]) if r else default
     def put(self,db,key,value):db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',(key,json.dumps(value,ensure_ascii=False)))
+    # ---- traffic through this computer's exit, counted by the gateway (both directions) ----
+    @staticmethod
+    def china_day(at=None):return datetime.datetime.fromtimestamp(time.time() if at is None else at,CHINA).date().isoformat()
+    def add_traffic(self,day,count):
+        if count<=0:return
+        with self.db() as db:
+            db.execute('INSERT INTO traffic VALUES (?,?) ON CONFLICT(day) DO UPDATE SET bytes=bytes+excluded.bytes',(day,int(count)))
+            db.execute('DELETE FROM traffic WHERE day<?',((datetime.date.fromisoformat(day)-datetime.timedelta(days=400)).isoformat(),))
+    def traffic_summary(self,db,at=None):
+        today=datetime.datetime.fromtimestamp(time.time() if at is None else at,CHINA).date()
+        first=today.replace(day=1);following=first.replace(year=first.year+1,month=1) if first.month==12 else first.replace(month=first.month+1)
+        rows={r[0]:r[1] for r in db.execute('SELECT day,bytes FROM traffic WHERE day>=? AND day<=?',(first.isoformat(),today.isoformat()))}
+        days=[int(rows.get((first+datetime.timedelta(days=i)).isoformat(),0)) for i in range(today.day)]
+        reset=int(datetime.datetime(following.year,following.month,1,tzinfo=CHINA).timestamp())
+        return {'traffic_used_bytes':sum(days),'traffic_limit_bytes':None,'traffic_reset_at':reset,'traffic_days_from':first.isoformat(),'traffic_days':days}
+    # ---- the address each exit shows to websites ----
+    def set_exit_ip(self,identity,ip):
+        with self.db() as db:db.execute('UPDATE exits SET exit_ip=?,exit_ip_at=? WHERE id=?',(str(ip),int(time.time()),int(identity)))
+    def set_selected_exit_ip(self,ip):
+        with self.db() as db:
+            identity=self.get(db,'selected_exit')
+            if identity is not None:db.execute('UPDATE exits SET exit_ip=?,exit_ip_at=? WHERE id=?',(str(ip),int(time.time()),int(identity)))
+    def exit_nodes_of(self,identity):
+        with self.db() as db:
+            row=db.execute('SELECT node FROM exits WHERE id=?',(int(identity),)).fetchone()
+        if not row:return None
+        value=json.loads(row[0]);return value if isinstance(value,list) else [value]
+    def exits_without_ip(self):
+        with self.db() as db:return [r[0] for r in db.execute("SELECT id FROM exits WHERE exit_ip IS NULL OR exit_ip='' ORDER BY id")]
     def ticket(self,db,identity):
         r=db.execute('SELECT * FROM tickets WHERE id=?',(identity,)).fetchone()
         if not r:raise ManagementError('ticket not found')
@@ -244,7 +280,7 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
             if kind=='admin_password_info':
                 cred=self.get(db,'admin_password');return {'set':cred is not None,'username':cred['username'] if cred else None}
             if kind=='admin_session_revoke_all':self.put(db,'admin_sessions',[]);return {'saved':True}
-            if kind=='account':return self.get(db,'account')
+            if kind=='account':return {**self.get(db,'account'),**self.traffic_summary(db)}
             if kind=='set_contact':
                 account=self.get(db,'account');account['contact']=text(req.get('contact'),200);self.put(db,'account',account);return account
             if kind=='messages':
@@ -309,7 +345,7 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
             if kind=='exits':
                 def summary(r):
                     nodes=json.loads(r['node']);nodes=nodes if isinstance(nodes,list) else [nodes]
-                    return {'id':r['id'],'name':r['name'],'created_at':r['created_at'],'lines':len(nodes),'types':sorted({n.get('type','socks5') for n in nodes})}
+                    return {'id':r['id'],'name':r['name'],'created_at':r['created_at'],'lines':len(nodes),'types':sorted({n.get('type','socks5') for n in nodes}),'exit_ip':r['exit_ip'] or '','exit_ip_at':r['exit_ip_at']}
                 return {'items':[summary(r) for r in db.execute('SELECT * FROM exits ORDER BY id')],'selected':self.get(db,'selected_exit')}
             if kind=='store_exit':
                 nodes=exit_nodes(req.get('nodes',req.get('node',{})))
@@ -323,7 +359,7 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
                 nodes=exit_nodes(nodes)
                 if req.get('exit_id') is not None:
                     identity=int(req['exit_id'])
-                    if db.execute('UPDATE exits SET node=? WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
+                    if db.execute('UPDATE exits SET node=?,exit_ip=NULL,exit_ip_at=NULL WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
                 else:
                     if db.execute('SELECT COUNT(*) FROM exits').fetchone()[0]>=20:raise ManagementError('maximum 20 exits')
                     identity=db.execute('INSERT INTO exits(name,node,created_at) VALUES (?,?,?)',(text(req.get('name') or '我的出口',80,True),json.dumps(nodes),now)).lastrowid
@@ -331,7 +367,7 @@ CREATE TABLE IF NOT EXISTS ai_accounts(id INTEGER PRIMARY KEY,data TEXT NOT NULL
                 return {'id':identity,'lines':len(nodes),'skipped':skipped,'types':sorted({n['type'] for n in nodes})}
             if kind=='update_exit':
                 identity=int(req.get('id',0));nodes=exit_nodes(req.get('nodes',req.get('node',{})))
-                if db.execute('UPDATE exits SET node=? WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
+                if db.execute('UPDATE exits SET node=?,exit_ip=NULL,exit_ip_at=NULL WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
                 if req.get('name') is not None:db.execute('UPDATE exits SET name=? WHERE id=?',(text(req.get('name'),80,True),identity))
                 return {'id':identity,'lines':len(nodes),'saved':True}
             if kind=='select_exit':

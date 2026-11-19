@@ -132,7 +132,8 @@ public static class MihomoConfiguration
  /// <summary>Claude's web and desktop app (sign-in check, feature flags, error reports included) always go through
  /// the exit in list and coexist modes, whatever the customer's list says: a list edit can never move Claude off it.</summary>
  public static readonly string[] ClaudeAlways=["claude.ai","claude.com","anthropic.com","claudeusercontent.com","challenges.cloudflare.com",
-  "statsig.com","statsigapi.net","featuregates.org","sentry.io","intercom.io","intercomcdn.com","segment.io","segment.com"];
+  "statsig.com","statsigapi.net","featuregates.org","sentry.io","intercom.io","intercomcdn.com","segment.io","segment.com",
+  "http-intake.logs.us5.datadoghq.com"];
  // The browser check reads the browser's address from ipify: it must see the exit in every mode.
  static readonly string[] SelfChecks=["speed.cloudflare.com","gstatic.com","ipify.org"];
  static string[] ListedRules(IEnumerable<string> gateways,IReadOnlyList<DirectRule> direct,IReadOnlyList<string> proxyOnly,PrivateDns? dns)

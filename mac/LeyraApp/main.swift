@@ -186,6 +186,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         case "daemon":
             return try askService(args["request"] ?? [:]) as? [String: Any] ?? ["ok": false, "error": "后台服务回应无效"]
         case "app_version": return ok(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
+        case "read_clipboard":
+            // Paste into the window's own text boxes (links, subscription addresses).
+            var text = ""
+            DispatchQueue.main.sync { text = NSPasteboard.general.string(forType: .string) ?? "" }
+            return ok(["text": String(text.prefix(400000))])
         case "shell_info": return ok(["glass": false, "platform": "mac"])
         case "verify_owner", "set_theme": return ok([String: Any]())
         case "show_window": DispatchQueue.main.async { self.showMain() }; return ok([String: Any]())

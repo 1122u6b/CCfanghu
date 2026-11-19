@@ -870,11 +870,13 @@
   // 个人中心、流量卡片、断网页里的套餐、流量、重置日、本机设备、绑定日期、维护结束时间（原型里是演示文字）。
   // 一位小数，整数不带「.0」（「0 GB」「12 GB」「38.2 GB」）。
   function gb(b) { return b == null ? '—' : (b / 1073741824).toFixed(1).replace(/\.0$/, '') + ' GB'; }
+  // 用掉的量不到 1 GB 时按 MB 写（「0 GB」看着像没在统计）。
+  function usedText(b) { return b == null ? '—' : b < 1073741824 ? Math.round(b / 1048576) + ' MB' : gb(b); }
   function applyInfo(a) {
     var I = P.INFO, lim = a.traffic_limit_bytes, used = a.traffic_used_bytes;
     I.plan = esc(a.plan || '—');
     I.limit = lim ? gb(lim).replace('.0 GB', ' GB') : '不限';
-    I.used = gb(used);
+    I.used = usedText(used);
     I.pct = lim && used != null ? Math.min(100, Math.round(used * 1000 / lim) / 10) : 0;
     I.reset = a.traffic_reset_at ? day(a.traffic_reset_at) : '—';
     // 每天用量（docs/01 §5.7）：服务端按天汇总、随心跳下发，最后一天是今天。

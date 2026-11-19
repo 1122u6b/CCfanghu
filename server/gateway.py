@@ -6,6 +6,7 @@ from urllib.parse import urlsplit,parse_qs
 from devices import Devices
 from management import Management,ManagementError
 from mux import MuxSession,MUX_TARGET
+import secrets
 
 def make_certificate(cert,key,host,days=365):
     # Explicit config avoids platform OpenSSL defaults adding duplicate extensions.
@@ -176,6 +177,10 @@ class Gateway:
         self.management=Management(config.get('data_dir') or str(Path(config.get('upstream_file',config['cert'])).parent))
         self.devices=Devices(self.management.root)
         self.device_active={};self.device_checks={}
+        # Bytes through each computer's exit not yet written to its store (flushed every minute).
+        self.traffic_pending={}
+        # Exit address checks: nonce -> waiting future; (computer, exit) -> last attempt.
+        self.exit_probes={};self.exit_probe_tried={}
         from upstream_kernel import KernelUpstreams,find_binary
         binary=config.get('kernel_binary') or find_binary()
         self.kernel=KernelUpstreams(Path(self.management.root)/'upstream-kernel',Path(binary) if binary else None)
@@ -190,7 +195,9 @@ class Gateway:
     def upstream(self,management=None):return self.upstreams(management)[0]
     async def dial_nodes(self,management=None):
         """Kernel-protocol nodes of one exit share a single fallback listener on this server."""
-        nodes=self.upstreams(management);kernel=[n for n in nodes if n['type'] not in UPSTREAM_TYPES]
+        return await self.dial_list(self.upstreams(management))
+    async def dial_list(self,nodes):
+        kernel=[n for n in nodes if n['type'] not in UPSTREAM_TYPES]
         if not kernel:return nodes
         local=await self.kernel.resolve(kernel);result=[];placed=False
         for n in nodes:
@@ -249,6 +256,12 @@ class Gateway:
         rows=header.decode('iso-8859-1').split('\r\n');method,path,_=rows[0].split(' ',2)
         h={k.lower().strip():v.strip() for line in rows[1:] if ':' in line for k,v in [line.split(':',1)]}
         if path.startswith('/private-dns/'):return await self.doh(r,w,method,path,h)
+        if method=='GET' and path.startswith('/api/v1/exit-probe/'):
+            future=self.exit_probes.get(path.rsplit('/',1)[1]);peer=w.get_extra_info('peername')
+            if future is None or future.done() or not peer:return await self.response(w,404,{'error':'not found'})
+            observed=ipaddress.ip_address(peer[0])
+            if getattr(observed,'ipv4_mapped',None):observed=observed.ipv4_mapped
+            future.set_result(str(observed));return await self.response(w,200,{'ok':True})
         if method=='GET' and path.split('?')[0] in ('/api/admin','/api/admin/','/admin','/admin/'):return await self.admin_page(w)
         if method=='GET' and path=='/api/v1/admin-login':return await self.response(w,200,{'password_set':self.management.admin_password_set()})
         if method=='POST' and path=='/api/v1/admin-login':return await self.admin_login(r,w,h,client_ip)
@@ -268,9 +281,11 @@ class Gateway:
         if method=='GET' and path=='/api/v1/egress-probe':
             peer=w.get_extra_info('peername')
             if not peer:return await self.response(w,400,{'error':'peer address unavailable'})
-            import ipaddress
             observed=ipaddress.ip_address(peer[0])
             if getattr(observed,'ipv4_mapped',None):observed=observed.ipv4_mapped
+            if device is not None:
+                try:await asyncio.to_thread(device.management.set_selected_exit_ip,str(observed))
+                except Exception as e:print('exit address not saved: '+type(e).__name__,flush=True)
             return await self.response(w,200,{'observed_source':str(observed),'scope':'this authenticated TLS connection only'})
         if method=='GET' and path=='/api/v1/config':return await self.response(w,200,{'proxies':[self.node(device)],'mux':'yamux' if self.mux_enabled() else None,'license_required':False,'identity':{'role':'owner' if is_admin else 'device','id':None if is_admin else device.id}})
         if method=='POST' and path=='/api/v1/rpc':
@@ -309,6 +324,10 @@ class Gateway:
                 result=await asyncio.to_thread(call) if isinstance(request,dict) and request.get('type') in ('import_exit_links','ip_geo') else call()
             except ManagementError as e:return await self.response(w,400,{'error':'invalid management request','detail':str(e)[:300]})
             except (ValueError,TypeError,KeyError):return await self.response(w,400,{'error':'invalid management request'})
+            if device is not None and isinstance(result,dict):
+                kind=request.get('type')
+                if kind in ('import_exit_links','store_exit','update_exit') and isinstance(result.get('id'),int):self.probe_exits_later(device,[result['id']])
+                elif kind=='exits':self.probe_exits_later(device,[x['id'] for x in result.get('items',[]) if not x.get('exit_ip')])
             return await self.response(w,200,result)
         if method=='POST' and path=='/api/v1/own-exit':
             n=int(h.get('content-length','0'))
@@ -371,11 +390,56 @@ class Gateway:
         head=('HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %d\r\nCache-Control: no-store\r\nX-Frame-Options: DENY\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n'
               "Content-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; form-action 'none'; frame-ancestors 'none'\r\nConnection: close\r\n\r\n")%len(data)
         w.write(head.encode()+data);await w.drain()
-    async def pipe(self,r,w):
+    async def pipe(self,r,w,count=None):
         while True:
             data=await asyncio.wait_for(r.read(65536),300)
             if not data:return
             w.write(data);await asyncio.wait_for(w.drain(),30)
+            if count:count(len(data))
+    def counter(self,device):
+        if device is None:return None
+        pending=self.traffic_pending;key=device.id
+        def count(n):pending[key]=pending.get(key,0)+n
+        return count
+    def flush_traffic(self):
+        pending,self.traffic_pending=self.traffic_pending,{}
+        day=Management.china_day()
+        for device_id,n in pending.items():
+            try:Management(Path(self.devices.root)/device_id).add_traffic(day,n)
+            except Exception as e:print('traffic not saved: '+type(e).__name__,flush=True)
+    async def traffic_writer(self):
+        while True:
+            await asyncio.sleep(60)
+            try:await asyncio.to_thread(self.flush_traffic)
+            except Exception as e:print('traffic flush failed: '+type(e).__name__,flush=True)
+    async def probe_exit(self,device,exit_id):
+        """Learn the address websites see for one exit without the customer switching to it: connect
+        through that exit back to this gateway with a one-time nonce and read the source address."""
+        key=(device.id,int(exit_id));now=time.monotonic()
+        if now-self.exit_probe_tried.get(key,-1e9)<600:return
+        self.exit_probe_tried[key]=now
+        if len(self.exit_probe_tried)>20000:self.exit_probe_tried.clear()
+        nonce=secrets.token_urlsafe(18);future=asyncio.get_running_loop().create_future();self.exit_probes[nonce]=future;w=None
+        try:
+            nodes=await asyncio.to_thread(device.management.exit_nodes_of,exit_id)
+            if not nodes:return
+            dial=await self.dial_list([validate_node(n) for n in nodes])
+            r,w=await asyncio.wait_for(connect_any(dial,(self.config['public_host'],int(self.config['port']))),25)
+            context=ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT);context.check_hostname=False;context.verify_mode=ssl.CERT_NONE
+            await asyncio.wait_for(w.start_tls(context),15)
+            w.write(('GET /api/v1/exit-probe/'+nonce+' HTTP/1.1\r\nHost: exit-probe\r\nConnection: close\r\n\r\n').encode());await w.drain()
+            observed=await asyncio.wait_for(future,15)
+            await asyncio.to_thread(device.management.set_exit_ip,exit_id,observed)
+            self.exit_probe_tried.pop(key,None)
+        except Exception as e:print('exit address check failed: '+type(e).__name__,flush=True)
+        finally:
+            self.exit_probes.pop(nonce,None)
+            if w is not None:
+                w.close()
+                with contextlib.suppress(Exception):await w.wait_closed()
+    def probe_exits_later(self,device,ids):
+        loop=asyncio.get_running_loop()
+        for i in ids[:8]:loop.create_task(self.probe_exit(device,i))
     def device_ok(self,device):
         # One database check per computer every 5 s, shared by all its connections
         # (hundreds of connections each checking every second slowed the gateway down).
@@ -416,7 +480,8 @@ class Gateway:
                 return await self.mux_session(r,w,device)
             upr,upwriter=await connect_any(await self.dial_nodes(device.management if device else None),target)
             w.write(b'\x05\x00\x00\x01'+b'\x00'*6);await w.drain()
-            tasks=[asyncio.create_task(self.pipe(r,upwriter)),asyncio.create_task(self.pipe(upr,w))]
+            count=self.counter(device)
+            tasks=[asyncio.create_task(self.pipe(r,upwriter,count)),asyncio.create_task(self.pipe(upr,w,count))]
             if device:tasks.append(asyncio.create_task(self.watch_device(device)))
             try:
                 done,pending=await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
@@ -477,7 +542,7 @@ class Gateway:
             left=self.device_active.get(device.id,1)-1
             if left>0:self.device_active[device.id]=left
             else:self.device_active.pop(device.id,None)
-        session=MuxSession(r,w,open_upstream,take,give)
+        session=MuxSession(r,w,open_upstream,take,give,self.counter(device) or (lambda n:None))
         tasks=[asyncio.create_task(session.run())]
         if device:tasks.append(asyncio.create_task(self.watch_device(device)))
         try:await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
@@ -488,6 +553,7 @@ class Gateway:
         context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.minimum_version=ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(self.config['cert'],self.config['key'])
         asyncio.get_running_loop().create_task(self.expiry_reminders())
+        asyncio.get_running_loop().create_task(self.traffic_writer())
         async def preload():
             try:await self.kernel.preload(self.kernel_exits())
             except Exception as e:print('kernel preload skipped: '+type(e).__name__,flush=True)

@@ -146,12 +146,19 @@ sealed class MainWindow:Form
   finally{if(packed is not null)CryptographicOperations.ZeroMemory(packed);Interlocked.Exchange(ref authenticating,0);}
  }
  static JsonElement Result(object value)=>JsonSerializer.SerializeToElement(value);
+ static string ClipboardText()
+ {
+  var text=Clipboard.ContainsText()?Clipboard.GetText():"";
+  return text.Length<=400000?text:text[..400000];
+ }
  async Task<JsonElement> InvokeCommand(string command,JsonElement args)
  {
   switch(command)
   {
    case "shell_info":return Result(new{glass=false,platform="windows"});
    case "app_version":return Result(ProductInfo.Version);
+   // Paste into the window's own text boxes (links, subscription addresses): web pages cannot read the clipboard by themselves.
+   case "read_clipboard":return Result(new{text=ClipboardText()});
    // The app's own confirmation dialog is enough; no Windows password prompt.
    case "verify_owner":return Result(new{});
    case "run_rescue":return await ElevatedHelper("--recover");
