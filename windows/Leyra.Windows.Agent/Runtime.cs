@@ -259,9 +259,12 @@ sealed partial class Runtime:IDisposable
   var fatal=expired||e is HttpRequestException hr&&hr.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
   // Another of the customer's own exits not tried yet: switch to it instead of cutting the network.
   // The blocking rules stay on while switching, so the real IP is never used.
-  var switching=!fatal&&exitCount is int count&&count>1&&triedExits.Count<count&&DateTimeOffset.UtcNow>=failoverPausedUntil;
+  var switching=!fatal&&store.Settings.AutoSwitchExit&&blockReason is null&&exitCount is int count&&count>1&&triedExits.Count<count&&DateTimeOffset.UtcNow>=failoverPausedUntil;
   try{ApplyGuard(0);state=switching?"starting":"blocked";reason=expired?"software_expired":e is HttpRequestException h?h.StatusCode switch{HttpStatusCode.Forbidden=>"software_expired",HttpStatusCode.Unauthorized=>"device_unbound",_=>"all_lines_down"}:"all_lines_down";}
   catch{state="unprotected";reason="guard_failed";switching=false;}
+  // The customer has more than one exit: say whether none of them works or switching was turned off.
+  if(!fatal&&!switching&&reason=="all_lines_down")reason=blockReason??(exitCount is int n&&n>1?(store.Settings.AutoSwitchExit?"all_exits_down":"exit_down"):"all_lines_down");
+  blockReason=null;
   if(switching){reason="switching_exit";failoverRequested=true;retryAt=DateTimeOffset.UtcNow;Program.Log("exit down, switching to the next exit",e);return;}
   retryAt=DateTimeOffset.UtcNow.AddSeconds(Math.Min(60,5*Math.Pow(2,Math.Min(failures++,4))));
   triedExits.Clear();
@@ -294,6 +297,15 @@ sealed partial class Runtime:IDisposable
    trafficSend=Task.Run(async()=>{try{await Remote(new{type="report_traffic",bytes=send},CancellationToken.None);Interlocked.Add(ref trafficPending,-send);}catch(Exception e){Program.Log("traffic report",e);}});
   }
  }
+ // Programs keep sending and nothing comes back (an exit that takes connections but passes nothing on): check the
+ // exit now instead of at the next regular check. Two readings 5 s apart, at most once every 15 s.
+ int stallReads;DateTimeOffset stallProbeAt;
+ void NoteStall()
+ {
+  if(state!="protected"){stallReads=0;return;}
+  if(up>=200&&down<512){if(++stallReads>=2&&DateTimeOffset.UtcNow>=stallProbeAt){stallReads=0;stallProbeAt=DateTimeOffset.UtcNow.AddSeconds(15);nextNetProbe=DateTimeOffset.UtcNow;}}
+  else if(down>=2048)stallReads=0;
+ }
  // ---------- 换出口：不重建防护 ----------
  // Every exit is reached through the same Leyra gateway, which picks the customer's selected exit for each new
  // connection, so nothing on this computer has to be rebuilt: close the connections opened before the switch
@@ -301,7 +313,7 @@ sealed partial class Runtime:IDisposable
  // falls back to a direct connection. If the new exit does not answer, rebuild as before (failover takes over).
  async Task ExitChanged(CancellationToken stop)
  {
-  exitCount=null;exitAskAt=DateTimeOffset.MinValue;
+  exitAskAt=DateTimeOffset.MinValue; // the number of exits is asked again soon (an exit may just have been added)
   if(!configured||state!="protected"){configured=false;retryAt=DateTimeOffset.MinValue;return;}
   // Switching between an exit reached through Hong Kong and one this computer dials itself changes the line: rebuild.
   try
@@ -329,21 +341,67 @@ sealed partial class Runtime:IDisposable
  }
  // ---------- 出口自动切换：当前出口连不上时换到客户自己添加的下一个出口 ----------
  bool failoverRequested;readonly HashSet<int> triedExits=new();DateTimeOffset failoverPausedUntil=DateTimeOffset.MinValue;
- async Task Failover(CancellationToken stop)
+ // The next exit to use: working ones first (checked by the server in the last 6 minutes, fastest first), then
+ // the not yet checked ones in the order the customer added them; ones known to be down right now are skipped.
+ async Task<(int Id,string Name,string From)?> PickExit(CancellationToken stop)
  {
-  var list=await Remote(new{type="exits"},stop);
-  var items=list.GetProperty("items").EnumerateArray().Select(x=>(Id:x.GetProperty("id").GetInt32(),Name:Text(x,"name"))).ToList();
+  var list=await Remote(new{type="exits"},stop);var now=DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+  var items=list.GetProperty("items").EnumerateArray().Select((x,i)=>
+  {
+   var h=x.TryGetProperty("health",out var hv)&&hv.ValueKind==JsonValueKind.Object?hv:default;
+   bool? ok=h.ValueKind==JsonValueKind.Object&&h.TryGetProperty("ok",out var o)&&o.ValueKind is JsonValueKind.True or JsonValueKind.False?o.GetBoolean():null;
+   var fresh=h.ValueKind==JsonValueKind.Object&&now-Num(h,"at")<360;
+   return (Id:x.GetProperty("id").GetInt32(),Name:Text(x,"name"),Index:i,Good:ok==true&&fresh,Bad:ok==false&&fresh,Ms:h.ValueKind==JsonValueKind.Object?Num(h,"ms"):0);
+  }).ToList();
   exitCount=items.Count;
   var current=list.GetProperty("selected").ValueKind==JsonValueKind.Number?list.GetProperty("selected").GetInt32():(int?)null;
   if(current is int c)triedExits.Add(c);
-  var from=items.FirstOrDefault(x=>x.Id==current).Name;
-  // Next exit after the current one, in the order the customer added them.
-  var start=items.FindIndex(x=>x.Id==current);
-  var next=items.Skip(start+1).Concat(items.Take(Math.Max(0,start+1))).FirstOrDefault(x=>!triedExits.Contains(x.Id));
-  if(next.Name is null){triedExits.Clear();return;}
+  var from=items.FirstOrDefault(x=>x.Id==current).Name??"当前出口";
+  var next=items.Where(x=>x.Id!=current&&!triedExits.Contains(x.Id)&&!x.Bad).OrderBy(x=>x.Good?0:1).ThenBy(x=>x.Good?x.Ms:0).ThenBy(x=>x.Index).FirstOrDefault();
+  return next.Name is null?null:(next.Id,next.Name,from);
+ }
+ object? lastFailover;string? blockReason;
+ // The line was cut while switching (it could not be built on the exit in use): move to the next working exit.
+ async Task Failover(CancellationToken stop)
+ {
+  var pick=await PickExit(stop);
+  if(pick is not {} next)
+  {
+   // None of the customer's exits works right now: stay cut off (the real IP is never used), say so, try again shortly.
+   triedExits.Clear();state="blocked";reason="all_exits_down";retryAt=DateTimeOffset.UtcNow.AddSeconds(30);Record("blocked",reason);return;
+  }
   await Remote(new{type="select_exit",id=next.Id},stop);triedExits.Add(next.Id);
   configured=false;retryAt=DateTimeOffset.UtcNow;
-  Record("exit_failover",(from??"当前出口")+" → "+next.Name);
+  Record("exit_failover",next.From+" → "+next.Name);lastFailover=new{at=DateTimeOffset.UtcNow.ToUnixTimeSeconds(),from=next.From,to=next.Name};
+ }
+ // The exit in use stopped passing traffic while protected: move straight to a working exit without rebuilding
+ // the line (all exits go through the same gateway), or cut off and say why.
+ async Task ExitDown(Exception e,DateTimeOffset generation,CancellationToken stop)
+ {
+  await gate.WaitAsync(stop);
+  try
+  {
+   if(state!="protected"||!configured||configAt!=generation)return;
+   var fatal=e is HttpRequestException h&&h.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+   if(!fatal&&store.Settings.AutoSwitchExit&&DateTimeOffset.UtcNow>=failoverPausedUntil)
+   {
+    (int Id,string Name,string From)? pick;
+    try{pick=await PickExit(stop);}
+    catch(Exception ex)when(ex is not OperationCanceledException||!stop.IsCancellationRequested){pick=null;failoverPausedUntil=DateTimeOffset.UtcNow.AddMinutes(1);Program.Log("could not ask which exits work",ex);}
+    if(pick is {} next)
+    {
+     await Remote(new{type="select_exit",id=next.Id},stop);triedExits.Add(next.Id);
+     Record("exit_failover",next.From+" → "+next.Name);lastFailover=new{at=DateTimeOffset.UtcNow.ToUnixTimeSeconds(),from=next.From,to=next.Name};
+     Program.Log("exit down, moved to "+next.Name,e);
+     await ExitChanged(stop);return;
+    }
+    if(exitCount is int n&&n>1)blockReason="all_exits_down";
+   }
+   else if(!fatal&&!store.Settings.AutoSwitchExit&&exitCount is int m&&m>1)blockReason="exit_down";
+   Block(e);
+  }
+  catch(Exception ex)when(ex is not OperationCanceledException||!stop.IsCancellationRequested){Program.Log("handling a broken exit",ex);if(state=="protected"&&configured)Block(e);}
+  finally{Publish();gate.Release();}
  }
  Task? networkTask;
  int netFailures;DateTimeOffset nextNetProbe=DateTimeOffset.MinValue;DateTimeOffset lastTraffic=DateTimeOffset.MinValue;
@@ -360,7 +418,7 @@ sealed partial class Runtime:IDisposable
   var ok=false;
   try
   {
-   using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(20));var ct=deadline.Token;
+   using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop);deadline.CancelAfter(TimeSpan.FromSeconds(12));var ct=deadline.Token;
    await cloud.SendAsync("/api/v1/status",cancellation:ct);
    var observed=await ObserveExit(ct);
    if(configAt!=generation||!configured||state!="protected")return;
@@ -370,17 +428,17 @@ sealed partial class Runtime:IDisposable
   {
    if(configAt!=generation||!configured||state!="protected")return;
    var fatal=e is HttpRequestException h&&h.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
-   netFailures++;nextNetProbe=DateTimeOffset.UtcNow.AddSeconds(10);
+   netFailures++;nextNetProbe=DateTimeOffset.UtcNow.AddSeconds(3);
    // Pages are still loading: everything has to go through the customer's exit (direct traffic is
    // blocked), so data flowing means the exit works and only the check was refused, as busy
    // residential exits do. Keep the customer online; only a check failing with nothing flowing cuts off.
-   var flowing=DateTimeOffset.UtcNow-lastTraffic<TimeSpan.FromSeconds(30);
-   Program.Log("line check failed ("+netFailures+"/3"+(flowing?", traffic still flowing":"")+")",e);
-   if(!fatal&&flowing){netFailures=Math.Min(netFailures,2);return;}
-   if(!fatal&&netFailures<3)return;
-   await gate.WaitAsync(stop);
-   try{if(state=="protected"&&configured&&configAt==generation)Block(e);}
-   finally{Publish();gate.Release();}
+   // Only in "everything through the exit" mode does downloading prove the exit works (in the other modes most
+   // traffic does not use it), and only for the last 10 s.
+   var flowing=!coexist&&!store.Settings.ProxyOnlyListed&&DateTimeOffset.UtcNow-lastTraffic<TimeSpan.FromSeconds(10);
+   Program.Log("line check failed ("+netFailures+"/2"+(flowing?", traffic still flowing":"")+")",e);
+   if(!fatal&&flowing){netFailures=Math.Min(netFailures,1);return;}
+   if(!fatal&&netFailures<2)return;
+   await ExitDown(e,generation,stop);
   }
   if(!ok)return;
   // Location, timezone and line samples are extras: being slow or failing never counts as the line being down.
@@ -419,7 +477,7 @@ sealed partial class Runtime:IDisposable
   using(var local=CancellationTokenSource.CreateLinkedTokenSource(stop))
   {
    local.CancelAfter(TimeSpan.FromSeconds(4));
-   try{var traffic=await kernel.Rates(local.Token);up=traffic.Up;down=traffic.Down;if(down>=2048)lastTraffic=DateTimeOffset.UtcNow;var proxies=await kernel.Get("proxies/"+Uri.EscapeDataString("出口"),local.Token);selected=Text(proxies,"now");await CountDirectTraffic(local.Token);}
+   try{var traffic=await kernel.Rates(local.Token);up=traffic.Up;down=traffic.Down;if(down>=2048)lastTraffic=DateTimeOffset.UtcNow;NoteStall();var proxies=await kernel.Get("proxies/"+Uri.EscapeDataString("出口"),local.Token);selected=Text(proxies,"now");await CountDirectTraffic(local.Token);}
    catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidDataException or JsonException){/* 读流量只是显示用，下次再读 */}
   }
   heartbeat=DateTimeOffset.UtcNow;lastHealth=heartbeat;
@@ -441,7 +499,7 @@ sealed partial class Runtime:IDisposable
   var lastCheck=last is null?(JsonElement?)null:JsonSerializer.SerializeToElement(last);
   var index=nodes.ValueKind==JsonValueKind.Array?nodes.EnumerateArray().Select((x,i)=>(Name:Text(x,"name"),Index:i+1)).FirstOrDefault(x=>x.Name==selected).Index:0;
   var remaining=Math.Max(0,store.Settings.PausedUntil-DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-  return new{version=Program.Version,coexist,consent_version=store.Settings.ConsentVersion,protection=new{state=visible,reason,remaining_secs=remaining,auto_resume_on_node=false,quit=store.Settings.QuitPause,off=visible=="paused"&&!store.Settings.Enabled,blocked=visible=="blocked",since_secs=0},lines,current_line=index==0?"1":index.ToString(),line_mode=new{mode},rate=visible=="protected"?new{up_bps=up,down_bps=down}:null,guard=visible=="protected"?new{since=guardSince.ToUnixTimeSeconds(),blocked=(int?)null}:null,checks=bypassCheck is not null&&visible=="protected"&&JsonSerializer.SerializeToElement(bypassCheck).GetProperty("verdict").GetString()=="fail"?new[]{bypassCheck}:Array.Empty<object>(),conflicts,proxy_undo=proxy.UndoAvailable,last_error=lastError,update=updateReady,update_at_boot=store.Settings.UpdateAtBoot,last_check=lastCheck is JsonElement lc?new{at=lc.GetProperty("at").GetInt64(),kind=Text(lc,"kind"),problems=lc.GetProperty("problems").GetInt32()}:null};
+  return new{version=Program.Version,coexist,consent_version=store.Settings.ConsentVersion,protection=new{state=visible,reason,remaining_secs=remaining,auto_resume_on_node=false,quit=store.Settings.QuitPause,off=visible=="paused"&&!store.Settings.Enabled,blocked=visible=="blocked",since_secs=0},lines,current_line=index==0?"1":index.ToString(),line_mode=new{mode},rate=visible=="protected"?new{up_bps=up,down_bps=down}:null,guard=visible=="protected"?new{since=guardSince.ToUnixTimeSeconds(),blocked=(int?)null}:null,checks=bypassCheck is not null&&visible=="protected"&&JsonSerializer.SerializeToElement(bypassCheck).GetProperty("verdict").GetString()=="fail"?new[]{bypassCheck}:Array.Empty<object>(),conflicts,proxy_undo=proxy.UndoAvailable,last_error=lastError,update=updateReady,update_at_boot=store.Settings.UpdateAtBoot,auto_exit=store.Settings.AutoSwitchExit,last_failover=lastFailover,last_check=lastCheck is JsonElement lc?new{at=lc.GetProperty("at").GetInt64(),kind=Text(lc,"kind"),problems=lc.GetProperty("problems").GetInt32()}:null};
  }
  string writtenState="";
  void Publish()
@@ -581,6 +639,7 @@ sealed partial class Runtime:IDisposable
     case "report_bad_line":return await Remote(new{type="new_ticket",kind=1,title="线路问题",body="客户反馈当前线路不可用，请检查服务端出口。"},stop);
     case "install_update":return InstallUpdate();
     case "update_at_boot":return UpdateAtBoot();
+    case "set_auto_exit":store.Settings.AutoSwitchExit=Bool(request,"on");store.Save();return new{saved=true,on=store.Settings.AutoSwitchExit};
     case "own_exit":case "store_exit":return await AddExit(request,stop);
     case "block_before_ready":
      if(!Bool(request,"on"))NeedOwner(request);

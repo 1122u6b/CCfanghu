@@ -2,8 +2,14 @@
 automated Windows test. Listens on 127.0.0.1 only and exits by itself after the given lifetime.
 
 Usage: python3 ci_socks5.py PORT USERNAME PASSWORD LIFETIME_SECONDS
+
+USERNAME and USERNAME + "2" are both accepted, so the test can add two separate exits. A request for
+"stop-N.leyra-ci.invalid" makes the account that sent it take connections but pass nothing on for N seconds
+(at most 300): an exit that dies in the middle of a session, the way a broken node behaves.
 """
-import asyncio, ipaddress, socket, struct, sys
+import asyncio, ipaddress, re, socket, struct, sys, time
+
+STOPPED = {}   # account -> monotonic time until which it passes nothing on
 
 
 async def pipe(r, w):
@@ -25,7 +31,8 @@ async def handle(r, w, user, password):
         w.write(b'\x05\x02'); await w.drain()
         _, ulen = await r.readexactly(2); u = await r.readexactly(ulen)
         plen = (await r.readexactly(1))[0]; p = await r.readexactly(plen)
-        if u.decode() != user or p.decode() != password:
+        account = u.decode()
+        if account not in (user, user + '2') or p.decode() != password:
             w.write(b'\x01\x01'); return
         w.write(b'\x01\x00'); await w.drain()
         ver, cmd, _, atyp = await r.readexactly(4)
@@ -36,6 +43,14 @@ async def handle(r, w, user, password):
         port = struct.unpack('!H', await r.readexactly(2))[0]
         if cmd != 1:
             w.write(b'\x05\x07\x00\x01' + b'\x00' * 6); return
+        stop = re.fullmatch(r'stop-(\d{1,3})\.leyra-ci\.invalid', host)
+        if stop:
+            STOPPED[account] = time.monotonic() + min(300, int(stop.group(1)))
+            w.write(b'\x05\x05\x00\x01' + b'\x00' * 6); return
+        if time.monotonic() < STOPPED.get(account, 0):
+            # Takes the connection, then nothing comes back.
+            w.write(b'\x05\x00\x00\x01' + b'\x00' * 6); await w.drain()
+            await asyncio.sleep(max(1, STOPPED[account] - time.monotonic())); return
         try:
             infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
             if any(not ipaddress.ip_address(i[4][0]).is_global for i in infos):

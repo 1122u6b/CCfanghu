@@ -62,6 +62,9 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
             if 'exit_probe_error' not in cols:db.execute('ALTER TABLE exits ADD COLUMN exit_probe_error TEXT')
             # 「本机直连」: the computer dials this exit itself (for nodes that only take connections from mainland China).
             if 'client_direct' not in cols:db.execute('ALTER TABLE exits ADD COLUMN client_direct INTEGER NOT NULL DEFAULT 0')
+            # Latest health check through the exit (the gateway checks the exits of computers that are online).
+            for c,t in (('health_ok','INTEGER'),('health_at','INTEGER'),('health_ms','INTEGER')):
+                if c not in cols:db.execute('ALTER TABLE exits ADD COLUMN '+c+' '+t)
             # Messages can carry a link (e.g. to renew) and a tag so automatic reminders are sent only once.
             cols={r[1] for r in db.execute('PRAGMA table_info(messages)')}
             if 'link' not in cols:db.execute('ALTER TABLE messages ADD COLUMN link TEXT')
@@ -105,12 +108,19 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
     # ---- the address each exit shows to websites ----
     def set_exit_ip(self,identity,ip):
         with self.db() as db:db.execute('UPDATE exits SET exit_ip=?,exit_ip_at=?,exit_probe_error=NULL WHERE id=?',(str(ip),int(time.time()),int(identity)))
+    def set_exit_health(self,identity,ok,ms=None):
+        with self.db() as db:
+            if ms is None:db.execute('UPDATE exits SET health_ok=?,health_at=? WHERE id=?',(int(bool(ok)),int(time.time()),int(identity)))
+            else:db.execute('UPDATE exits SET health_ok=?,health_at=?,health_ms=? WHERE id=?',(int(bool(ok)),int(time.time()),int(ms),int(identity)))
+    def exits_to_check(self):
+        """Exits the gateway itself can check (not the ones the computer dials directly)."""
+        with self.db() as db:return [r[0] for r in db.execute('SELECT id FROM exits WHERE client_direct=0 ORDER BY id')]
     def set_exit_probe_failed(self,identity,reason):
         with self.db() as db:db.execute('UPDATE exits SET exit_probe_error=? WHERE id=?',(str(reason)[:80],int(identity)))
     def set_selected_exit_ip(self,ip):
         with self.db() as db:
             identity=self.get(db,'selected_exit')
-            if identity is not None:db.execute('UPDATE exits SET exit_ip=?,exit_ip_at=?,exit_probe_error=NULL WHERE id=?',(str(ip),int(time.time()),int(identity)))
+            if identity is not None:db.execute('UPDATE exits SET exit_ip=?,exit_ip_at=?,exit_probe_error=NULL,health_ok=1,health_at=? WHERE id=?',(str(ip),int(time.time()),int(time.time()),int(identity)))
     def exit_nodes_of(self,identity):
         with self.db() as db:
             row=db.execute('SELECT node FROM exits WHERE id=?',(int(identity),)).fetchone()
@@ -369,7 +379,7 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
             if kind=='exits':
                 def summary(r):
                     nodes=json.loads(r['node']);nodes=nodes if isinstance(nodes,list) else [nodes]
-                    return {'id':r['id'],'name':r['name'],'created_at':r['created_at'],'lines':len(nodes),'types':sorted({n.get('type','socks5') for n in nodes}),'exit_ip':r['exit_ip'] or '','exit_ip_at':r['exit_ip_at'],'exit_ip_error':r['exit_probe_error'] or '','direct':bool(r['client_direct'])}
+                    return {'id':r['id'],'name':r['name'],'created_at':r['created_at'],'lines':len(nodes),'types':sorted({n.get('type','socks5') for n in nodes}),'exit_ip':r['exit_ip'] or '','exit_ip_at':r['exit_ip_at'],'exit_ip_error':r['exit_probe_error'] or '','direct':bool(r['client_direct']),'health':{'ok':None if r['health_ok'] is None else bool(r['health_ok']),'at':r['health_at'],'ms':r['health_ms']}}
                 return {'items':[summary(r) for r in db.execute('SELECT * FROM exits ORDER BY id')],'selected':self.get(db,'selected_exit')}
             if kind=='store_exit':
                 nodes=exit_nodes(req.get('nodes',req.get('node',{})))
@@ -386,7 +396,7 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
                 if direct:self.check_client_direct(nodes)
                 if req.get('exit_id') is not None:
                     identity=int(req['exit_id'])
-                    if db.execute('UPDATE exits SET node=?,exit_ip=NULL,exit_ip_at=NULL,exit_probe_error=NULL WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
+                    if db.execute('UPDATE exits SET node=?,exit_ip=NULL,exit_ip_at=NULL,exit_probe_error=NULL,health_ok=NULL,health_at=NULL,health_ms=NULL WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
                 else:
                     if db.execute('SELECT COUNT(*) FROM exits').fetchone()[0]>=20:raise ManagementError('maximum 20 exits')
                     identity=db.execute('INSERT INTO exits(name,node,created_at) VALUES (?,?,?)',(text(req.get('name') or '我的出口',80,True),json.dumps(nodes),now)).lastrowid
@@ -396,7 +406,7 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
                 return {'id':identity,'lines':len(nodes),'skipped':skipped,'types':sorted({n['type'] for n in nodes})}
             if kind=='update_exit':
                 identity=int(req.get('id',0));nodes=exit_nodes(req.get('nodes',req.get('node',{})))
-                if db.execute('UPDATE exits SET node=?,exit_ip=NULL,exit_ip_at=NULL,exit_probe_error=NULL WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
+                if db.execute('UPDATE exits SET node=?,exit_ip=NULL,exit_ip_at=NULL,exit_probe_error=NULL,health_ok=NULL,health_at=NULL,health_ms=NULL WHERE id=?',(json.dumps(nodes),identity)).rowcount!=1:raise ManagementError('exit not found')
                 if req.get('name') is not None:db.execute('UPDATE exits SET name=? WHERE id=?',(text(req.get('name'),80,True),identity))
                 return {'id':identity,'lines':len(nodes),'saved':True}
             if kind=='set_exit_direct':

@@ -120,7 +120,7 @@
     all_lines_down: 'route', software_expired: 'expired', node_expired: 'expired', quota_exhausted: 'traffic',
     device_unbound: 'unbound', banned: 'banned', maintenance: 'service', credential_rotated: 'rotated',
     kernel_down: 'component', rules_failed: 'rules', preflight_failed: 'settings', config_invalid: 'settings',
-    tun_taken: 'taken'
+    tun_taken: 'taken', all_exits_down: 'exits', exit_down: 'exitoff'
   };
   // 别的代理软件占着虚拟网卡（docs/03 P4）：原型里没有这一页，在这里补上；是谁用冲突提示里认出来的名字。
   P.PM.taken = {
@@ -231,8 +231,19 @@
     S.screen = 'trialStopped'; S.trial = 'stopped';
   }
 
+  var failoverSeen = 0;
   function apply(st) {
     applyLines(st);
+    if (st.auto_exit != null) S.autoExit = !!st.auto_exit;
+    // 出口连不上、已自动换到另一个：系统通知 + 界面提示（同一次只提醒一次；打开软件时 10 分钟前的旧事不再提）。
+    var lf = st.last_failover;
+    if (lf && lf.at && lf.at !== failoverSeen) {
+      failoverSeen = lf.at; S.failover = { at: lf.at, from: lf.from || '原出口', to: lf.to || '另一个出口' };
+      if (Date.now() / 1000 - lf.at < 600) {
+        notifyOnce('failover.' + lf.at, '出口已自动切换', '「' + S.failover.from + '」连不上，已换到「' + S.failover.to + '」，网站看到的 IP 会变');
+        P.toast('「' + esc(S.failover.from) + '」连不上，已自动换到「' + esc(S.failover.to) + '」，网站看到的 IP 会变', 'info');
+      }
+    }
     S.rate = st.rate ? { up: st.rate.up_bps, down: st.rate.down_bps } : null;
     S.speedTesting = !!S.busy.speed || !!st.speed_testing;
     // 最近一次检查（docs/03 §4）：安全检查页一打开就显示。
@@ -929,6 +940,8 @@
     o.err = esc(o.raw.err);
     // 本机直连：这台电脑直接连这个出口（卖家节点只允许国内连接时用），不经香港中转。
     o.direct = !!e.direct;
+    // 服务器最近 6 分钟内经这个出口测通了（换出口、切回时用）。
+    o.healthy = !!(e.health && e.health.ok && e.health.at && Date.now() / 1000 - e.health.at < 360);
     o.name = o.raw.name;
     o.city = esc(o.raw.location || '—');
     Object.defineProperty(o, 'ip', { enumerable: true, get: function () { return esc(o.raw.ip || (o.current && curIp !== '-' ? curIp : o.direct ? '选用后显示 IP' : '—')); } });
@@ -950,6 +963,12 @@
     markCurrent(cur ? cur.id : null);
     // 「添加出口」：服务端说能加才有，自己加的到了上限（默认 5 个）也没有。
     P.set({ exitMaxOwn: x && x.can_add ? (x.max_own || 5) : 0 });
+    // 自动换过出口、原来那个又测通了：通知一次（不自动切回，免得网站看到的 IP 来回变）。
+    var F = S.failover;
+    if (F) {
+      var back = EXITS.filter(function (e) { return e.name === F.from && !e.current && e.healthy; })[0];
+      if (back) notifyOnce('recovered.' + F.at, '「' + F.from + '」恢复了', '在「线路」页点「切回」就能换回去');
+    }
   }
   function exitName(e) { return esc(e.raw.name || '出口'); }
   A.pickExit = function (i) {
@@ -985,6 +1004,15 @@
       loadAccount(); poll();
     }).catch(function (err) { if (S.dialog === D) { D.busy = false; D.err = esc(msg(err)); P.render(); } });
   };
+  // 出口连不上时自动换：开 / 关
+  A.autoExit = function () {
+    var to = S.autoExit === false;
+    call({ type: 'set_auto_exit', on: to }).then(function (r) {
+      S.autoExit = !!(r && r.on); P.render();
+      P.toast(S.autoExit ? '已打开：出口连不上时自动换到能用的出口并通知你' : '已关闭：出口连不上时直接断网提醒，IP 不会自己变');
+    }).catch(function (e) { P.toast('没改成：' + msg(e), 'info'); });
+  };
+  A.autoExitOn = function () { if (S.autoExit === false) A.autoExit(); };
   // 本机直连 ⇄ 经香港中转：正在用的出口改了走法，防护会重新建一次线路（几秒，期间真实 IP 照样挡住）。
   A.exitDirect = function (i) {
     var e = shownExits()[+i];

@@ -181,6 +181,8 @@ class Gateway:
         self.traffic_pending={}
         # Exit address checks: nonce -> waiting future; (computer, exit) -> last attempt.
         self.exit_probes={};self.exit_probe_tried={};self.probe_tasks=set();self.exit_probe_wait=15
+        # When each computer was last seen (its regular checks come every 30 s); exit health covers those online.
+        self.device_seen={};self.exit_health_every=120
         from upstream_kernel import KernelUpstreams,find_binary
         binary=config.get('kernel_binary') or find_binary()
         self.kernel=KernelUpstreams(Path(self.management.root)/'upstream-kernel',Path(binary) if binary else None)
@@ -291,6 +293,7 @@ class Gateway:
         token=authorization[7:] if authorization.startswith('Bearer ') else ''
         is_admin=hmac.compare_digest(authorization.encode(),('Bearer '+self.config['api_token']).encode()) or (token.startswith('adm_') and self.management.admin_session_valid(token))
         device=None if is_admin else self.devices.authenticate(token)
+        self.seen(device)
         renew_only=False
         if not is_admin and device is None:
             if self.devices.expired_token(token):
@@ -441,12 +444,13 @@ class Gateway:
             await asyncio.sleep(60)
             try:await asyncio.to_thread(self.flush_traffic)
             except Exception as e:print('traffic flush failed: '+type(e).__name__,flush=True)
-    async def probe_exit(self,device,exit_id):
+    async def probe_exit(self,device,exit_id,force=False):
         """Learn the address websites see for one exit without the customer switching to it: connect
-        through that exit back to this gateway with a one-time nonce and read the source address."""
+        through that exit back to this gateway with a one-time nonce and read the source address. The same check
+        is the exit's health: whether it passes traffic right now and how long the round trip took."""
         key=(device.id,int(exit_id));now=time.monotonic()
-        if now-self.exit_probe_tried.get(key,-1e9)<600:return
-        self.exit_probe_tried[key]=now
+        if not force and now-self.exit_probe_tried.get(key,-1e9)<600:return
+        self.exit_probe_tried[key]=now;started=time.monotonic()
         if len(self.exit_probe_tried)>20000:self.exit_probe_tried.clear()
         nonce=secrets.token_urlsafe(18);future=asyncio.get_running_loop().create_future();self.exit_probes[nonce]=future;w=None
         try:
@@ -459,6 +463,7 @@ class Gateway:
             w.write(('GET /api/v1/exit-probe/'+nonce+' HTTP/1.1\r\nHost: exit-probe\r\nConnection: close\r\n\r\n').encode());await w.drain()
             observed=await asyncio.wait_for(future,self.exit_probe_wait)
             await asyncio.to_thread(device.management.set_exit_ip,exit_id,observed)
+            await asyncio.to_thread(device.management.set_exit_health,exit_id,True,int((time.monotonic()-started)*1000))
             self.exit_probe_tried.pop(key,None)
         except Exception as e:
             print('exit address check failed: '+type(e).__name__,flush=True)
@@ -467,7 +472,9 @@ class Gateway:
             reason=('出口连上了但不转发流量' if isinstance(e,(TimeoutError,asyncio.TimeoutError,ConnectionResetError,asyncio.IncompleteReadError)) and w is not None
                     else '出口拒绝了账号或密码' if 'authentication' in str(e) or 'password' in str(e)
                     else '连不上出口地址')
-            try:await asyncio.to_thread(device.management.set_exit_probe_failed,exit_id,reason)
+            try:
+                await asyncio.to_thread(device.management.set_exit_probe_failed,exit_id,reason)
+                await asyncio.to_thread(device.management.set_exit_health,exit_id,False)
             except Exception as e2:print('exit check result not saved: '+type(e2).__name__,flush=True)
         finally:
             self.exit_probes.pop(nonce,None)
@@ -476,6 +483,30 @@ class Gateway:
                 w.close()
                 with contextlib.suppress(Exception):await asyncio.wait_for(w.wait_closed(),3)
                 if w.transport is not None:w.transport.abort()
+    # ---- Exit health: every 2 minutes, the exits of computers seen in the last 5 minutes ----
+    def seen(self,device):
+        if device is not None:self.device_seen[device.id]=time.monotonic()
+    async def check_exit_health(self):
+        from types import SimpleNamespace
+        now=time.monotonic();online=[k for k,t in self.device_seen.items() if now-t<300]
+        for k in [k for k,t in self.device_seen.items() if now-t>=3600]:self.device_seen.pop(k,None)
+        limit=asyncio.Semaphore(16)
+        async def one(device,exit_id):
+            async with limit:await self.probe_exit(device,exit_id,force=True)
+        jobs=[]
+        for device_id in online:
+            try:
+                device=SimpleNamespace(id=device_id,management=Management(Path(self.devices.root)/device_id))
+                ids=await asyncio.to_thread(device.management.exits_to_check)
+            except Exception as e:
+                print('exit health skipped: '+type(e).__name__,flush=True);continue
+            jobs+=[one(device,i) for i in ids[:20]]
+        if jobs:await asyncio.gather(*jobs,return_exceptions=True)
+    async def exit_health_loop(self):
+        while True:
+            await asyncio.sleep(self.exit_health_every)
+            try:await self.check_exit_health()
+            except Exception as e:print('exit health round failed: '+type(e).__name__,flush=True)
     def probe_exits_later(self,device,ids):
         loop=asyncio.get_running_loop()
         for i in ids[:8]:
@@ -595,6 +626,7 @@ class Gateway:
         context.load_cert_chain(self.config['cert'],self.config['key'])
         asyncio.get_running_loop().create_task(self.expiry_reminders())
         asyncio.get_running_loop().create_task(self.traffic_writer())
+        asyncio.get_running_loop().create_task(self.exit_health_loop())
         async def preload():
             try:await self.kernel.preload(self.kernel_exits())
             except Exception as e:print('kernel preload skipped: '+type(e).__name__,flush=True)

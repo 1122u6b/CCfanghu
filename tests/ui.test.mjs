@@ -211,3 +211,39 @@ test('timezone prompt waits for the automatic change and closes itself once the 
   assert.equal(w.__proto.S.dialog.type,'addexit');
  }finally{await cleanup(w);}
 });
+
+test('broken exits: switch notice, all-down page, recovered hint and the auto-switch setting',async()=>{
+ const now=Math.floor(Date.now()/1000);
+ let status={protection:{state:'protected'},auto_exit:true,last_failover:{at:now-5,from:'我的vps',to:'我的ip'}};
+ const account={activated:true,account_id:5,suite:{kind:'soft'},own_exit:'connected',channels:[],current_exit:1,
+  exits:{list:[{id:1,name:'我的ip',own:true,lines:1,current:true,exit_ip:'198.51.100.2',health:{ok:true,at:now-30,ms:800}},{id:2,name:'我的vps',own:true,lines:1,current:false,exit_ip:'',health:{ok:true,at:now-20,ms:900}}],can_add:true,max_own:5}};
+ const calls=[];
+ const w=await setup((command,args)=>{if(command==='daemon')calls.push(args.request);
+  return command==='daemon'&&args.request.type==='account'?account:command==='daemon'&&args.request.type==='status'?status:command==='daemon'&&args.request.type==='set_auto_exit'?{saved:true,on:args.request.on}:{};});
+ try{
+  await settle();
+  // the switch is told once (system notification + message in the window)
+  assert.equal(w.__proto.S.failover.from,'我的vps');
+  // the original exit works again: offered, never switched back by itself
+  const routes=render(w,'routes');
+  assert.match(routes,/「我的vps」恢复了/);assert.match(routes,/切回「我的vps」/);
+  assert.equal(calls.filter(c=>c.type==='select_exit').length,0);
+  // settings: on by default, can be turned off
+  let set=render(w,'settings');assert.match(set,/出口连不上时自动换/);assert.match(set,/开：自动换到其他能用的出口/);
+  w.__proto.A.autoExit();await settle();
+  const sent=calls.filter(c=>c.type==='set_auto_exit').pop();assert.equal(sent&&sent.on,false);
+  set=render(w,'settings');assert.match(set,/关：直接断网提醒/);
+ }finally{await cleanup(w);}
+});
+
+test('all exits down and switching turned off have their own cut-off pages',async()=>{
+ const w=await setup(inactive);
+ try{
+  const P=w.__proto;
+  for(const [reason,text] of [['exits',/你添加的出口现在都连不上/],['exitoff',/关闭了「出口连不上时自动换」/]]){
+   Object.assign(P.S,{screen:'main',page:'overview',status:'pm',reason,consentVer:P.DISCLAIMER_VER,dialog:null,popup:null});P.render();
+   assert.match(w.document.body.textContent,text,reason);
+   assert.doesNotMatch(w.document.body.textContent,/真实 IP 已隐藏，所有流量/);
+  }
+ }finally{await cleanup(w);}
+});

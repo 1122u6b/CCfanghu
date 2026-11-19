@@ -46,6 +46,8 @@
     expired: { short: '全套已到期', get desc() { return '全套已于 ' + S.exp.date + '到期。为了不暴露真实 IP，网络已断开。接入你自己的出口，或重新开通全套。'; }, btns: [['primary', '接入你的出口', 'dialog:ownexit'], ['secondary', '重新开通全套', 'upgrade']] },
     traffic: { short: '本月流量已用完', get desc() { return '本月 ' + INFO.limit + ' 流量已用完。为了不暴露真实 IP，网络已断开。加购流量或 ' + INFO.reset + '重置后自动恢复。'; }, btns: [['primary', '联系售后', 'contact']] },
     route: { short: '线路暂时不可用', desc: '线路暂时连不上，正在自动重试。为了不暴露真实 IP，网络保持断开。如果 15 分钟内没恢复，客服会自动收到提醒。', desc2: '在酒店、机场等需要网页登录的 Wi-Fi 上？可先暂停防护完成登录，线路连上后自动恢复；也可以改连手机热点。', btns: [['primary', '刷新连接', 'pmRefresh'], ['secondary', '换一条线路', 'pmSwitch']], pause: '暂停防护去登录' },
+    exits: { short: '所有出口都连不上', desc: '你添加的出口现在都连不上，为了不暴露真实 IP 网络已断开。软件每半分钟再试一次，有出口恢复就自动接上。', desc2: '也可以去「线路」换个链接、添加新出口，或找卖家确认节点是否正常。', btns: [['primary', '去线路页', 'go:routes'], ['secondary', '添加出口', 'exitAdd']] },
+    exitoff: { short: '出口连不上', desc: '正在用的出口连不上，为了不暴露真实 IP 网络已断开。你关闭了「出口连不上时自动换」，所以没有切到其他出口，网站看到的 IP 不会变。', desc2: '可以去「线路」手动换一个出口，或者打开自动换。', btns: [['primary', '去线路页', 'go:routes'], ['secondary', '打开自动换', 'autoExitOn']] },
     node: { short: '线路处理中', desc: '线路暂时连不上，客服已收到提醒、正在处理。为了不暴露真实 IP，网络已断开。' },
     unbound: { short: '本设备已解绑', desc: '本设备已解绑，本机已停止服务，网络已断开。还要在这台电脑上用，输入原来的授权码恢复；要直接上网可以暂停防护（会暴露真实 IP）。', btns: [['primary', '用原授权码恢复', 'dialog:restoreCode'], ['secondary', '联系客服', 'contact']] },
     service: { short: '服务维护中', get desc() { return '服务维护中' + (INFO.maintEnd ? '，预计 ' + INFO.maintEnd + ' 结束' : '') + '。维护期间网络断开，结束后自动恢复。'; } },
@@ -644,9 +646,16 @@
   /* 出口一栏（01 §5.2「多个出口」）：老套餐是我们分配的加自己加的，单独软件、免费试用只有自己加的 */
   function curExit() { return S.exits ? exitsShown()[S.exit] : null; }
   function exitsShown() { return S.exits === 'soft' ? EXITS.filter(function (e) { return e.own; }) : EXITS; }
+  // 自动换过出口、原来那个又能用了：提示一下，点一下切回（不自动切回，免得 IP 来回变）。
+  function recoveredNote(L, b) {
+    var F = S.failover; if (!F) return '';
+    var i = -1; L.forEach(function (e, k) { if (i < 0 && e.name === F.from && k !== S.exit && e.healthy) i = k; });
+    return i < 0 ? '' : '<div class="hx-alert info lx-recovered" role="status">' + I('info', 20) + '<span class="msg">「' + esc(F.from) + '」恢复了。刚才它连不上，已自动换到「' + esc(F.to) + '」。</span>' + btn('secondary', '切回「' + esc(F.from) + '」', 'pickExit:' + i, b ? ' disabled' : '') + '</div>';
+  }
   function exitsSec(b) {
     var L = exitsShown(), own = L.filter(function (e) { return e.own; }).length;
     return '<div class="p-sec"><div class="p-cardhead"><h2>出口</h2><span class="p-sub">点哪个用哪个，切换后出口 IP 跟着变，防护不断</span></div>' +
+      recoveredNote(L, b) +
       '<div class="p-exits" role="radiogroup" aria-label="出口">' + L.map(function (e, i) {
         var cur = i === S.exit, last = S.exits === 'soft' && own <= 1;
         return '<div class="p-exit" aria-current="' + cur + '"><button class="pick" role="radio" aria-checked="' + cur + '" data-act="pickExit:' + i + '"' + (b ? ' disabled' : '') + '><span class="rad" aria-hidden="true"></span><span class="t">' +
@@ -1126,6 +1135,8 @@
       setGroup('通用', '', '<div class="hx-card p-setcard">' +
         '<div class="hx-setrow"><div class="l"><span>外观</span></div><div class="hx-seg" role="group" aria-label="外观">' + [['system', '跟随系统'], ['light', '浅色'], ['dark', '深色']].map(function (a) { return '<button aria-pressed="' + (S.appearance === a[0]) + '" data-act="appearance:' + a[0] + '">' + a[1] + '</button>'; }).join('') + '</div></div>' +
         '<div class="hx-setrow"><div class="l"><span>通知</span><small>状态变化、工单回复、到期提醒</small></div>' + sw(S.notify, 'notify', '通知') + '</div>' +
+        // 出口连不上时：开 = 自动换到能用的出口并通知（网站看到的 IP 会变）；关 = 直接断网提醒（IP 不会自己变）
+        '<div class="hx-setrow"><div class="l"><span>出口连不上时自动换</span><small>' + (S.autoExit !== false ? '开：自动换到其他能用的出口并通知你，网站看到的 IP 会变' : '关：直接断网提醒，网站看到的 IP 不会自己变') + '</small></div>' + sw(S.autoExit !== false, 'autoExit', '出口连不上时自动换') + '</div>' +
         '<div class="hx-setrow"><div class="l"><span>时区</span><small>' + (!TZN.exit ? lat(TZN.sys) + '· 还不知道出口所在的时区，暂时没法比对' : S.tzChanged ? '和出口一致 · ' + TZN.exit : lat(TZN.sys) + '· 和出口不一致，境外网站可能据此判断你所在的地区') + '</small></div>' + (!TZN.exit ? '' : S.tzChanged ? btn('text', '恢复原来的时区', 'tzRestore') : btn('secondary', '更换时区', 'tzChange')) + '</div>' +
         '</div>') +
       setGroup('网络', '', routeCard() + '<div class="hx-card"><div class="p-cardhead" style="margin:0"><h2>局域网</h2></div>' +

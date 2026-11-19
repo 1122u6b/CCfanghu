@@ -73,6 +73,33 @@ for i in 1 2 3; do P=$(curl -s --max-time 6 https://api.ipify.org || true); [ -n
 ask "{\"type\":\"set_exit_direct\",\"id\":$CUR,\"direct\":false}" >/dev/null || fail "could not switch back through Hong Kong"
 s=$(wait_for '^protected' 150) || fail "not protected again after switching back through Hong Kong: $s"
 P=$(ip); [ "$P" = "$EXIT" ] || fail "after switching back traffic does not go through the exit: $P"; echo "   back through Hong Kong: $s, address $P"
+echo "   the exit in use stops passing traffic mid-session (like a dead node): Leyra notices and moves to the spare exit"
+curid(){ python3 ask.py '{"type":"account"}' --full 2>/dev/null | python3 -c 'import json,sys;l=json.load(sys.stdin)["value"]["exits"]["list"];print(([x["id"] for x in l if x["current"]] or [""])[0])' 2>/dev/null; }
+SPARE=$(python3 ask.py "{\"type\":\"own_exit\",\"links\":\"socks5://ci2:$SOCKS_PASS@127.0.0.1:$SOCKS_PORT\",\"name\":\"spare\"}" --full | python3 -c 'import json,sys;print(json.load(sys.stdin)["value"]["id"])')
+ask "{\"type\":\"select_exit\",\"id\":$CUR}" >/dev/null || fail "could not go back to the first exit"
+wait_for '^protected' 60 >/dev/null; sleep 5; BEFORE=$(ip)
+curl -s --max-time 8 -x http://127.0.0.1:17890 http://stop-240.leyra-ci.invalid/ >/dev/null || true
+T0=$(date +%s); MOVED=""
+while [ $(( $(date +%s) - T0 )) -lt 90 ]; do
+  P=$(curl -s --max-time 4 https://api.ipify.org || true)
+  [ -n "$P" ] && [ "$P" != "$BEFORE" ] && fail "while the exit was dead, sites saw another address: $P"
+  [ "$(curid)" = "$SPARE" ] && { MOVED=1; break; }; sleep 2
+done
+echo "   moved to the spare exit: ${MOVED:-no} after $(( $(date +%s) - T0 )) s"
+[ -n "$MOVED" ] || fail "did not move away from an exit that stopped passing traffic within 90 s"
+s=$(wait_for '^protected' 60) || fail "not protected on the spare exit: $s"
+LF=$(python3 ask.py '{"type":"status"}' --full | python3 -c 'import json,sys;print((json.load(sys.stdin)["value"].get("last_failover") or {}).get("to",""))')
+echo "   switch the customer is told about: -> $LF"; [ "$LF" = "spare" ] || fail "the automatic switch was not reported to the window: $LF"
+echo "   automatic switching turned off: the dead exit cuts the network instead, nothing gets out, the exit is not changed"
+ask '{"type":"set_auto_exit","on":false}' >/dev/null || fail "could not turn automatic switching off"
+ask "{\"type\":\"select_exit\",\"id\":$CUR}" >/dev/null || fail "could not select the dead exit"
+s=$(wait_for '^blocked' 90); echo "   with switching off: $s"
+[[ "$s" == "blocked exit_down"* ]] || fail "with automatic switching off, a dead exit should cut off with reason exit_down: $s"
+for i in 1 2 3; do P=$(curl -s --max-time 5 https://api.ipify.org || true); [ -n "$P" ] && fail "something got out while cut off: $P"; done
+[ "$(curid)" = "$CUR" ] || fail "the exit was changed although automatic switching is off"
+ask '{"type":"set_auto_exit","on":true}' >/dev/null || fail "could not turn automatic switching back on"
+ask "{\"type\":\"select_exit\",\"id\":$SPARE}" >/dev/null || fail "could not select the spare exit"
+s=$(wait_for '^protected' 150) || fail "not protected again on the spare exit: $s"; echo "   back on the spare exit: $s"
 
 echo "7. pause: rules removed, normal network back"
 ask '{"type":"pause","minutes":10}' >/dev/null || ask '{"type":"pause","reason":"quit"}' >/dev/null

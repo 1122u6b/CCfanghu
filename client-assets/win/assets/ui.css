@@ -1022,3 +1022,5 @@ b, strong { font-weight: 500; }
 /* 添加出口弹窗：本机直连选项 */
 .lx-direct { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
 .lx-direct .p-sub { font-size: 12px; }
+.lx-recovered { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.lx-recovered .msg { flex: 1; }

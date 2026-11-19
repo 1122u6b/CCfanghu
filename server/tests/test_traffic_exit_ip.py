@@ -219,6 +219,40 @@ if __name__ == '__main__':
     unittest.main()
 
 
+class ExitHealth(ExitAddressThroughTheExit):
+    """The gateway keeps checking the exits of computers that are online, so a failover can pick one that works."""
+    async def test_health_of_every_exit_of_online_computers(self):
+        issued = self.gateway.devices.issue('A'); device = self.gateway.devices.authenticate(issued['token'])
+        other = self.gateway.devices.authenticate(self.gateway.devices.issue('B')['token'])
+        rpc = lambda d, req: self.gateway.devices.device_rpc(self.gateway.management, d, req)
+        good = rpc(device, {'type': 'store_exit', 'name': 'good', 'node': {'type': 'socks5', 'server': '127.0.0.1', 'port': self.exit_port}})['id']
+        dead = rpc(device, {'type': 'store_exit', 'name': 'dead', 'node': {'type': 'socks5', 'server': '127.0.0.1', 'port': 9}})['id']
+        mine = rpc(device, {'type': 'store_exit', 'name': 'mine', 'node': {'type': 'socks5', 'server': '127.0.0.1', 'port': 9}})['id']
+        rpc(device, {'type': 'set_exit_direct', 'id': mine, 'direct': True})
+        offline = rpc(other, {'type': 'store_exit', 'name': 'x', 'node': {'type': 'socks5', 'server': '127.0.0.1', 'port': self.exit_port}})['id']
+        self.gateway.seen(device)                      # only A was seen recently
+        await self.gateway.check_exit_health()
+        items = {x['id']: x for x in rpc(device, {'type': 'exits'})['items']}
+        self.assertTrue(items[good]['health']['ok']); self.assertIsInstance(items[good]['health']['ms'], int)
+        self.assertFalse(items[dead]['health']['ok'])
+        self.assertIsNone(items[mine]['health']['ok'])  # dialed by the computer itself: not checked here
+        self.assertIsNone(rpc(other, {'type': 'exits'})['items'][0]['health']['ok'])  # computer not online
+        # A health round is not held back by the 10-minute pause of the address check.
+        await self.gateway.check_exit_health()
+        self.assertFalse({x['id']: x for x in rpc(device, {'type': 'exits'})['items']}[dead]['health']['ok'])
+        # New link: health unknown again until checked.
+        rpc(device, {'type': 'update_exit', 'id': good, 'node': {'type': 'socks5', 'server': '127.0.0.1', 'port': 9}})
+        self.assertIsNone({x['id']: x for x in rpc(device, {'type': 'exits'})['items']}[good]['health']['ok'])
+
+    async def test_regular_check_of_the_exit_in_use_marks_it_working(self):
+        from management import Management
+        issued = self.gateway.devices.issue('A'); device = self.gateway.devices.authenticate(issued['token'])
+        rpc = lambda req: self.gateway.devices.device_rpc(self.gateway.management, device, req)
+        identity = rpc({'type': 'store_exit', 'name': 'x', 'node': {'type': 'socks5', 'server': '203.0.113.5', 'port': 1080}})['id']
+        rpc({'type': 'select_exit', 'id': identity}); device.management.set_selected_exit_ip('203.0.113.5')
+        self.assertTrue(rpc({'type': 'exits'})['items'][0]['health']['ok'])
+
+
 class ClientDirectExit(unittest.IsolatedAsyncioTestCase):
     """「本机直连」: for nodes that only take connections from mainland China, the computer dials the exit itself."""
     async def asyncSetUp(self):

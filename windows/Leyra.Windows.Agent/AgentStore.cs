@@ -25,6 +25,8 @@ sealed class AgentSettings
  // 「下次开机时更新」：已下载并核对过的新版本，下次开机本服务启动时自动安装（不再提示）。
  public string? UpdateAtBoot{get;set;}
  public string UpdateAtBootDigest{get;set;}="";
+ // 出口连不上时自动换到其他能用的出口（默认开）。关了：直接断网并提醒，出口 IP 不会自己变。
+ public bool AutoSwitchExit{get;set;}=true;
 }
 sealed class AgentStore
 {

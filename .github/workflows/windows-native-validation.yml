@@ -334,6 +334,47 @@ jobs:
           if ((Ask ('{"type":"set_exit_direct","id":' + $goodExit + ',"direct":false}')) -ne 0) { $failures += 'could not switch back through Hong Kong' }
           $s = WaitFor 'protected' 150; Write-Host "   back through Hong Kong: $s"
           if ($s -notmatch 'protected') { $failures += "not protected again after switching back through Hong Kong: $s" }
+          Write-Host '   the exit in use stops passing traffic mid-session (like a dead node): Leyra notices and moves to the spare exit'
+          $spareLink = "socks5://ci2:$($env:SOCKS_PASS)@127.0.0.1:$($env:SOCKS_PORT)"
+          if ((Ask ('{"type":"own_exit","links":"' + $spareLink + '","name":"备用出口"}')) -ne 0) { $failures += 'could not add the spare exit' }
+          $spare = (Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value.id
+          if ((Ask ('{"type":"select_exit","id":' + $goodExit + '}')) -ne 0) { $failures += 'could not go back to the first exit' }
+          $s = WaitFor 'protected' 60; Start-Sleep 5
+          $ipAllExpected = try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 https://api.ipify.org).Content.Trim() } catch { '' }
+          Write-Host "   before: sites see $ipAllExpected"
+          try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 8 -Proxy http://127.0.0.1:17890 http://stop-240.leyra-ci.invalid/ | Out-Null } catch { }
+          $t0 = Get-Date; $moved = $false; $leaked = @()
+          while (((Get-Date) - $t0).TotalSeconds -lt 90) {
+            # someone keeps browsing meanwhile; nothing may come back from anywhere but an exit
+            try { $seen = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 4 https://api.ipify.org).Content.Trim(); if ($seen -and $seen -ne $ipAllExpected) { $leaked += $seen } } catch { }
+            Ask '{"type":"account"}' | Out-Null
+            $cur = ((Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value.exits.list | Where-Object { $_.current } | Select-Object -First 1).id
+            if ($cur -eq $spare) { $moved = $true; break }
+            Start-Sleep 2
+          }
+          $took = [int]((Get-Date) - $t0).TotalSeconds
+          $s = WaitFor 'protected' 60
+          Write-Host "   moved to the spare exit: $moved after $took s, state: $s"
+          if (-not $moved) { $failures += "did not move away from an exit that stopped passing traffic within 90 s" }
+          if ($leaked) { $failures += "while the exit was dead, sites saw another address: $($leaked -join ',')" }
+          if ($s -notmatch 'protected') { $failures += "not protected on the spare exit: $s" }
+          Ask '{"type":"status"}' | Out-Null
+          $lf = (Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value.last_failover
+          Write-Host "   switch the customer is told about: $($lf.from) -> $($lf.to)"
+          if ($lf.to -ne '备用出口') { $failures += "the automatic switch was not reported to the window: $($lf | ConvertTo-Json -Compress)" }
+          Write-Host '   automatic switching turned off: the dead exit cuts the network instead, nothing gets out, the exit is not changed'
+          if ((Ask '{"type":"set_auto_exit","on":false}') -ne 0) { $failures += 'could not turn automatic switching off' }
+          if ((Ask ('{"type":"select_exit","id":' + $goodExit + '}')) -ne 0) { $failures += 'could not select the dead exit' }
+          $s = WaitFor 'blocked' 90; Write-Host "   with switching off: $s"
+          if ($s -notmatch 'blocked exit_down') { $failures += "with automatic switching off, a dead exit should cut off with reason exit_down: $s" }
+          foreach ($k in 1..3) { try { $p = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 https://api.ipify.org).Content } catch { $p = '' }; if ($p) { $failures += "something got out while cut off: $p" } }
+          Ask '{"type":"account"}' | Out-Null
+          $cur = ((Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value.exits.list | Where-Object { $_.current } | Select-Object -First 1).id
+          if ($cur -ne $goodExit) { $failures += "the exit was changed although automatic switching is off (now $cur)" }
+          if ((Ask '{"type":"set_auto_exit","on":true}') -ne 0) { $failures += 'could not turn automatic switching back on' }
+          if ((Ask ('{"type":"select_exit","id":' + $spare + '}')) -ne 0) { $failures += 'could not select the spare exit' }
+          $s = WaitFor 'protected' 150; Write-Host "   back on the spare exit: $s"
+          if ($s -notmatch 'protected') { $failures += "not protected again on the spare exit: $s" }
           Write-Host '   only listed sites go through the exit, the rest connects directly (and back to everything through the exit)'
           function SeenIp {
             for ($k = 1; $k -le 3; $k++) {
