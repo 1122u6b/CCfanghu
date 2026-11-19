@@ -211,4 +211,4 @@ jobs:
             "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $TEST_CODE; [ -n '$UI_CODE' ] && sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $UI_CODE; pkill -f \"[l]eyra-ci-socks.py $SOCKS_PORT \" || true"
 
 
-# fresh run 20261119T025056 (0.4.21: quick exit switching, exit problem notes, home layout; each attempt is a new run)
+# fresh run 20261119T033859 (0.4.22: exits dialed by the computer itself; each attempt is a new run)
