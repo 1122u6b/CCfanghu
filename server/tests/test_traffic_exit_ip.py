@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gateway import Gateway, make_certificate
+from gateway import Gateway
 from management import CHINA, Management
 from upstream_kernel import free_port
 
@@ -112,7 +112,17 @@ class ExitAddressThroughTheExit(unittest.IsolatedAsyncioTestCase):
     and records the address the connection came from."""
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory(); root = Path(self.tmp.name)
-        make_certificate(root / 'g.crt', root / 'g.key', '127.0.0.1')
+        # Same self-signed certificate setup as the other gateway tests (no openssl command: works on Windows too).
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.x509.oid import NameOID
+        key = ec.generate_private_key(ec.SECP256R1()); name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, '127.0.0.1')])
+        now = datetime.datetime.now(datetime.timezone.utc)
+        cert = x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key()).serial_number(x509.random_serial_number()) \
+            .not_valid_before(now - datetime.timedelta(minutes=1)).not_valid_after(now + datetime.timedelta(hours=1)).sign(key, hashes.SHA256())
+        (root / 'g.crt').write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+        (root / 'g.key').write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
         self.port = free_port()
         self.gateway = Gateway({'data_dir': self.tmp.name, 'cert': str(root / 'g.crt'), 'key': str(root / 'g.key'), 'public_host': '127.0.0.1',
                                 'port': self.port, 'listen': '127.0.0.1', 'client_user': 'o', 'client_password': 'p', 'api_token': 't', 'fingerprint': 'f',
