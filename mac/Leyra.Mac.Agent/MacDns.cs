@@ -29,7 +29,7 @@ static class MacDns
  public static void Apply()
  {
   // Remember the customer's own settings once (a second Apply must not save 127.0.0.1 as "before").
-  if(!File.Exists(Saved))AgentStore.Atomic(Saved,JsonSerializer.SerializeToUtf8Bytes(Services().ToDictionary(s=>s,Current)));
+  if(!File.Exists(Saved))AgentStore.Atomic(Saved,Leyra.Windows.Core.LeyraJson.ToUtf8(Services().ToDictionary(s=>s,Current)));
   foreach(var s in Services())Run("-setdnsservers",s,"127.0.0.1");
   Flush();
  }
@@ -38,7 +38,7 @@ static class MacDns
   if(!File.Exists(Saved))return;
   try
   {
-   var before=JsonSerializer.Deserialize<Dictionary<string,string[]>>(File.ReadAllBytes(Saved))??[];
+   var before=System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(Saved),AgentJson.Default.DictionaryStringStringArray)??[];
    foreach(var s in Services())
    {
     var now=Current(s);if(!(now.Length==1&&now[0]=="127.0.0.1"))continue;   // changed by the customer since: leave it

@@ -8,7 +8,7 @@ namespace Leyra.Mac.Agent;
 static class BrowserPolicies
 {
  static readonly string[] Domains={"/Library/Managed Preferences/com.google.Chrome","/Library/Managed Preferences/com.microsoft.Edge"};
- [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] record Prior(string Domain,string Name,string? Value);
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] internal record Prior(string Domain,string Name,string? Value);
  static string FileName=>Path.Combine(AgentStore.Root,"browser-policies.json");
  static (int Code,string Out) Defaults(params string[] args)
  {
@@ -22,7 +22,7 @@ static class BrowserPolicies
  {
   Directory.CreateDirectory("/Library/Managed Preferences");
   if(!File.Exists(FileName))
-   AgentStore.Atomic(FileName,JsonSerializer.SerializeToUtf8Bytes(Domains.SelectMany(d=>new[]{"WebRtcIPHandling","QuicAllowed"}.Select(n=>new Prior(d,n,Read(d,n)))).ToList()));
+   AgentStore.Atomic(FileName,Leyra.Windows.Core.LeyraJson.ToUtf8(Domains.SelectMany(d=>new[]{"WebRtcIPHandling","QuicAllowed"}.Select(n=>new Prior(d,n,Read(d,n)))).ToList()));
   foreach(var d in Domains)
   {
    if(Defaults("write",d,"WebRtcIPHandling","-string","disable_non_proxied_udp").Code!=0||Defaults("write",d,"QuicAllowed","-bool","false").Code!=0)throw new IOException("无法设置浏览器策略");
@@ -33,7 +33,7 @@ static class BrowserPolicies
  public static void Restore()
  {
   if(!File.Exists(FileName))return;
-  var prior=JsonSerializer.Deserialize<List<Prior>>(File.ReadAllBytes(FileName))??throw new InvalidDataException("浏览器策略恢复记录无效");
+  var prior=System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(FileName),AgentJson.Default.ListPrior)??throw new InvalidDataException("浏览器策略恢复记录无效");
   foreach(var item in prior)
   {
    if(!Domains.Contains(item.Domain)||item.Name is not ("WebRtcIPHandling" or "QuicAllowed"))throw new InvalidDataException("浏览器策略恢复项无效");

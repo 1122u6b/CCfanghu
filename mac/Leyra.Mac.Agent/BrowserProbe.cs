@@ -72,7 +72,7 @@ sealed class BrowserProbe(Func<string,string?,IReadOnlyList<(string Ip,string Ty
     }
    lock(pending)pending.Remove(parts[1]);
    var verdict=report(browser,seen,candidates);
-   await Reply(stream,200,"application/json",JsonSerializer.Serialize(verdict),deadline.Token);return;
+   await Reply(stream,200,"application/json",Leyra.Windows.Core.LeyraJson.ToText(verdict),deadline.Token);return;
   }
   await Reply(stream,405,"text/plain","method not allowed",deadline.Token);
  }
@@ -125,7 +125,7 @@ sealed class BrowserProbe(Func<string,string?,IReadOnlyList<(string Ip,string Ty
  Promise.all([ipDone,iceDone]).then(send);setTimeout(send,22000);
 })();
 </script>
-""".Replace("__NONCE__",JsonSerializer.Serialize(nonce)));
+""".Replace("__NONCE__",Leyra.Windows.Core.LeyraJson.ToText(nonce)));
  public void Dispose(){stop?.Cancel();listener?.Stop();stop?.Dispose();}
 }
 

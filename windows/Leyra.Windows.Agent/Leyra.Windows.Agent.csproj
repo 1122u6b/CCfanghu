@@ -3,10 +3,16 @@
   <OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework>
   <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><PlatformTarget>x64</PlatformTarget>
   <AssemblyName>Leyra.Agent</AssemblyName>
+  <!-- Compiled to machine code when published (no readable IL ships). JSON is written by LeyraJson and read through
+       source-generated AgentJson; run-time JSON reflection stays off so nothing relies on it. -->
+  <PublishAot>true</PublishAot><JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
  </PropertyGroup>
  <ItemGroup>
   <ProjectReference Include="../Leyra.Windows.Core/Leyra.Windows.Core.csproj" />
   <ProjectReference Include="../Leyra.Windows.Platform/Leyra.Windows.Platform.csproj" />
   <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
+  <!-- LeyraJson reads the properties of Leyra's own objects: keep them all in the machine-code build. -->
+  <TrimmerRootAssembly Include="Leyra.Agent" /><TrimmerRootAssembly Include="Leyra.Windows.Core" /><TrimmerRootAssembly Include="Leyra.Windows.Platform" />
  </ItemGroup>
 </Project>

@@ -6,7 +6,7 @@ namespace Leyra.Windows.Agent;
 static class BrowserPolicies
 {
  static readonly string[] Paths={@"SOFTWARE\Policies\Google\Chrome",@"SOFTWARE\Policies\Microsoft\Edge"};
- [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] record Prior(string Path,string Name,bool Present,RegistryValueKind Kind,object? Value);
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] internal record Prior(string Path,string Name,bool Present,RegistryValueKind Kind,object? Value);
  static string FileName=>Path.Combine(AgentStore.Root,"browser-policies.json");
  public static object Install()
  {
@@ -15,7 +15,7 @@ static class BrowserPolicies
    var prior=new List<Prior>();
    foreach(var path in Paths)using(var key=Registry.LocalMachine.OpenSubKey(path))foreach(var name in new[]{"WebRtcIPHandling","QuicAllowed"})
    {var present=key?.GetValueNames().Contains(name)==true;prior.Add(new(path,name,present,present?key!.GetValueKind(name):RegistryValueKind.String,present?key!.GetValue(name):null));}
-   AgentStore.Atomic(FileName,JsonSerializer.SerializeToUtf8Bytes(prior));
+   AgentStore.Atomic(FileName,Leyra.Windows.Core.LeyraJson.ToUtf8(prior));
   }
   foreach(var path in Paths)using(var key=Registry.LocalMachine.CreateSubKey(path)){key.SetValue("WebRtcIPHandling","disable_non_proxied_udp",RegistryValueKind.String);key.SetValue("QuicAllowed",0,RegistryValueKind.DWord);}
   return new{saved=true,restart_browser_required=true};
@@ -23,7 +23,7 @@ static class BrowserPolicies
  public static void Restore()
  {
   if(!File.Exists(FileName))return;
-  var prior=JsonSerializer.Deserialize<List<Prior>>(System.IO.File.ReadAllBytes(FileName))??throw new InvalidDataException("浏览器策略恢复记录无效");
+  var prior=System.Text.Json.JsonSerializer.Deserialize(System.IO.File.ReadAllBytes(FileName),AgentJson.Default.ListPrior)??throw new InvalidDataException("浏览器策略恢复记录无效");
   foreach(var item in prior)
   {
    if(!Paths.Contains(item.Path)||item.Name is not ("WebRtcIPHandling" or "QuicAllowed"))throw new InvalidDataException("浏览器策略恢复项无效");

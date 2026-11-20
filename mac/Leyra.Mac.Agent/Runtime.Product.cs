@@ -284,7 +284,7 @@ sealed partial class Runtime
  string[] ConflictImages(string id)
  {
   RefreshConflicts(true);
-  var item=conflicts.Select(x=>JsonSerializer.SerializeToElement(x)).FirstOrDefault(x=>Text(x,"id")==id);
+  var item=conflicts.Select(x=>Leyra.Windows.Core.LeyraJson.ToElement(x)).FirstOrDefault(x=>Text(x,"id")==id);
   if(item.ValueKind!=JsonValueKind.Object)throw new InvalidOperationException("它已经退出了");
   if(!item.TryGetProperty("quit",out var quit)||quit.ValueKind!=JsonValueKind.Object||!quit.TryGetProperty("images",out var images))throw new InvalidOperationException("这一项不能自动退出，请手动处理");
   var owner=quit.TryGetProperty("owner",out var o)&&o.ValueKind==JsonValueKind.True;
@@ -297,7 +297,7 @@ sealed partial class Runtime
   // shares a name (python, node...) is never ended.
   string? folder=null;
   if(id.StartsWith("proxy-owner-",StringComparison.Ordinal))
-   folder=conflicts.Select(x=>JsonSerializer.SerializeToElement(x)).Where(x=>Text(x,"id")==id).Select(x=>Path.GetDirectoryName(Text(x,"evidence"))).FirstOrDefault();
+   folder=conflicts.Select(x=>Leyra.Windows.Core.LeyraJson.ToElement(x)).Where(x=>Text(x,"id")==id).Select(x=>Path.GetDirectoryName(Text(x,"evidence"))).FirstOrDefault();
   foreach(var image in images)foreach(var p in Process.GetProcessesByName(image))using(p)
   {
    try{var path=p.MainModule?.FileName;if(path is not null&&string.Equals(Path.GetFullPath(path),own,StringComparison.OrdinalIgnoreCase))continue;
@@ -468,9 +468,9 @@ sealed partial class Runtime
   lastBypassScan=DateTimeOffset.UtcNow;
   try
   {
-   var result=ScanBypass();var before=bypassCheck is null?"":JsonSerializer.Serialize(bypassCheck);bypassCheck=result;
-   var element=JsonSerializer.SerializeToElement(result);
-   if(Text(element,"verdict")=="fail"&&JsonSerializer.Serialize(result)!=before)Record("bypass",Text(element,"detail").Split('：').Last());
+   var result=ScanBypass();var before=bypassCheck is null?"":Leyra.Windows.Core.LeyraJson.ToText(bypassCheck);bypassCheck=result;
+   var element=Leyra.Windows.Core.LeyraJson.ToElement(result);
+   if(Text(element,"verdict")=="fail"&&Leyra.Windows.Core.LeyraJson.ToText(result)!=before)Record("bypass",Text(element,"detail").Split('：').Last());
   }
   catch(Exception e)when(e is System.ComponentModel.Win32Exception or NetworkInformationException or InvalidOperationException){}
  }

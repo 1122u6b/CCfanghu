@@ -8,7 +8,7 @@ public static class PipeProtocol
  public const int MaximumFrame=1024*1024;
  public static async Task WriteAsync(Stream stream,object value,CancellationToken cancellation=default)
  {
-  var payload=JsonSerializer.SerializeToUtf8Bytes(value);
+  var payload=Leyra.Windows.Core.LeyraJson.ToUtf8(value);
   if(payload.Length==0 || payload.Length>MaximumFrame)throw new InvalidDataException("本机通信内容超过上限");
   var header=new byte[4];BinaryPrimitives.WriteInt32LittleEndian(header,payload.Length);
   await stream.WriteAsync(header,cancellation);await stream.WriteAsync(payload,cancellation);await stream.FlushAsync(cancellation);

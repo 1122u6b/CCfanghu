@@ -11,13 +11,13 @@ namespace Leyra.Windows.Agent;
 sealed partial class Runtime:IDisposable
 {
  readonly SystemProxy proxy;readonly CoexistProxy coexistProxy;readonly AgentStore store;readonly SemaphoreSlim gate=new(1,1);readonly KernelSession kernel=new();readonly WfpEngine filters=new();readonly OwnerProof ownerProof=new();
- ServerProfile? profile;PrivateServerClient? cloud;JsonElement nodes=JsonSerializer.SerializeToElement(Array.Empty<object>());
+ ServerProfile? profile;PrivateServerClient? cloud;JsonElement nodes=Leyra.Windows.Core.LeyraJson.ToElement(Array.Empty<object>());
  string state="starting",reason="route",lastError="",exitIp="",selected="",mode="auto";
  int? exitCount;DateTimeOffset exitAskAt=DateTimeOffset.MinValue;
  DateTimeOffset heartbeat=DateTimeOffset.MinValue,lastHealth=DateTimeOffset.MinValue,guardSince=DateTimeOffset.MinValue;
  bool configured,dnsVerified,exitVerified;long up,down;ulong tunnel;
  [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] sealed record Snapshot(JsonElement Data,DateTimeOffset Heartbeat,bool Protected);
- volatile Snapshot snapshot=new(JsonSerializer.SerializeToElement(new{version=Program.Version,protection=new{state="starting"}}),DateTimeOffset.MinValue,false);
+ volatile Snapshot snapshot=new(Leyra.Windows.Core.LeyraJson.ToElement(new{version=Program.Version,protection=new{state="starting"}}),DateTimeOffset.MinValue,false);
  DateTimeOffset retryAt=DateTimeOffset.MinValue;int failures;
  long? licenseExpiresAt; // unix seconds; null = bought out (never expires) or not known yet
  DateTimeOffset expiryCheckAt=DateTimeOffset.MinValue;
@@ -43,7 +43,7 @@ sealed partial class Runtime:IDisposable
   this.store=store;proxy=new SystemProxy(store.Owner);coexistProxy=new CoexistProxy(store.Owner);profile=store.Profile();if(profile is not null)cloud=new PrivateServerClient(profile);
   probe=new BrowserProbe(BrowserReport);Publish();
  }
- static JsonElement Json(object value)=>JsonSerializer.SerializeToElement(value);
+ static JsonElement Json(object value)=>Leyra.Windows.Core.LeyraJson.ToElement(value);
  static string Text(JsonElement value,string field,string fallback="")=>value.TryGetProperty(field,out var v)&&v.ValueKind==JsonValueKind.String?v.GetString()??fallback:fallback;
  static bool Bool(JsonElement value,string field,bool fallback=false)=>value.TryGetProperty(field,out var v)&&v.ValueKind is JsonValueKind.True or JsonValueKind.False?v.GetBoolean():fallback;
  void Record(string kind,string detail="")
@@ -145,7 +145,7 @@ sealed partial class Runtime:IDisposable
     {"proxies",upstream.Type=="direct"?Array.Empty<object>():new object[]{new Dictionary<string,object>{{"name","本机原代理"},{"type",upstream.Type},{"server","127.0.0.1"},{"port",upstream.Port},{"udp",false}}}},
     {"rules",reject.Append(upstream.Type=="direct"?"MATCH,DIRECT":"MATCH,本机原代理").ToArray()},{"dns",new{enable=false}},{"tun",new{enable=false}}};
    using var limit=new CancellationTokenSource(TimeSpan.FromSeconds(15));
-   kernel.Start(JsonSerializer.SerializeToUtf8Bytes(hold),limit.Token).GetAwaiter().GetResult();
+   kernel.Start(Leyra.Windows.Core.LeyraJson.ToUtf8(hold),limit.Token).GetAwaiter().GetResult();
    coexistProxy.Take();
   }
   catch(Exception e)when(e is not OutOfMemoryException){Program.Log("coexist holding configuration",e);}
@@ -212,7 +212,7 @@ sealed partial class Runtime:IDisposable
    var built=System.Text.Json.Nodes.JsonNode.Parse(MihomoConfiguration.Build(nodes,kernel.Secret,false,null,store.Settings.DirectRules,mux,store.Settings.ProxyDomains))!.AsObject();
    if(upstream.Type!="direct")
    {
-    ((System.Text.Json.Nodes.JsonArray)built["proxies"]!).Add(new System.Text.Json.Nodes.JsonObject{["name"]="本机原代理",["type"]=upstream.Type,["server"]="127.0.0.1",["port"]=upstream.Port,["udp"]=false});
+    ((System.Text.Json.Nodes.JsonArray)built["proxies"]!).Add((System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject{["name"]="本机原代理",["type"]=upstream.Type,["server"]="127.0.0.1",["port"]=upstream.Port,["udp"]=false});
     var rules=(System.Text.Json.Nodes.JsonArray)built["rules"]!;rules[rules.Count-1]="MATCH,本机原代理";
    }
    // Claude's programs are held by program here too (they may only reach Leyra; the firewall rules below).
@@ -604,10 +604,10 @@ sealed partial class Runtime:IDisposable
   var region=exitGeo is not null&&exitGeoFor==exitIp?exitGeo.Label:"";var speed=lastSpeed is {} s?new{down_bps=s.Down,ago_secs=(long)(DateTimeOffset.UtcNow-s.At).TotalSeconds,measured=true}:null;
   var lines=nodes.ValueKind==JsonValueKind.Array?nodes.EnumerateArray().Select((node,i)=>{var name=Text(node,"name");var q=Quality(name);return new{id=(i+1).ToString(),label=(i+1)+" · "+(name.Length>0?name:"自有线路"),region,exit_ip=exitIp,latency_ms=q.Latency,success_pct=q.Success,signal=q.Signal,speed=name==selected||nodes.GetArrayLength()==1?speed:null};}).ToArray():[];
   object? last;lock(checkHistory)last=checkHistory.FirstOrDefault();
-  var lastCheck=last is null?(JsonElement?)null:JsonSerializer.SerializeToElement(last);
+  var lastCheck=last is null?(JsonElement?)null:Leyra.Windows.Core.LeyraJson.ToElement(last);
   var index=nodes.ValueKind==JsonValueKind.Array?nodes.EnumerateArray().Select((x,i)=>(Name:Text(x,"name"),Index:i+1)).FirstOrDefault(x=>x.Name==selected).Index:0;
   var remaining=Math.Max(0,store.Settings.PausedUntil-DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-  return new{version=Program.Version,coexist,consent_version=store.Settings.ConsentVersion,protection=new{state=visible,reason,remaining_secs=remaining,auto_resume_on_node=false,quit=store.Settings.QuitPause,off=visible=="paused"&&!store.Settings.Enabled,blocked=visible=="blocked",since_secs=0},lines,current_line=index==0?"1":index.ToString(),line_mode=new{mode},rate=visible=="protected"?new{up_bps=up,down_bps=down}:null,guard=visible=="protected"?new{since=guardSince.ToUnixTimeSeconds(),blocked=(int?)null}:null,checks=bypassCheck is not null&&visible=="protected"&&JsonSerializer.SerializeToElement(bypassCheck).GetProperty("verdict").GetString()=="fail"?new[]{bypassCheck}:Array.Empty<object>(),conflicts,proxy_undo=proxy.UndoAvailable,last_error=lastError,update=updateReady,update_at_boot=store.Settings.UpdateAtBoot,auto_exit=store.Settings.AutoSwitchExit,last_failover=lastFailover,listed=store.Settings.ProxyOnlyListed,mode_offer=store.Settings.ModeChosen!=true,holding,shared_vpn=coexist?foreignTunnel:null,proxy_fight=coexist&&proxyRetakes.Count(t=>DateTimeOffset.UtcNow-t<TimeSpan.FromMinutes(2))>3,last_check=lastCheck is JsonElement lc?new{at=lc.GetProperty("at").GetInt64(),kind=Text(lc,"kind"),problems=lc.GetProperty("problems").GetInt32()}:null};
+  return new{version=Program.Version,coexist,consent_version=store.Settings.ConsentVersion,protection=new{state=visible,reason,remaining_secs=remaining,auto_resume_on_node=false,quit=store.Settings.QuitPause,off=visible=="paused"&&!store.Settings.Enabled,blocked=visible=="blocked",since_secs=0},lines,current_line=index==0?"1":index.ToString(),line_mode=new{mode},rate=visible=="protected"?new{up_bps=up,down_bps=down}:null,guard=visible=="protected"?new{since=guardSince.ToUnixTimeSeconds(),blocked=(int?)null}:null,checks=bypassCheck is not null&&visible=="protected"&&Leyra.Windows.Core.LeyraJson.ToElement(bypassCheck).GetProperty("verdict").GetString()=="fail"?new[]{bypassCheck}:Array.Empty<object>(),conflicts,proxy_undo=proxy.UndoAvailable,last_error=lastError,update=updateReady,update_at_boot=store.Settings.UpdateAtBoot,auto_exit=store.Settings.AutoSwitchExit,last_failover=lastFailover,listed=store.Settings.ProxyOnlyListed,mode_offer=store.Settings.ModeChosen!=true,holding,shared_vpn=coexist?foreignTunnel:null,proxy_fight=coexist&&proxyRetakes.Count(t=>DateTimeOffset.UtcNow-t<TimeSpan.FromMinutes(2))>3,last_check=lastCheck is JsonElement lc?new{at=lc.GetProperty("at").GetInt64(),kind=Text(lc,"kind"),problems=lc.GetProperty("problems").GetInt32()}:null};
  }
  string writtenState="";
  void Publish()
@@ -661,7 +661,7 @@ sealed partial class Runtime:IDisposable
    switch(type)
    {
     case "pair":
-     NeedOwner(request);await PairWith(ServerProfile.Parse(JsonSerializer.SerializeToUtf8Bytes(request.GetProperty("profile"))),stop);return new{saved=true};
+     NeedOwner(request);await PairWith(ServerProfile.Parse(Leyra.Windows.Core.LeyraJson.ToUtf8(request.GetProperty("profile"))),stop);return new{saved=true};
     case "activate":case "restore":
      // One authorization code = one computer: the server binds the code to this hardware ID.
      var watch=System.Diagnostics.Stopwatch.StartNew();
@@ -789,13 +789,13 @@ sealed partial class Runtime:IDisposable
   else
   {
    using var http=new HttpClient(new HttpClientHandler{AllowAutoRedirect=false,UseProxy=false}){Timeout=TimeSpan.FromSeconds(20)};
-   using var response=await http.PostAsync(ActivationUrl,new StringContent(JsonSerializer.Serialize(body),System.Text.Encoding.UTF8,"application/json"),stop);
+   using var response=await http.PostAsync(ActivationUrl,new StringContent(Leyra.Windows.Core.LeyraJson.ToText(body),System.Text.Encoding.UTF8,"application/json"),stop);
    var bytes=await response.Content.ReadAsByteArrayAsync(stop);if(bytes.Length>2*1024*1024)throw new InvalidDataException("服务器响应过大");
    using var doc=JsonDocument.Parse(bytes);
    if(!response.IsSuccessStatusCode)throw new InvalidOperationException(doc.RootElement.TryGetProperty("detail",out var d)&&d.ValueKind==JsonValueKind.String&&d.GetString()!.Length<=200?d.GetString():"激活失败，请稍后再试");
    result=doc.RootElement.Clone();
   }
-  return ServerProfile.Parse(JsonSerializer.SerializeToUtf8Bytes(result.GetProperty("profile")));
+  return ServerProfile.Parse(Leyra.Windows.Core.LeyraJson.ToUtf8(result.GetProperty("profile")));
  }
  void ReadRules(JsonElement result)
  {

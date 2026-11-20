@@ -39,14 +39,14 @@ sealed class AgentStore
  public AgentStore()
  {
   Owner=new SecurityIdentifier(File.ReadAllText(Path.Combine(Root,"owner.sid")).Trim());
-  Settings=File.Exists(Path.Combine(Root,"state.json"))?JsonSerializer.Deserialize<AgentSettings>(File.ReadAllBytes(Path.Combine(Root,"state.json")))??throw new InvalidDataException("本机状态文件无效"):new(){ProxyOnlyListed=true,ModeChosen=true}; // a new install: only Claude through the exit
+  Settings=File.Exists(Path.Combine(Root,"state.json"))?System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(Path.Combine(Root,"state.json")),AgentJson.Default.AgentSettings)??throw new InvalidDataException("本机状态文件无效"):new(){ProxyOnlyListed=true,ModeChosen=true}; // a new install: only Claude through the exit
   if(Settings.Schema!=1 || Settings.DirectRules.Count>64)throw new InvalidDataException("本机状态版本无效");
   Settings.DirectRules=Settings.DirectRules.Select(r=>DirectRule.Parse(r.Cidr,r.Note,r.Public)).ToList();
   try{Settings.ProxyDomains=Leyra.Windows.Core.MihomoConfiguration.ProxyDomains(Settings.ProxyDomains??[]).ToList();}
   catch(InvalidDataException){Settings.ProxyDomains=[..Leyra.Windows.Core.MihomoConfiguration.DefaultProxyDomains];}
  }
  public ServerProfile? Profile()=>File.Exists(ProfileFile)?ServerProfile.Parse(File.ReadAllBytes(ProfileFile)):null;
- public void Save()=>Atomic(Path.Combine(Root,"state.json"),JsonSerializer.SerializeToUtf8Bytes(Settings));
+ public void Save()=>Atomic(Path.Combine(Root,"state.json"),Leyra.Windows.Core.LeyraJson.ToUtf8(Settings));
  public void SetProfile(ServerProfile profile)=>Atomic(ProfileFile,profile.Encode());
  public static void Atomic(string path,byte[] bytes)
  {

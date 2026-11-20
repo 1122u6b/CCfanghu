@@ -30,7 +30,7 @@ namespace Leyra.Windows.Core;
         if (role=="device" && !Guid.TryParse(id,out _)) throw new InvalidDataException("设备编号无效");
         return new(host,port,token,certificate,fingerprint,role,id);
     }
-    public byte[] Encode() => JsonSerializer.SerializeToUtf8Bytes(new {leyra_server=new {host=Host,port=Port,token=Token,certificate=Certificate,fingerprint=Fingerprint,role=Role,device_id=DeviceId}});
+    public byte[] Encode() => Leyra.Windows.Core.LeyraJson.ToUtf8(new {leyra_server=new {host=Host,port=Port,token=Token,certificate=Certificate,fingerprint=Fingerprint,role=Role,device_id=DeviceId}});
     public bool AcceptCertificate(X509Certificate2? cert,DateTimeOffset now) => cert is not null && now>=cert.NotBefore.ToUniversalTime() && now<=cert.NotAfter.ToUniversalTime() && CryptographicOperations.FixedTimeEquals(SHA256.HashData(cert.RawData),Convert.FromHexString(Fingerprint));
 }
 

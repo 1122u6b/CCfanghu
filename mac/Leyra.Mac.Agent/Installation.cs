@@ -24,7 +24,7 @@ static class Installation
    var state=Path.Combine(AgentStore.Root,"state.json");
    if(File.Exists(state))
    {
-    var s=System.Text.Json.JsonSerializer.Deserialize<AgentSettings>(File.ReadAllBytes(state));
+    var s=System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(state),AgentJson.Default.AgentSettings);
     if(s?.OriginalTimezone is { Length: >0 } tz)SystemClock.SetTimezone(tz,CancellationToken.None).GetAwaiter().GetResult();
    }
   }

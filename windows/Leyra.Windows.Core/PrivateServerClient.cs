@@ -27,7 +27,7 @@ public sealed class PrivateServerClient : IDisposable
         using var request=new HttpRequestMessage(body is null ? HttpMethod.Get : HttpMethod.Post,profile.Address(path));
         if (body is not null)
         {
-            var encoded=JsonSerializer.SerializeToUtf8Bytes(body);
+            var encoded=Leyra.Windows.Core.LeyraJson.ToUtf8(body);
             if (encoded.Length>131072) throw new InvalidDataException("请求超过上限");
             request.Content=new ByteArrayContent(encoded);request.Content.Headers.ContentType=new MediaTypeHeaderValue("application/json");
         }

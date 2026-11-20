@@ -11,7 +11,7 @@ namespace Leyra.Mac.Agent;
 static class CoexistProxy
 {
  public const int LocalPort=17890;
- [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] record Setting(string Service,string Kind,bool On,string Server,int Port);
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] internal record Setting(string Service,string Kind,bool On,string Server,int Port);
  [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] public record Upstream(string Type,int Port);
  static string Saved=>Path.Combine(AgentStore.Root,"proxy-before.json");
  static readonly string[] Kinds=["webproxy","securewebproxy","socksfirewallproxy"];
@@ -74,7 +74,7 @@ static class CoexistProxy
  /// <summary>The customer's own local proxy: from the saved settings while Leyra is in front, else from the system.</summary>
  public static Upstream? Find()
  {
-  var list=Taken?JsonSerializer.Deserialize<List<Setting>>(File.ReadAllBytes(Saved))??[]:Current();
+  var list=Taken?System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(Saved),AgentJson.Default.ListSetting)??[]:Current();
   var http=list.FirstOrDefault(s=>Local(s)&&s.Kind is "webproxy" or "securewebproxy");
   if(http is not null)return new("http",http.Port);
   var socks=list.FirstOrDefault(s=>Local(s)&&s.Kind=="socksfirewallproxy");
@@ -87,7 +87,7 @@ static class CoexistProxy
  /// <summary>Leyra's local proxy becomes the system proxy (HTTP, HTTPS and SOCKS) on every network service.</summary>
  public static void Take()
  {
-  if(!Taken)AgentStore.Atomic(Saved,JsonSerializer.SerializeToUtf8Bytes(Current()));
+  if(!Taken)AgentStore.Atomic(Saved,Leyra.Windows.Core.LeyraJson.ToUtf8(Current()));
   foreach(var s in Services())
   {
    foreach(var k in Kinds)Run("-set"+k,s,"127.0.0.1",LocalPort.ToString());
@@ -105,7 +105,7 @@ static class CoexistProxy
   if(!Taken)return;
   try
   {
-   var before=JsonSerializer.Deserialize<List<Setting>>(File.ReadAllBytes(Saved))??[];
+   var before=System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(Saved),AgentJson.Default.ListSetting)??[];
    foreach(var s in before)
    {
     if(s.Kind=="autoproxy")

@@ -12,7 +12,7 @@ sealed class CoexistProxy(SecurityIdentifier owner)
 {
  public const int LocalPort=17890;
  [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] public record Upstream(string Type,int Port);
- [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] record Saved(int? ProxyEnable,string? ProxyServer,string? ProxyOverride,string? AutoConfigURL);
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] internal record Saved(int? ProxyEnable,string? ProxyServer,string? ProxyOverride,string? AutoConfigURL);
  const string Suffix=@"\Software\Microsoft\Windows\CurrentVersion\Internet Settings";
  static string SavedPath=>Path.Combine(AgentStore.Root,"proxy-before.json");
  RegistryKey Open(bool write)=>Registry.Users.OpenSubKey(owner.Value+Suffix,write)??throw new InvalidOperationException("当前桌面用户的网络设置不可用");
@@ -60,7 +60,7 @@ sealed class CoexistProxy(SecurityIdentifier owner)
  {
   try
   {
-   if(Taken){var s=JsonSerializer.Deserialize<Saved>(File.ReadAllBytes(SavedPath));return s is null?null:Parse(s.ProxyEnable,s.ProxyServer)??FromPac(s.AutoConfigURL);}
+   if(Taken){var s=System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(SavedPath),AgentJson.Default.Saved);return s is null?null:Parse(s.ProxyEnable,s.ProxyServer)??FromPac(s.AutoConfigURL);}
    using var key=Open(false);return Parse(key.GetValue("ProxyEnable") as int?,key.GetValue("ProxyServer") as string)??FromPac(key.GetValue("AutoConfigURL") as string);
   }
   catch(Exception e)when(e is InvalidOperationException or JsonException or IOException){return null;}
@@ -68,7 +68,7 @@ sealed class CoexistProxy(SecurityIdentifier owner)
  public void Take()
  {
   using var key=Open(true);
-  if(!Taken)AgentStore.Atomic(SavedPath,JsonSerializer.SerializeToUtf8Bytes(new Saved(key.GetValue("ProxyEnable") as int?,key.GetValue("ProxyServer") as string,key.GetValue("ProxyOverride") as string,key.GetValue("AutoConfigURL") as string)));
+  if(!Taken)AgentStore.Atomic(SavedPath,Leyra.Windows.Core.LeyraJson.ToUtf8(new Saved(key.GetValue("ProxyEnable") as int?,key.GetValue("ProxyServer") as string,key.GetValue("ProxyOverride") as string,key.GetValue("AutoConfigURL") as string)));
   key.SetValue("ProxyEnable",1,RegistryValueKind.DWord);key.SetValue("ProxyServer","127.0.0.1:"+LocalPort,RegistryValueKind.String);key.DeleteValue("AutoConfigURL",false);
   if(key.GetValue("ProxyOverride") is not string)key.SetValue("ProxyOverride","<local>",RegistryValueKind.String);
  }
@@ -83,7 +83,7 @@ sealed class CoexistProxy(SecurityIdentifier owner)
   if(!Taken)return;
   try
   {
-   var s=JsonSerializer.Deserialize<Saved>(File.ReadAllBytes(SavedPath));
+   var s=System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(SavedPath),AgentJson.Default.Saved);
    using var key=Open(true);
    void Put(string name,object? value,RegistryValueKind kind){if(value is null)key.DeleteValue(name,false);else key.SetValue(name,value,kind);}
    Put("ProxyEnable",s?.ProxyEnable,RegistryValueKind.DWord);Put("ProxyServer",s?.ProxyServer,RegistryValueKind.String);

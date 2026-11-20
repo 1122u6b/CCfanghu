@@ -70,7 +70,7 @@ sealed class KernelSession:IDisposable
  }
  public async Task Select(string name,CancellationToken stop)
  {
-  using var request=new HttpRequestMessage(HttpMethod.Put,"proxies/"+Uri.EscapeDataString("出口")){Content=new StringContent(JsonSerializer.Serialize(new{name}),System.Text.Encoding.UTF8,"application/json")};
+  using var request=new HttpRequestMessage(HttpMethod.Put,"proxies/"+Uri.EscapeDataString("出口")){Content=new StringContent(Leyra.Windows.Core.LeyraJson.ToText(new{name}),System.Text.Encoding.UTF8,"application/json")};
   using var response=await controller.SendAsync(request,stop);response.EnsureSuccessStatusCode();
  }
  public async Task<(long Up,long Down)> Rates(CancellationToken stop)

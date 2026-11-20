@@ -6,9 +6,14 @@
   <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   <AssemblyName>leyra-agent</AssemblyName><RootNamespace>Leyra.Mac.Agent</RootNamespace>
   <RuntimeIdentifiers>osx-arm64;osx-x64</RuntimeIdentifiers>
-  
+  <!-- Compiled to machine code when published (no .NET runtime or readable IL ships). JSON is written by LeyraJson and
+       read through source-generated AgentJson; run-time JSON reflection stays off so nothing relies on it. -->
+  <PublishAot>true</PublishAot><JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  <StripSymbols>true</StripSymbols><IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
  </PropertyGroup>
  <ItemGroup>
   <ProjectReference Include="../../windows/Leyra.Windows.Core/Leyra.Windows.Core.csproj" />
+  <!-- LeyraJson reads the properties of Leyra's own objects: keep them all in the machine-code build. -->
+  <TrimmerRootAssembly Include="leyra-agent" /><TrimmerRootAssembly Include="Leyra.Windows.Core" />
  </ItemGroup>
 </Project>

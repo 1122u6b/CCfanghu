@@ -106,10 +106,10 @@ public static class MihomoConfiguration
     var fast=copy.DeepClone().AsObject();var plain=copy;
     fast["name"]=Unique(label+" · 复用");plain["name"]=Unique(label+" · 标准");
     fast["smux"]=new JsonObject{["enabled"]=true,["protocol"]="yamux",["max-connections"]=4,["min-streams"]=4,["only-tcp"]=true};
-    list.Add(fast);list.Add(plain);
+    list.Add((JsonNode)fast);list.Add((JsonNode)plain);
     muxGroups.Add(new Dictionary<string,object>{{"name",label},{"type","fallback"},{"proxies",new[]{fast["name"]!.GetValue<string>(),plain["name"]!.GetValue<string>()}},{"url","https://www.gstatic.com/generate_204"},{"interval",10},{"timeout",3000},{"lazy",false}});
    }
-   else{copy["name"]=label;list.Add(copy);}
+   else{copy["name"]=label;list.Add((JsonNode)copy);}
    var ip=node.GetProperty("server").GetString()!;endpoints.Add(ip+(ip.Contains(':')?"/128":"/32"));
   }
   var groups=new object[]{new Dictionary<string,object>{{"name","出口"},{"type","select"},{"proxies",new[]{"自动选择"}.Concat(labelList).ToArray()}},new Dictionary<string,object>{{"name","自动选择"},{"type","url-test"},{"proxies",labelList},{"url","https://www.gstatic.com/generate_204"},{"interval",300},{"tolerance",100}}}.Concat(muxGroups).ToArray();
@@ -131,7 +131,7 @@ public static class MihomoConfiguration
    config["dns"]=dnsConfig;
   }
   else config["dns"]=new {enable=false};
-  return JsonSerializer.SerializeToUtf8Bytes(config,new JsonSerializerOptions{WriteIndented=true});
+  return Leyra.Windows.Core.LeyraJson.ToUtf8(config,true);
  }
  /// <summary>Claude's web and desktop app (sign-in check, feature flags, error reports included) always go through
  /// the exit in list and coexist modes, whatever the customer's list says: a list edit can never move Claude off it.</summary>

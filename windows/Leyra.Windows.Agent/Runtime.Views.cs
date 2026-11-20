@@ -20,7 +20,7 @@ sealed partial class Runtime
   if(profile is null)return new{activated=false};
   var account=await Remote(new{type="account"},stop);var ai=await Remote(new{type="ai_accounts"},stop);var messages=await Remote(new{type="messages"},stop);var exits=await Remote(new{type="exits"},stop);
   var help=await Remote(new{type="help"},stop);
-  var channels=help.TryGetProperty("channels",out var ch)&&ch.ValueKind==JsonValueKind.Array?ch.Clone():JsonSerializer.SerializeToElement(Array.Empty<object>());
+  var channels=help.TryGetProperty("channels",out var ch)&&ch.ValueKind==JsonValueKind.Array?ch.Clone():Leyra.Windows.Core.LeyraJson.ToElement(Array.Empty<object>());
   // Code-activated computers expire; computers set up by the owner with a connection file do not.
   long? expires=account.TryGetProperty("expires_at",out var ex)&&ex.ValueKind==JsonValueKind.Number&&ex.GetInt64()<253402300799L?ex.GetInt64():null; // bought-out codes never expire
   licenseExpiresAt=expires;
@@ -66,7 +66,7 @@ sealed partial class Runtime
   }
   catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidDataException or KeyNotFoundException){Add("E3","skipped","暂时取不到服务器时间："+e.Message);}
   RefreshConflicts(true);
-  var conflictList=conflicts.Select(x=>JsonSerializer.SerializeToElement(x)).ToArray();
+  var conflictList=conflicts.Select(x=>Leyra.Windows.Core.LeyraJson.ToElement(x)).ToArray();
   Add("E4",conflictList.Length==0?"pass":"fail",conflictList.Length==0?"没有发现其他代理、VPN 或虚拟网卡":string.Join("；",conflictList.Select(x=>Text(x,"message"))));
   Add("E5","pass","已打开 Windows 基础过滤接口");
   var filtersFound=NetworkFilterSoftware();
@@ -101,7 +101,7 @@ sealed partial class Runtime
    Add("L7",v6?"fail":"pass",v6?"IPv6 可以绕开独享线路直连公网":"电脑有公网 IPv6，直接连接已被拒绝");
   }
   else Add("L7",guarded?"pass":"skipped",guarded?"电脑没有公网 IPv6 地址":"防护规则未安装，未做 IPv6 实测");
-  if(live){lastBypassScan=DateTimeOffset.MinValue;RefreshBypass();var l8=JsonSerializer.SerializeToElement(bypassCheck??ScanBypass());Add("L8",Text(l8,"verdict"),Text(l8,"detail"));}
+  if(live){lastBypassScan=DateTimeOffset.MinValue;RefreshBypass();var l8=Leyra.Windows.Core.LeyraJson.ToElement(bypassCheck??ScanBypass());Add("L8",Text(l8,"verdict"),Text(l8,"detail"));}
   else Add("L8","skipped","防护建立后才检查绕开独享线路的程序");
   var exitZone=exitGeoFor==exitIp&&exitGeo is not null?exitGeo.Timezone:"";var zoneMatches=exitZone.Length>0&&SystemClock.Matches(exitZone);
   Add("C1",exitZone.Length==0?"skipped":zoneMatches?"pass":"warn",exitZone.Length==0?(geoLoading?"正在查询出口所在地的时区":geoError.Length>0?geoError:"尚未取得出口时区，暂时无法比对"):zoneMatches?"电脑时区已和出口所在地一致（"+exitZone+"）":"电脑时区和出口所在地（"+exitZone+"）不一致");
@@ -126,7 +126,7 @@ sealed partial class Runtime
   }
   else Add("L9","skipped","尚未执行一分钟观察");
   var identity="CK-"+DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss")+"-"+Guid.NewGuid().ToString("N")[..6];
-  var result=new{id=identity,items=items.ToArray(),at=DateTimeOffset.UtcNow.ToUnixTimeSeconds(),kind=deep?"deep":"manual",problems=items.Count(x=>JsonSerializer.SerializeToElement(x).GetProperty("verdict").GetString() is "fail" or "warn")};
+  var result=new{id=identity,items=items.ToArray(),at=DateTimeOffset.UtcNow.ToUnixTimeSeconds(),kind=deep?"deep":"manual",problems=items.Count(x=>Leyra.Windows.Core.LeyraJson.ToElement(x).GetProperty("verdict").GetString() is "fail" or "warn")};
   lock(checkHistory){checkHistory.Insert(0,result);if(checkHistory.Count>10)checkHistory.RemoveAt(10);}
   Record("check",result.problems.ToString());
   return result;
