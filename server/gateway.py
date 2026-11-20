@@ -67,6 +67,7 @@ def validate_node(o):
 # fresh by connect_any. Small on purpose: some providers cap simultaneous connections. A page opens many
 # connections at once: each time the pool runs dry it keeps one more (up to WARM_MAX), refilled all at once,
 # and gives one back for every minute without running dry.
+SHARING_WINDOW=600;SHARING_PLACES=3  # same credentials from 3+ networks within 10 minutes
 WARM_SIZE=2;WARM_MAX=6;WARM_MAX_AGE=20;WARM_IDLE_STOP=60;WARM_SHRINK=60
 _warm={}  # key -> {'conns':[(t,r,w)], 'used':t, 'task':Task|None}
 def _warm_key(o):return (o['server'],o['port'],o.get('username') or '')
@@ -193,7 +194,7 @@ class Gateway:
         # Exit address checks: nonce -> waiting future; (computer, exit) -> last attempt.
         self.exit_probes={};self.exit_probe_tried={};self.probe_tasks=set();self.exit_probe_wait=15
         # When each computer was last seen (its regular checks come every 30 s); exit health covers those online.
-        self.device_seen={};self.exit_health_every=120
+        self.device_seen={};self.device_places={};self.sharing_noted={};self.exit_health_every=120
         from upstream_kernel import KernelUpstreams,find_binary
         binary=config.get('kernel_binary') or find_binary()
         self.kernel=KernelUpstreams(Path(self.management.root)/'upstream-kernel',Path(binary) if binary else None)
@@ -495,6 +496,18 @@ class Gateway:
                 with contextlib.suppress(Exception):await asyncio.wait_for(w.wait_closed(),3)
                 if w.transport is not None:w.transport.abort()
     # ---- Exit health: every 2 minutes, the exits of computers seen in the last 5 minutes ----
+    def note_place(self,device,ip):
+        """Networks one computer's credentials come from (IPv4 /16, IPv6 /32) during the last 10 minutes."""
+        try:
+            a=ipaddress.ip_address(ip);a=getattr(a,'ipv4_mapped',None) or a
+            place=str(ipaddress.ip_network('%s/%d'%(a,16 if a.version==4 else 32),strict=False))
+        except ValueError:return
+        now=time.monotonic();places=self.__dict__.setdefault('device_places',{}).setdefault(device.id,{});places[place]=now;noted=self.__dict__.setdefault('sharing_noted',{})
+        for k in [k for k,t in places.items() if now-t>SHARING_WINDOW]:places.pop(k)
+        if len(places)>=SHARING_PLACES and now-noted.get(device.id,-1e9)>SHARING_WINDOW:
+            noted[device.id]=now
+            try:self.devices.note_sharing(device.id,len(places))
+            except Exception as e:print('sharing note failed: '+type(e).__name__,flush=True)
     def seen(self,device):
         if device is not None:self.device_seen[device.id]=time.monotonic()
     async def check_exit_health(self):
@@ -555,6 +568,7 @@ class Gateway:
             if not valid:return
             if device:
                 self.device_active[device.id]=self.device_active.get(device.id,0)+1;counted_device=True
+                if peer:=w.get_extra_info('peername'):self.note_place(device,peer[0])
             head=await exact(r,4)
             if head[:3]!=b'\x05\x01\x00':w.write(b'\x05\x07\x00\x01'+b'\x00'*6);await w.drain();return
             target=await address(r,head[3])

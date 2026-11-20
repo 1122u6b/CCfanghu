@@ -79,6 +79,7 @@ class Devices:
 CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY,name TEXT NOT NULL,secret_hash TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS probes(nonce TEXT PRIMARY KEY,device_id TEXT NOT NULL REFERENCES devices(id),expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,target TEXT NOT NULL,at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS sharing(device_id TEXT PRIMARY KEY,at INTEGER NOT NULL,places INTEGER NOT NULL);
 ''')
         os.chmod(self.path, 0o600)
         from licenses import Licenses
@@ -160,7 +161,13 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,tar
 
     def list(self):
         with self.db() as db:
-            return {'items': [dict(row) for row in db.execute('SELECT id,name,enabled,created_at FROM devices ORDER BY created_at,id')], 'license_required': False}
+            return {'items': [dict(row) for row in db.execute('SELECT d.id,d.name,d.enabled,d.created_at,s.at AS shared_at,s.places AS shared_places FROM devices d LEFT JOIN sharing s ON s.device_id=d.id ORDER BY d.created_at,d.id')], 'license_required': False}
+
+    def note_sharing(self, identity, places):
+        """One computer's credentials used from several far-apart networks at the same time: probably copied to
+        other computers. Only shown to the owner (a customer's own VPN can also move between places)."""
+        with self.db() as db:
+            db.execute('INSERT INTO sharing VALUES(?,?,?) ON CONFLICT(device_id) DO UPDATE SET at=excluded.at,places=max(places,excluded.places)', (identity, int(time.time()), int(places)))
 
     def set_enabled(self, identity, enabled):
         self.identity(identity)

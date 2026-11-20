@@ -165,7 +165,7 @@ R.devices = function () {
   return devices().then(function (ds) {
     $('main').innerHTML = '<div class="card"><h2>新客户 / 新电脑</h2><div class="row"><input id="dn" maxlength="100" placeholder="客户名称，例如：张三 · 办公室电脑"><button class="b p" onclick="newDevice()">创建并下载连接文件</button></div></div>' +
       '<div class="card"><h2>全部设备（' + ds.length + '）</h2><table><tr><th>名称</th><th>状态</th><th>创建时间</th><th></th></tr>' + ds.map(function (d) {
-        return '<tr><td>' + esc(d.name) + '<br><span class="muted">' + d.id + '</span></td><td>' + (d.enabled ? '<span class="tag ok">启用</span>' : '<span class="tag x">已停用</span>') + '</td><td>' + when(d.created_at) + '</td><td>' +
+        return '<tr><td>' + esc(d.name) + '<br><span class="muted">' + d.id + '</span></td><td>' + (d.enabled ? '<span class="tag ok">启用</span>' : '<span class="tag x">已停用</span>') + (d.shared_at && Date.now() / 1000 - d.shared_at < 7 * 86400 ? '<br><span class="tag x" title="10 分钟内从 ' + d.shared_places + ' 个相距很远的网络同时连接，可能是授权被复制到别的电脑；客户自己的 VPN 换节点也会这样，请核实后再决定是否停用">疑似多台共用 · ' + when(d.shared_at) + '</span>' : '') + '</td><td>' + when(d.created_at) + '</td><td>' +
           '<button class="b" onclick="openDevice(\'' + d.id + '\')">出口与账户</button> ' +
           '<button class="b" onclick="toggleDevice(\'' + d.id + '\',' + !d.enabled + ')">' + (d.enabled ? '停用' : '启用') + '</button> ' +
           '<button class="b d" onclick="rotateDevice(\'' + d.id + '\')">更换凭据</button></td></tr>';

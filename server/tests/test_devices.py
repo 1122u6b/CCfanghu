@@ -43,6 +43,17 @@ class DeviceTests(unittest.TestCase):
         self.assertIsNone(self.registry.authenticate('../etc.' + 'x'*48))
         self.assertIsNone(self.registry.authenticate(self.a['id'] + '.' + 'x'*48))
 
+    def test_credentials_used_from_far_apart_networks_are_flagged(self):
+        g = Gateway.__new__(Gateway); g.devices = self.registry; g.device_places = {}; g.sharing_noted = {}
+        g.note_place(self.da, '1.2.3.4'); g.note_place(self.da, '1.2.9.9'); g.note_place(self.da, '::ffff:1.2.5.5')   # one network
+        g.note_place(self.da, '8.8.1.1')
+        rows = {r['id']: r for r in self.registry.list()['items']}
+        self.assertIsNone(rows[self.a['id']]['shared_at'])        # two places (home + phone hotspot) is normal
+        g.note_place(self.da, '45.1.1.1')
+        rows = {r['id']: r for r in self.registry.list()['items']}
+        self.assertEqual(rows[self.a['id']]['shared_places'], 3)
+        self.assertIsNone(rows[self.b['id']]['shared_at'])
+
     def test_device_contacts_are_isolated(self):
         self.rpc(self.da, {'type': 'set_contact', 'contact': 'A-private'})
         self.assertEqual(self.rpc(self.da, {'type': 'account'})['contact'], 'A-private')
