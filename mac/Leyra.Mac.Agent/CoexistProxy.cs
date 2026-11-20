@@ -54,9 +54,12 @@ static class CoexistProxy
   try
   {
    using var http=new HttpClient(new HttpClientHandler{UseProxy=false}){Timeout=TimeSpan.FromSeconds(3),MaxResponseContentBufferSize=1024*1024};
-   return FromPacScript(http.GetStringAsync(u).GetAwaiter().GetResult());
+   var script=http.GetStringAsync(u).GetAwaiter().GetResult();
+   var found=FromPacScript(script);
+   if(found is null)Program.Log("PAC script names no proxy on this Mac",new Exception(s.Server+" ("+script.Length+" characters)"));
+   return found;
   }
-  catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidOperationException){return null;}
+  catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidOperationException){Program.Log("reading the PAC script "+s.Server,e);return null;}
  }
  static bool Local(Setting s)=>s.Kind!="autoproxy"&&s.On&&s.Port is >0 and <65536&&s.Port!=LocalPort&&s.Server is "127.0.0.1" or "localhost" or "::1";
  public static bool Taken=>File.Exists(Saved);
@@ -70,6 +73,7 @@ static class CoexistProxy
   if(socks is not null)return new("socks5",socks.Port);
   // Clash's "PAC mode" and the like: the system proxy is a script on this Mac naming the customer's local proxy.
   foreach(var auto in list.Where(s=>s.Kind=="autoproxy"&&s.On))if(FromPac(auto) is Upstream fromScript)return fromScript;
+  if(list.Any(s=>s.Kind=="autoproxy"&&s.Server.Length>0))Program.Log("customer's proxy not found",new Exception(string.Join("; ",list.Select(s=>s.Service+" "+s.Kind+" "+(s.On?"on":"off")+" "+s.Server+":"+s.Port))));
   return null;
  }
  /// <summary>Leyra's local proxy becomes the system proxy (HTTP, HTTPS and SOCKS) on every network service.</summary>
