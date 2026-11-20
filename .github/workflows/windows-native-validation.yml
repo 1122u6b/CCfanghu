@@ -356,6 +356,7 @@ jobs:
           $s = WaitFor 'protected' 60
           Write-Host "   moved to the spare exit: $moved after $took s, state: $s"
           if (-not $moved) { $failures += "did not move away from an exit that stopped passing traffic within 90 s" }
+          elseif ($took -gt 60) { $failures += "moving away from an exit that stopped passing traffic took $took s (more than 60 s)" }
           if ($leaked) { $failures += "while the exit was dead, sites saw another address: $($leaked -join ',')" }
           if ($s -notmatch 'protected') { $failures += "not protected on the spare exit: $s" }
           Ask '{"type":"status"}' | Out-Null
@@ -375,6 +376,8 @@ jobs:
           if ((Ask ('{"type":"select_exit","id":' + $spare + '}')) -ne 0) { $failures += 'could not select the spare exit' }
           $s = WaitFor 'protected' 150; Write-Host "   back on the spare exit: $s"
           if ($s -notmatch 'protected') { $failures += "not protected again on the spare exit: $s" }
+          # the first test account passes traffic again for the later steps
+          try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 8 -Proxy http://127.0.0.1:17890 http://resume.leyra-ci.invalid/ | Out-Null } catch { }
           Write-Host '   only listed sites go through the exit, the rest connects directly (and back to everything through the exit)'
           function SeenIp {
             for ($k = 1; $k -le 3; $k++) {

@@ -6,6 +6,7 @@ Usage: python3 ci_socks5.py PORT USERNAME PASSWORD LIFETIME_SECONDS
 USERNAME and USERNAME + "2" are both accepted, so the test can add two separate exits. A request for
 "stop-N.leyra-ci.invalid" makes the account that sent it take connections but pass nothing on for N seconds
 (at most 300): an exit that dies in the middle of a session, the way a broken node behaves.
+"resume.leyra-ci.invalid" (from any account) brings every account back.
 """
 import asyncio, ipaddress, re, socket, struct, sys, time
 
@@ -43,6 +44,8 @@ async def handle(r, w, user, password):
         port = struct.unpack('!H', await r.readexactly(2))[0]
         if cmd != 1:
             w.write(b'\x05\x07\x00\x01' + b'\x00' * 6); return
+        if host == 'resume.leyra-ci.invalid':   # every account passes traffic again
+            STOPPED.clear(); w.write(b'\x05\x05\x00\x01' + b'\x00' * 6); return
         stop = re.fullmatch(r'stop-(\d{1,3})\.leyra-ci\.invalid', host)
         if stop:
             STOPPED[account] = time.monotonic() + min(300, int(stop.group(1)))

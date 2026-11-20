@@ -80,6 +80,23 @@ using(var stopped=new CancellationTokenSource()){
  Check(D("0.4.18","0.4.19",1000)=="drop","older version is never installed");
 }
 
+// Which exit a failover moves to (the server's exit list as the window and the service read it).
+{
+ var choose=type.GetMethod("ChooseExit",BindingFlags.Static|BindingFlags.NonPublic)!;
+ long now=1_800_000_000;
+ string Pick(string json,params int[] tried){var r=choose.Invoke(null,[JsonDocument.Parse(json).RootElement,new HashSet<int>(tried),now]);return r is null?"none":r.ToString()!;}
+ string H(object ok,long at,long ms)=>"{\"ok\":"+ok+",\"at\":"+at+",\"ms\":"+ms+"}";
+ const string unknown="{\"ok\":null,\"at\":null,\"ms\":null}";
+ // A just-added exit has every health field null: reading it must not fail the whole switch.
+ Check(Pick("{\"selected\":2,\"items\":[{\"id\":1,\"name\":\"good\",\"health\":"+H("true",now-30,800)+"},{\"id\":2,\"name\":\"broken\",\"health\":"+unknown+"}]}").Contains("good"),"a new exit without health does not stop the switch to the working one");
+ Check(Pick("{\"selected\":1,\"items\":[{\"id\":1,\"name\":\"a\"},{\"id\":2,\"name\":\"slow\",\"health\":"+H("true",now-30,2000)+"},{\"id\":3,\"name\":\"fast\",\"health\":"+H("true",now-30,300)+"}]}").Contains("fast"),"working exits: the fastest first");
+ Check(Pick("{\"selected\":1,\"items\":[{\"id\":1,\"name\":\"a\"},{\"id\":2,\"name\":\"down\",\"health\":"+H("false",now-30,0)+"},{\"id\":3,\"name\":\"new\",\"health\":"+unknown+"}]}").Contains("new"),"an exit known to be down is skipped, an unchecked one is tried");
+ Check(Pick("{\"selected\":1,\"items\":[{\"id\":1,\"name\":\"a\"},{\"id\":2,\"name\":\"old\",\"health\":"+H("false",now-3600,0)+"}]}").Contains("old"),"a failure from an hour ago does not rule an exit out");
+ Check(Pick("{\"selected\":1,\"items\":[{\"id\":1,\"name\":\"a\"},{\"id\":2,\"name\":\"down\",\"health\":"+H("false",now-30,0)+"}]}")=="none","no working exit: none, so the line is cut instead of hopping");
+ Check(Pick("{\"selected\":1,\"items\":[{\"id\":1,\"name\":\"a\"},{\"id\":2,\"name\":\"b\",\"health\":"+H("true",now-30,500)+"}]}",2)=="none","an exit already tried in this round is not tried again");
+ Check(Pick("{\"selected\":null,\"items\":[{\"id\":1,\"name\":\"a\",\"health\":"+unknown+"}]}").Contains("a"),"no exit selected yet: any exit will do");
+}
+
 sealed class SlowDownload:Stream
 {
  bool sent;

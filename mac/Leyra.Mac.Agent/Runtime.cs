@@ -306,7 +306,8 @@ sealed partial class Runtime:IDisposable
  // ---------- 「本机直连」的流量：网关看不到，本机数好了报给服务器（「本月流量」照样显示） ----------
  bool directExit;GatewayEndpoint[] directEndpoints=[];
  long trafficLastTotal=-1,trafficPending;Dictionary<string,long> directConns=new();DateTimeOffset trafficReadAt,trafficSentAt;Task? trafficSend;
- static long Num(JsonElement value,string field)=>value.TryGetProperty(field,out var v)&&v.TryGetInt64(out var n)?n:0;
+ // A number field, 0 when missing or not a number (null, text): reading a JSON null as a number would throw.
+ static long Num(JsonElement value,string field)=>value.ValueKind==JsonValueKind.Object&&value.TryGetProperty(field,out var v)&&v.ValueKind==JsonValueKind.Number&&v.TryGetInt64(out var n)?n:0;
  // Every 5 s: everything the kernel moved, minus what went straight out (local network, sites not on the list).
  // Sent once a minute in the background; what could not be sent is kept for the next time.
  async Task CountDirectTraffic(CancellationToken stop)
@@ -330,14 +331,24 @@ sealed partial class Runtime:IDisposable
    trafficSend=Task.Run(async()=>{try{await Remote(new{type="report_traffic",bytes=send},CancellationToken.None);Interlocked.Add(ref trafficPending,-send);}catch(Exception e){Program.Log("traffic report",e);}});
   }
  }
- // Programs keep sending and nothing comes back (an exit that takes connections but passes nothing on): check the
- // exit now instead of at the next regular check. Two readings 5 s apart, at most once every 15 s.
- int stallReads;DateTimeOffset stallProbeAt;
- void NoteStall()
+ // Connections through the exit that sent something and got nothing back for 4 s or more, while no connection
+ // through the exit receives anything: the exit takes connections but passes nothing on (an expired node does
+ // exactly that). Checked every 5 s; the exit is then checked at once, and a failed check counts right away.
+ DateTimeOffset stallProbeAt,stallAt=DateTimeOffset.MinValue;Dictionary<string,long> exitDownloads=new();
+ async Task NoteStall(CancellationToken stop)
  {
-  if(state!="protected"){stallReads=0;return;}
-  if(up>=200&&down<512){if(++stallReads>=2&&DateTimeOffset.UtcNow>=stallProbeAt){stallReads=0;stallProbeAt=DateTimeOffset.UtcNow.AddSeconds(15);nextNetProbe=DateTimeOffset.UtcNow;}}
-  else if(down>=2048)stallReads=0;
+  if(state!="protected"){exitDownloads.Clear();return;}
+  var snap=await kernel.Get("connections",stop);var now=DateTimeOffset.UtcNow;var stuck=0;var progress=false;var seen=new Dictionary<string,long>();
+  if(snap.TryGetProperty("connections",out var list)&&list.ValueKind==JsonValueKind.Array)
+   foreach(var c in list.EnumerateArray())
+   {
+    if(!c.TryGetProperty("chains",out var chains)||chains.ValueKind!=JsonValueKind.Array||chains.EnumerateArray().Any(x=>x.ValueKind==JsonValueKind.String&&x.GetString() is "DIRECT" or "REJECT"))continue;
+    var id=Text(c,"id");var got=Num(c,"download");seen[id]=got;
+    if(got>(exitDownloads.TryGetValue(id,out var was)?was:0))progress=true;
+    if(got==0&&Num(c,"upload")>0&&DateTimeOffset.TryParse(Text(c,"start"),out var started)&&now-started>TimeSpan.FromSeconds(4))stuck++;
+   }
+  exitDownloads=seen;
+  if(stuck>=2&&!progress){stallAt=now;if(now>=stallProbeAt){stallProbeAt=now.AddSeconds(15);nextNetProbe=now;}}
  }
  // ---------- 换出口：不重建防护 ----------
  // Every exit is reached through the same Leyra gateway, which picks the customer's selected exit for each new
@@ -378,20 +389,28 @@ sealed partial class Runtime:IDisposable
  // the not yet checked ones in the order the customer added them; ones known to be down right now are skipped.
  async Task<(int Id,string Name,string From)?> PickExit(CancellationToken stop)
  {
-  var list=await Remote(new{type="exits"},stop);var now=DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+  var list=await Remote(new{type="exits"},stop);
+  exitCount=list.GetProperty("items").GetArrayLength();
+  var current=list.GetProperty("selected").ValueKind==JsonValueKind.Number?list.GetProperty("selected").GetInt32():(int?)null;
+  if(current is int c)triedExits.Add(c);
+  return ChooseExit(list,triedExits,DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+ }
+ // Pure choice over the server's exit list (tested on its own): exits checked in the last 6 minutes and working
+ // first, fastest first; then the unchecked ones (a new exit has no health yet: every field null) in the order
+ // they were added; exits known to be down right now, the one in use and ones already tried are left out.
+ static (int Id,string Name,string From)? ChooseExit(JsonElement list,IReadOnlyCollection<int> tried,long now)
+ {
   var items=list.GetProperty("items").EnumerateArray().Select((x,i)=>
   {
    var h=x.TryGetProperty("health",out var hv)&&hv.ValueKind==JsonValueKind.Object?hv:default;
    bool? ok=h.ValueKind==JsonValueKind.Object&&h.TryGetProperty("ok",out var o)&&o.ValueKind is JsonValueKind.True or JsonValueKind.False?o.GetBoolean():null;
-   var fresh=h.ValueKind==JsonValueKind.Object&&now-Num(h,"at")<360;
-   return (Id:x.GetProperty("id").GetInt32(),Name:Text(x,"name"),Index:i,Good:ok==true&&fresh,Bad:ok==false&&fresh,Ms:h.ValueKind==JsonValueKind.Object?Num(h,"ms"):0);
+   var fresh=Num(h,"at") is long at&&at>0&&now-at<360;
+   return (Id:x.GetProperty("id").GetInt32(),Name:Text(x,"name"),Index:i,Good:ok==true&&fresh,Bad:ok==false&&fresh,Ms:Num(h,"ms"));
   }).ToList();
-  exitCount=items.Count;
   var current=list.GetProperty("selected").ValueKind==JsonValueKind.Number?list.GetProperty("selected").GetInt32():(int?)null;
-  if(current is int c)triedExits.Add(c);
   var from=items.FirstOrDefault(x=>x.Id==current).Name??"当前出口";
-  var next=items.Where(x=>x.Id!=current&&!triedExits.Contains(x.Id)&&!x.Bad).OrderBy(x=>x.Good?0:1).ThenBy(x=>x.Good?x.Ms:0).ThenBy(x=>x.Index).FirstOrDefault();
-  return next.Name is null?null:(next.Id,next.Name,from);
+  var next=items.Where(x=>x.Id!=current&&!tried.Contains(x.Id)&&!x.Bad).OrderBy(x=>x.Good?0:1).ThenBy(x=>x.Good?x.Ms:0).ThenBy(x=>x.Index).FirstOrDefault();
+  return next.Name is null?null:(next.Id,next.Name.Length>0?next.Name:"出口",from);
  }
  object? lastFailover;string? blockReason;
  // The line was cut while switching (it could not be built on the exit in use): move to the next working exit.
@@ -468,9 +487,11 @@ sealed partial class Runtime:IDisposable
    // Only in "everything through the exit" mode does downloading prove the exit works (in the other modes most
    // traffic does not use it), and only for the last 10 s.
    var flowing=!coexist&&!store.Settings.ProxyOnlyListed&&DateTimeOffset.UtcNow-lastTraffic<TimeSpan.FromSeconds(10);
-   Program.Log("line check failed ("+netFailures+"/2"+(flowing?", traffic still flowing":"")+")",e);
-   if(!fatal&&flowing){netFailures=Math.Min(netFailures,1);return;}
-   if(!fatal&&netFailures<2)return;
+   // Programs are waiting on the exit with nothing coming back as well: no need to wait for a second check.
+   var stalled=DateTimeOffset.UtcNow-stallAt<TimeSpan.FromSeconds(30);
+   Program.Log("line check failed ("+netFailures+"/2"+(flowing?", traffic still flowing":"")+(stalled?", connections get nothing back":"")+")",e);
+   if(!fatal&&flowing&&!stalled){netFailures=Math.Min(netFailures,1);return;}
+   if(!fatal&&netFailures<2&&!stalled)return;
    await ExitDown(e,generation,stop);
   }
   if(!ok)return;
@@ -508,7 +529,7 @@ sealed partial class Runtime:IDisposable
   using(var local=CancellationTokenSource.CreateLinkedTokenSource(stop))
   {
    local.CancelAfter(TimeSpan.FromSeconds(4));
-   try{var traffic=await kernel.Rates(local.Token);up=traffic.Up;down=traffic.Down;if(down>=2048)lastTraffic=DateTimeOffset.UtcNow;NoteStall();var proxies=await kernel.Get("proxies/"+Uri.EscapeDataString("出口"),local.Token);selected=Text(proxies,"now");await CountDirectTraffic(local.Token);}
+   try{var traffic=await kernel.Rates(local.Token);up=traffic.Up;down=traffic.Down;if(down>=2048)lastTraffic=DateTimeOffset.UtcNow;await NoteStall(local.Token);var proxies=await kernel.Get("proxies/"+Uri.EscapeDataString("出口"),local.Token);selected=Text(proxies,"now");await CountDirectTraffic(local.Token);}
    catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidDataException or JsonException){/* 读流量只是显示用，下次再读 */}
   }
   heartbeat=DateTimeOffset.UtcNow;lastHealth=heartbeat;

@@ -86,7 +86,9 @@ while [ $(( $(date +%s) - T0 )) -lt 90 ]; do
   [ "$(curid)" = "$SPARE" ] && { MOVED=1; break; }; sleep 2
 done
 echo "   moved to the spare exit: ${MOVED:-no} after $(( $(date +%s) - T0 )) s"
+TOOK=$(( $(date +%s) - T0 ))
 [ -n "$MOVED" ] || fail "did not move away from an exit that stopped passing traffic within 90 s"
+[ -n "$MOVED" ] && [ "$TOOK" -gt 60 ] && fail "moving away from an exit that stopped passing traffic took $TOOK s (more than 60 s)"
 s=$(wait_for '^protected' 60) || fail "not protected on the spare exit: $s"
 LF=$(python3 ask.py '{"type":"status"}' --full | python3 -c 'import json,sys;print((json.load(sys.stdin)["value"].get("last_failover") or {}).get("to",""))')
 echo "   switch the customer is told about: -> $LF"; [ "$LF" = "spare" ] || fail "the automatic switch was not reported to the window: $LF"
@@ -100,6 +102,7 @@ for i in 1 2 3; do P=$(curl -s --max-time 5 https://api.ipify.org || true); [ -n
 ask '{"type":"set_auto_exit","on":true}' >/dev/null || fail "could not turn automatic switching back on"
 ask "{\"type\":\"select_exit\",\"id\":$SPARE}" >/dev/null || fail "could not select the spare exit"
 s=$(wait_for '^protected' 150) || fail "not protected again on the spare exit: $s"; echo "   back on the spare exit: $s"
+curl -s --max-time 8 -x http://127.0.0.1:17890 http://resume.leyra-ci.invalid/ >/dev/null || true   # the first test account passes traffic again for the later steps
 
 echo "7. pause: rules removed, normal network back"
 ask '{"type":"pause","minutes":10}' >/dev/null || ask '{"type":"pause","reason":"quit"}' >/dev/null
