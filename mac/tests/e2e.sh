@@ -8,6 +8,8 @@ state(){ python3 ask.py '{"type":"status"}' --full 2>/dev/null | python3 -c 'imp
 wait_for(){ local end=$((SECONDS+$2)); while [ $SECONDS -lt $end ]; do s=$(state); [[ "$s" =~ $1 ]] && { echo "$s"; return 0; }; sleep 2; done; echo "$(state)"; return 1; }
 ip(){ for k in 1 2 3; do r=$(curl -s --max-time 20 https://api.ipify.org) && [[ "$r" =~ ^[0-9.]+$ ]] && { echo "$r"; return; }; sleep 3; done; echo "error"; }
 PHYS=$(cat /tmp/leyra-physical-if); REAL=$(cat /tmp/leyra-real-ip)
+# Each Mac has its own pair of test accounts (both Macs share one test proxy; one dropping its exit must not drop the other's).
+CIA=ci$([ "$(uname -m)" = arm64 ] && echo a || echo i)
 
 echo "1. service running and answering only its owner"
 sudo launchctl print system/xin.leyra.agent >/dev/null 2>&1 || fail "service not loaded in launchd"
@@ -23,7 +25,7 @@ FRESH=$(python3 ask.py '{"type":"status"}' --full | python3 -c 'import json,sys;
 echo "   fresh install: only Claude through the exit, asks which way = $FRESH"; [ "$FRESH" = "True False" ] || fail "a new install should send only Claude through the exit and not ask: $FRESH"
 
 echo "3. own exit -> protected"
-ask "{\"type\":\"own_exit\",\"links\":\"socks5://ci:$SOCKS_PASS@127.0.0.1:$SOCKS_PORT\"}" || fail "importing the own exit failed"
+ask "{\"type\":\"own_exit\",\"links\":\"socks5://$CIA:$SOCKS_PASS@127.0.0.1:$SOCKS_PORT\"}" || fail "importing the own exit failed"
 s=$(wait_for '^protected' 150) || fail "not protected after connecting the own exit: $s"; echo "   state: $s"
 
 echo "4. sites see the exit, not this Mac"
@@ -66,7 +68,7 @@ echo "   traffic counted by the server: $USED bytes, resets at $RESET, exit addr
 [[ "$RESET" =~ ^[0-9]+$ ]] || fail "traffic reset date missing: $RESET"
 [[ ",$EIPS," == *",$EXIT,"* ]] || fail "the exit does not show its own address: $EIPS (expected $EXIT)"
 echo "   switching between working exits is quick and protection never drops (no rebuild)"
-ask "{\"type\":\"own_exit\",\"links\":\"socks5://ci:$SOCKS_PASS@127.0.0.1:$SOCKS_PORT\",\"name\":\"second\"}" >/dev/null || fail "could not add a second working exit"
+ask "{\"type\":\"own_exit\",\"links\":\"socks5://$CIA:$SOCKS_PASS@127.0.0.1:$SOCKS_PORT\",\"name\":\"second\"}" >/dev/null || fail "could not add a second working exit"
 s=$(state); [[ "$s" == protected* ]] || fail "adding a working exit dropped protection: $s"
 other(){ python3 ask.py '{"type":"account"}' --full | python3 -c 'import json,sys;l=json.load(sys.stdin)["value"]["exits"]["list"];print(([x["id"] for x in l if not x["current"]] or [""])[0])'; }
 FIRST=$(other); T0=$(date +%s)
@@ -89,7 +91,7 @@ s=$(wait_for '^protected' 150) || fail "not protected again after switching back
 P=$(ip); [ "$P" = "$EXIT" ] || fail "after switching back traffic does not go through the exit: $P"; echo "   back through Hong Kong: $s, address $P"
 echo "   the exit in use stops passing traffic mid-session (like a dead node): Leyra notices and moves to the spare exit"
 curid(){ python3 ask.py '{"type":"account"}' --full 2>/dev/null | python3 -c 'import json,sys;l=json.load(sys.stdin)["value"]["exits"]["list"];print(([x["id"] for x in l if x["current"]] or [""])[0])' 2>/dev/null; }
-SPARE=$(python3 ask.py "{\"type\":\"own_exit\",\"links\":\"socks5://ci2:$SOCKS_PASS@127.0.0.1:$SOCKS_PORT\",\"name\":\"spare\"}" --full | python3 -c 'import json,sys;print(json.load(sys.stdin)["value"]["id"])')
+SPARE=$(python3 ask.py "{\"type\":\"own_exit\",\"links\":\"socks5://${CIA}2:$SOCKS_PASS@127.0.0.1:$SOCKS_PORT\",\"name\":\"spare\"}" --full | python3 -c 'import json,sys;print(json.load(sys.stdin)["value"]["id"])')
 ask "{\"type\":\"select_exit\",\"id\":$CUR}" >/dev/null || fail "could not go back to the first exit"
 wait_for '^protected' 60 >/dev/null; sleep 5; BEFORE=$(ip)
 curl -s --max-time 8 -x http://127.0.0.1:17890 http://stop-240.leyra-ci.ipify.org/ >/dev/null || true

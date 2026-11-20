@@ -3,10 +3,11 @@ automated Windows test. Listens on 127.0.0.1 only and exits by itself after the 
 
 Usage: python3 ci_socks5.py PORT USERNAME PASSWORD LIFETIME_SECONDS
 
-USERNAME and USERNAME + "2" are both accepted, so the test can add two separate exits. A request for
-"stop-N.leyra-ci.invalid" makes the account that sent it take connections but pass nothing on for N seconds
-(at most 300): an exit that dies in the middle of a session, the way a broken node behaves.
-"resume.leyra-ci.invalid" (from any account) brings every account back.
+USERNAME, optionally followed by a short machine tag (letters) and/or "2", is accepted: each test machine
+uses its own pair (ci/ci2, cia/cia2, cii/cii2 ...), so two machines testing at once do not disturb each other.
+A request for "stop-N.leyra-ci.invalid" makes the account that sent it take connections but pass nothing on
+for N seconds (at most 300): an exit that dies in the middle of a session, the way a broken node behaves.
+"resume.leyra-ci.invalid" brings back both accounts of the machine that sent it.
 """
 import asyncio, ipaddress, re, socket, struct, sys, time
 
@@ -33,7 +34,7 @@ async def handle(r, w, user, password):
         _, ulen = await r.readexactly(2); u = await r.readexactly(ulen)
         plen = (await r.readexactly(1))[0]; p = await r.readexactly(plen)
         account = u.decode()
-        if account not in (user, user + '2') or p.decode() != password:
+        if re.fullmatch(re.escape(user) + r'[a-z]{0,3}2?', account) is None or p.decode() != password:
             w.write(b'\x01\x01'); return
         w.write(b'\x01\x00'); await w.drain()
         ver, cmd, _, atyp = await r.readexactly(4)
@@ -46,7 +47,8 @@ async def handle(r, w, user, password):
             w.write(b'\x05\x07\x00\x01' + b'\x00' * 6); return
         # Also under ipify.org: Leyra always sends that through the exit (in every mode), so the request reaches here.
         if host in ('resume.leyra-ci.invalid', 'resume.leyra-ci.ipify.org'):   # every account passes traffic again
-            STOPPED.clear(); w.write(b'\x05\x05\x00\x01' + b'\x00' * 6); return
+            for k in [k for k in STOPPED if k.rstrip('2') == account.rstrip('2')]: STOPPED.pop(k)
+            w.write(b'\x05\x05\x00\x01' + b'\x00' * 6); return
         stop = re.fullmatch(r'stop-(\d{1,3})\.leyra-ci\.(?:invalid|ipify\.org)', host)
         if stop:
             STOPPED[account] = time.monotonic() + min(300, int(stop.group(1)))
