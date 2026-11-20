@@ -8,7 +8,7 @@ namespace Leyra.Mac.Agent;
 static class BrowserPolicies
 {
  static readonly string[] Domains={"/Library/Managed Preferences/com.google.Chrome","/Library/Managed Preferences/com.microsoft.Edge"};
- record Prior(string Domain,string Name,string? Value);
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] record Prior(string Domain,string Name,string? Value);
  static string FileName=>Path.Combine(AgentStore.Root,"browser-policies.json");
  static (int Code,string Out) Defaults(params string[] args)
  {

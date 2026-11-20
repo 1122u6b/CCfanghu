@@ -5,7 +5,7 @@ using Leyra.Windows.Core;
 
 namespace Leyra.Windows.Agent;
 
-sealed class AgentSettings
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] sealed class AgentSettings
 {
  public int Schema{get;set;}=1;
  public bool Enabled{get;set;}

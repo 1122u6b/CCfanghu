@@ -11,7 +11,7 @@ namespace Leyra.Mac.Agent;
 static class CoexistProxy
 {
  public const int LocalPort=17890;
- record Setting(string Service,string Kind,bool On,string Server,int Port);
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] record Setting(string Service,string Kind,bool On,string Server,int Port);
  public record Upstream(string Type,int Port);
  static string Saved=>Path.Combine(AgentStore.Root,"proxy-before.json");
  static readonly string[] Kinds=["webproxy","securewebproxy","socksfirewallproxy"];

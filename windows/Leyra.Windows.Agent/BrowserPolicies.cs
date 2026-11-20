@@ -6,7 +6,7 @@ namespace Leyra.Windows.Agent;
 static class BrowserPolicies
 {
  static readonly string[] Paths={@"SOFTWARE\Policies\Google\Chrome",@"SOFTWARE\Policies\Microsoft\Edge"};
- record Prior(string Path,string Name,bool Present,RegistryValueKind Kind,object? Value);
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] record Prior(string Path,string Name,bool Present,RegistryValueKind Kind,object? Value);
  static string FileName=>Path.Combine(AgentStore.Root,"browser-policies.json");
  public static object Install()
  {

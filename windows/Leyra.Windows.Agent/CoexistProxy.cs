@@ -12,7 +12,7 @@ sealed class CoexistProxy(SecurityIdentifier owner)
 {
  public const int LocalPort=17890;
  public record Upstream(string Type,int Port);
- record Saved(int? ProxyEnable,string? ProxyServer,string? ProxyOverride,string? AutoConfigURL);
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] record Saved(int? ProxyEnable,string? ProxyServer,string? ProxyOverride,string? AutoConfigURL);
  const string Suffix=@"\Software\Microsoft\Windows\CurrentVersion\Internet Settings";
  static string SavedPath=>Path.Combine(AgentStore.Root,"proxy-before.json");
  RegistryKey Open(bool write)=>Registry.Users.OpenSubKey(owner.Value+Suffix,write)??throw new InvalidOperationException("当前桌面用户的网络设置不可用");
