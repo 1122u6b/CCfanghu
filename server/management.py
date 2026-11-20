@@ -283,7 +283,8 @@ CREATE TABLE IF NOT EXISTS traffic(day TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
                 if not conf.get('zone'):raise ManagementError('DNS probe is not configured')
                 nonce=secrets.token_hex(16)
                 db.execute('DELETE FROM dns_probes WHERE at<?',(now-600,));db.execute('DELETE FROM dns_observations WHERE at<?',(now-600,))
-                if db.execute('SELECT COUNT(*) FROM dns_probes').fetchone()[0]>=1000:raise ManagementError('probe quota exceeded')
+                # Every computer keeps at most 16 open checks (see devices.py); this bound is only a last guard.
+                if db.execute('SELECT COUNT(*) FROM dns_probes').fetchone()[0]>=50000:raise ManagementError('probe quota exceeded')
                 db.execute('INSERT INTO dns_probes VALUES (?,?)',(nonce,now))
                 return {'nonce':nonce,'name':nonce+'.'+conf['zone'],'answer':conf.get('answer_ip'),'expires_at':now+600}
             if kind=='dns_probe_result':

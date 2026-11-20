@@ -116,10 +116,17 @@ class DeviceTests(unittest.TestCase):
         self.assertEqual(struct.unpack('!6H', response[:12])[3], 1)
         self.assertTrue(self.rpc(self.da, {'type': 'dns_probe_result', 'nonce': probe['nonce']})['matched'])
 
-    def test_probe_quota_is_per_device(self):
+    def test_probe_quota_is_per_device_and_never_cuts_a_computer_off(self):
         self.owner.configure_dns({'zone': 'probe.example.test'})
+        first = self.rpc(self.da, {'type': 'dns_probe_begin'})['nonce']
         for _ in range(16): self.rpc(self.da, {'type': 'dns_probe_begin'})
-        with self.assertRaises(ManagementError): self.rpc(self.da, {'type': 'dns_probe_begin'})
+        # A computer that keeps rebuilding its line is never refused; its oldest check is given up instead.
+        newest = self.rpc(self.da, {'type': 'dns_probe_begin'})['nonce']
+        with self.assertRaises(ManagementError): self.rpc(self.da, {'type': 'dns_probe_result', 'nonce': first})
+        self.assertIn('matched', self.rpc(self.da, {'type': 'dns_probe_result', 'nonce': newest}))
+        with self.registry.db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM probes WHERE device_id=?', (self.da.id,)).fetchone()[0], 16)
+        # Other computers are not affected.
         self.assertIn('nonce', self.rpc(self.db, {'type': 'dns_probe_begin'}))
 
     def test_private_ai_accounts_not_in_another_store(self):

@@ -250,10 +250,14 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,action TEXT NOT NULL,tar
                 conf['resolver_url'] = urlunsplit((parts.scheme, parts.netloc, prefix + '/private-dns/' + device.token, '', ''))
             return conf
         if kind == 'dns_probe_begin':
+            # Each computer keeps at most 16 open checks. A computer that rebuilds its line often (its exit keeps
+            # failing, the customer switches back and forth) gives up its oldest checks instead of being refused:
+            # refusing would leave it cut off until the old checks expire 10 minutes later.
             with self.db() as db:
-                active = db.execute('SELECT COUNT(*) FROM probes WHERE device_id=? AND expires_at>?', (device.id, int(time.time()))).fetchone()[0]
-                if active >= 16:
-                    raise ManagementError('device probe quota exceeded')
+                now = int(time.time())
+                db.execute('DELETE FROM probes WHERE expires_at<=?', (now,))
+                old = [r[0] for r in db.execute('SELECT nonce FROM probes WHERE device_id=? ORDER BY expires_at, rowid', (device.id,))]
+                db.executemany('DELETE FROM probes WHERE nonce=?', [(n,) for n in old[:max(0, len(old) - 15)]])
             result = owner.rpc(req)
             with self.db() as db:
                 db.execute('DELETE FROM probes WHERE expires_at<=?', (int(time.time()),))
