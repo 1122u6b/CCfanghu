@@ -500,7 +500,9 @@ jobs:
           $end = (Get-Date).AddSeconds(90); $shared = ''
           while ((Get-Date) -lt $end -and -not $shared) { Start-Sleep 4; Ask '{"type":"status"}' | Out-Null; $st = (Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value; if ($st.shared_vpn -and $st.protection.state -eq 'protected') { $shared = $st.shared_vpn } }
           $viaLeyra = SeenIp; $otherSite = SeenIp2
+          New-Item -ItemType Directory -Force $fakeDir | Out-Null; Copy-Item "$env:SystemRoot\System32\curl.exe" "$fakeDir\claude.exe" -Force
           $claudeDirect = & "$fakeDir\claude.exe" -s -o NUL -w '%{http_code}' --noproxy '*' --max-time 8 https://1.1.1.1/cdn-cgi/trace
+          Remove-Item "$env:LOCALAPPDATA\AnthropicClaude" -Recurse -Force -ErrorAction SilentlyContinue
           Write-Host "   shared with: '$shared'; the self-check site sees $viaLeyra (exit $ipAll), another site sees $otherSite, Claude app directly: $claudeDirect"
           if ($shared -ne 'OtherVPN') { $failures += "Leyra did not share with the other VPN's network card: '$shared'" }
           if ($viaLeyra -ne $ipAll) { $failures += "sharing with another VPN: the exit was not used for the self-check site: $viaLeyra" }
