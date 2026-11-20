@@ -92,7 +92,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15
+          - runner: macos-14   # macos-15 Apple silicon runners were not being assigned
             chip: apple-silicon
             code_key: code
           - runner: macos-15-intel
@@ -217,4 +217,4 @@ jobs:
             "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $TEST_CODE; [ -n '$UI_CODE' ] && sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $UI_CODE; pkill -f \"[l]eyra-ci-socks.py $SOCKS_PORT \" || true"
 
 
-# fresh run 20261120T1000 (0.4.30 machine code again: the Apple silicon runner never started; not published)
+# fresh run 20261120T1005 (0.4.30 machine code: Apple silicon test on macos-14; not published)
