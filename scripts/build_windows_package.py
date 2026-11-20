@@ -13,6 +13,9 @@ def main():
  payload.mkdir(parents=True)
  for project in ['Desktop','Agent']:
   subprocess.run([a.dotnet,'publish',str(ROOT/f'windows/Leyra.Windows.{project}'),'-c','Release','-r','win-x64','--self-contained','true','-o',str(payload),'-m:1','-nr:false','-p:UseSharedCompilation=false'],check=True)
+ # Leyra's own code, renamed and with its strings hidden, all four assemblies together (scripts/obfuscate.py).
+ from obfuscate import obfuscate
+ obfuscate(payload,['LeyraConnect.dll','Leyra.Agent.dll','Leyra.Windows.Core.dll','Leyra.Windows.Platform.dll'])
  from prepare_kernel import prepare
  prepare('windows',payload,ROOT/'artifacts/downloads')
  shutil.copy2(ROOT/'THIRD-PARTY-NOTICES.txt',payload/'THIRD-PARTY-NOTICES.txt')

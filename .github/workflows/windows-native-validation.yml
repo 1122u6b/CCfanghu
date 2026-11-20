@@ -153,6 +153,12 @@ jobs:
           @{ sha256 = $hash; source = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' } | ConvertTo-Json | Set-Content "$dir/runtime-origin.json"
       - name: Build installer
         run: python scripts/build_windows_package.py --makensis "C:\Program Files (x86)\NSIS\makensis.exe"
+      - name: Keep the obfuscation name map (for reading error logs; never shipped)
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-obfuscation-map
+          path: artifacts/obfuscation-maps
+          retention-days: 90
       - name: Build the request tool used for the end-to-end test
         run: dotnet build windows/Leyra.Windows.Checks -c Release -m:1 --nologo
       - name: Silent install on this disposable Windows machine

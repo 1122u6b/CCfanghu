@@ -80,6 +80,12 @@ jobs:
             mac/out/Leyra-*.pkg
             mac/out/Leyra-*.sha256
           retention-days: 7
+      - name: Keep the obfuscation name maps (for reading error logs; never shipped)
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-obfuscation-maps
+          path: artifacts/obfuscation-maps
+          retention-days: 90
   test:
     needs: [build, test-code]
     strategy:
