@@ -7,7 +7,7 @@ namespace Leyra.Windows.Agent;
 
 static class SystemClock
 {
- [StructLayout(LayoutKind.Sequential)]struct SystemTime{public ushort Year,Month,DayOfWeek,Day,Hour,Minute,Second,Milliseconds;}
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)]struct SystemTime{public ushort Year,Month,DayOfWeek,Day,Hour,Minute,Second,Milliseconds;}
  [DllImport("kernel32.dll",SetLastError=true)]static extern bool SetSystemTime(in SystemTime time);
  public static void SetUtc(double unix)
  {

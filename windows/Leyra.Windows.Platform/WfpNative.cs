@@ -3,16 +3,16 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 namespace Leyra.Windows.Platform;
 
-[StructLayout(LayoutKind.Sequential)] public struct DisplayData {public IntPtr Name,Description;}
-[StructLayout(LayoutKind.Sequential)] public struct ByteBlob {public uint Size;public IntPtr Data;}
-[StructLayout(LayoutKind.Explicit,Size=8)] public struct ValueUnion {[FieldOffset(0)]public byte U8;[FieldOffset(0)]public ushort U16;[FieldOffset(0)]public uint U32;[FieldOffset(0)]public IntPtr Pointer;}
-[StructLayout(LayoutKind.Sequential)] public struct WfpValue {public uint Type;public ValueUnion Value;}
-[StructLayout(LayoutKind.Sequential)] public struct WfpCondition {public Guid Field;public uint Match;public WfpValue Value;}
-[StructLayout(LayoutKind.Sequential)] public struct WfpAction {public uint Type;public Guid Key;}
-[StructLayout(LayoutKind.Explicit,Size=16)] public struct FilterContext {[FieldOffset(0)]public ulong Raw;[FieldOffset(0)]public Guid ProviderContext;}
-[StructLayout(LayoutKind.Sequential)] public struct WfpFilter {public Guid Key;public DisplayData Display;public uint Flags;public IntPtr ProviderKey;public ByteBlob ProviderData;public Guid Layer,SubLayer;public WfpValue Weight;public uint ConditionCount;public IntPtr Conditions;public WfpAction Action;public FilterContext Context;public IntPtr Reserved;public ulong Id;public WfpValue EffectiveWeight;}
-[StructLayout(LayoutKind.Sequential)] public struct WfpProvider {public Guid Key;public DisplayData Display;public uint Flags;public ByteBlob Data;public IntPtr ServiceName;}
-[StructLayout(LayoutKind.Sequential)] public struct WfpSubLayer {public Guid Key;public DisplayData Display;public uint Flags;public IntPtr ProviderKey;public ByteBlob Data;public ushort Weight;}
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)] public struct DisplayData {public IntPtr Name,Description;}
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)] public struct ByteBlob {public uint Size;public IntPtr Data;}
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Explicit,Size=8)] public struct ValueUnion {[FieldOffset(0)]public byte U8;[FieldOffset(0)]public ushort U16;[FieldOffset(0)]public uint U32;[FieldOffset(0)]public IntPtr Pointer;}
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)] public struct WfpValue {public uint Type;public ValueUnion Value;}
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)] public struct WfpCondition {public Guid Field;public uint Match;public WfpValue Value;}
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)] public struct WfpAction {public uint Type;public Guid Key;}
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Explicit,Size=16)] public struct FilterContext {[FieldOffset(0)]public ulong Raw;[FieldOffset(0)]public Guid ProviderContext;}
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)] public struct WfpFilter {public Guid Key;public DisplayData Display;public uint Flags;public IntPtr ProviderKey;public ByteBlob ProviderData;public Guid Layer,SubLayer;public WfpValue Weight;public uint ConditionCount;public IntPtr Conditions;public WfpAction Action;public FilterContext Context;public IntPtr Reserved;public ulong Id;public WfpValue EffectiveWeight;}
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)] public struct WfpProvider {public Guid Key;public DisplayData Display;public uint Flags;public ByteBlob Data;public IntPtr ServiceName;}
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)] public struct WfpSubLayer {public Guid Key;public DisplayData Display;public uint Flags;public IntPtr ProviderKey;public ByteBlob Data;public ushort Weight;}
 public static class WfpLayout
 {
  public static void Verify64Bit()

@@ -10,7 +10,7 @@ namespace Leyra.Windows.Platform;
 [SupportedOSPlatform("windows")]
 public static class NativeCredentials
 {
- [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]
  struct Info{public int Size;public IntPtr Parent;public string Message;public string Caption;public IntPtr Banner;}
  [DllImport("credui.dll",CharSet=CharSet.Unicode)]
  static extern uint CredUIPromptForWindowsCredentials(ref Info info,uint error,ref uint package,IntPtr input,uint inputSize,out IntPtr output,out uint outputSize,ref bool save,uint flags);

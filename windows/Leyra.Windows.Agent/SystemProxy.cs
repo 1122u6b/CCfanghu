@@ -95,7 +95,7 @@ sealed class SystemProxy(SecurityIdentifier owner)
   finally{System.Runtime.InteropServices.Marshal.FreeHGlobal(buffer);}
   return null;
  }
- [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]struct BasicInfo{public IntPtr Exit,Peb,Affinity,Priority,Pid,ParentPid;}
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]struct BasicInfo{public IntPtr Exit,Peb,Affinity,Priority,Pid,ParentPid;}
  [System.Runtime.InteropServices.DllImport("ntdll.dll")]static extern int NtQueryInformationProcess(IntPtr process,int infoClass,out BasicInfo info,int size,out int returned);
  static Process? ParentOf(Process p)
  {

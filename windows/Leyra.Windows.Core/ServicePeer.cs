@@ -16,14 +16,14 @@ public static class ServicePeer
  [DllImport("kernel32.dll",SetLastError=true)]
  [return:MarshalAs(UnmanagedType.Bool)]
  static extern bool GetNamedPipeServerProcessId(SafePipeHandle pipe,out uint processId);
- [StructLayout(LayoutKind.Sequential)]struct ServiceStatus{public uint Type,State,Controls,Exit,SpecificExit,Checkpoint,WaitHint,Pid,Flags;}
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)]struct ServiceStatus{public uint Type,State,Controls,Exit,SpecificExit,Checkpoint,WaitHint,Pid,Flags;}
  [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern IntPtr OpenSCManager(string? machine,string? database,uint access);
  [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern IntPtr OpenService(IntPtr manager,string name,uint access);
  [DllImport("advapi32.dll",SetLastError=true)]static extern bool QueryServiceStatusEx(IntPtr service,int level,out ServiceStatus status,uint size,out uint needed);
  [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern bool QueryServiceConfig(IntPtr service,IntPtr buffer,uint size,out uint needed);
  [DllImport("advapi32.dll")]static extern bool CloseServiceHandle(IntPtr handle);
  // QUERY_SERVICE_CONFIGW: three DWORDs, then the binary path pointer.
- [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]struct ServiceConfig{public uint Type,Start,Error;public IntPtr Binary;}
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]struct ServiceConfig{public uint Type,Start,Error;public IntPtr Binary;}
 
  /// <summary>The program path from the service's registered command line, e.g. "C:\..\Leyra.Agent.exe" --service.</summary>
  public static string ProgramFromCommandLine(string command)

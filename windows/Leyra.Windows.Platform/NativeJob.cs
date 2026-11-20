@@ -10,13 +10,13 @@ namespace Leyra.Windows.Platform;
 public sealed class NativeJob:IDisposable
 {
  readonly SafeFileHandle job;
- [StructLayout(LayoutKind.Sequential)]struct BasicLimit{public long ProcessTime,JobTime;public uint Flags;public UIntPtr MinWork,MaxWork;public uint Active;public UIntPtr Affinity;public uint Priority,Scheduling;}
- [StructLayout(LayoutKind.Sequential)]struct Io{public ulong A,B,C,D,E,F;}
- [StructLayout(LayoutKind.Sequential)]struct Limits{public BasicLimit Basic;public Io Io;public UIntPtr ProcessMemory,JobMemory,PeakProcessMemory,PeakJobMemory;}
- [StructLayout(LayoutKind.Sequential)]struct Startup{public uint Size;public IntPtr Reserved,Desktop,Title;public uint X,Y,XSize,YSize,XCount,YCount,Fill,Flags;public ushort Show,ReservedSize;public IntPtr ReservedBytes,Input,Output,Error;}
- [StructLayout(LayoutKind.Sequential)]struct StartupEx{public Startup Startup;public IntPtr Attributes;}
- [StructLayout(LayoutKind.Sequential)]struct ProcessInfo{public IntPtr Process,Thread;public uint Pid,Tid;}
- [StructLayout(LayoutKind.Sequential)]struct Security{public uint Length;public IntPtr Descriptor;[MarshalAs(UnmanagedType.Bool)]public bool Inherit;}
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)]struct BasicLimit{public long ProcessTime,JobTime;public uint Flags;public UIntPtr MinWork,MaxWork;public uint Active;public UIntPtr Affinity;public uint Priority,Scheduling;}
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)]struct Io{public ulong A,B,C,D,E,F;}
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)]struct Limits{public BasicLimit Basic;public Io Io;public UIntPtr ProcessMemory,JobMemory,PeakProcessMemory,PeakJobMemory;}
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)]struct Startup{public uint Size;public IntPtr Reserved,Desktop,Title;public uint X,Y,XSize,YSize,XCount,YCount,Fill,Flags;public ushort Show,ReservedSize;public IntPtr ReservedBytes,Input,Output,Error;}
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)]struct StartupEx{public Startup Startup;public IntPtr Attributes;}
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)]struct ProcessInfo{public IntPtr Process,Thread;public uint Pid,Tid;}
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)][StructLayout(LayoutKind.Sequential)]struct Security{public uint Length;public IntPtr Descriptor;[MarshalAs(UnmanagedType.Bool)]public bool Inherit;}
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern SafeFileHandle CreateJobObject(IntPtr security,string? name);
  [DllImport("kernel32.dll",SetLastError=true)]static extern bool SetInformationJobObject(SafeFileHandle job,int kind,in Limits value,uint size);
  [DllImport("kernel32.dll",SetLastError=true)]static extern bool TerminateJobObject(SafeFileHandle job,uint code);
