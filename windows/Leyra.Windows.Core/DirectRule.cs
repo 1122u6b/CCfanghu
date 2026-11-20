@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Net;
 namespace Leyra.Windows.Core;
-public sealed record DirectRule(string Cidr,string Note,bool Public)
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] public sealed record DirectRule(string Cidr,string Note,bool Public)
 {
     public static DirectRule Parse(string cidr,string note,bool confirmPublic)
     {

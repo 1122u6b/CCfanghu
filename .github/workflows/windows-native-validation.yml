@@ -172,7 +172,12 @@ jobs:
           $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S','/D=C:\Apps\Leyra' -Wait -PassThru
           $log = Join-Path $env:TEMP 'LEYRAConnect-setup.log'
           if (Test-Path $log) { Get-Content $log }
-          if ($p.ExitCode -ne 0) { Get-Service LeyraConnect -ErrorAction SilentlyContinue | Format-List *; throw "Installer exit code $($p.ExitCode)" }
+          if ($p.ExitCode -ne 0) {
+            Get-Service LeyraConnect -ErrorAction SilentlyContinue | Format-List *
+            Get-Content "$env:ProgramData\LeyraConnect\agent-error.log" -ErrorAction SilentlyContinue | Select-Object -Last 40
+            Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddMinutes(-10)} -ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -match '\.NET Runtime|Application Error' } | Select-Object -First 5 | ForEach-Object { $_.Message }
+            throw "Installer exit code $($p.ExitCode)"
+          }
       - name: Verify installed program, files and running service
         shell: pwsh
         run: |
