@@ -2,7 +2,7 @@ namespace Leyra.Windows.Core;
 /// <summary>Single source of the product version: agent, desktop, installer and update checks.</summary>
 public static class ProductInfo
 {
- public const string Version="0.4.29";
+ public const string Version="0.4.30";
  /// <summary>Semantic-version order; a pre-release sorts before its release.</summary>
  public static int Compare(string a,string b)
  {

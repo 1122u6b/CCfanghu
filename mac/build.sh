@@ -11,23 +11,14 @@ mkdir -p "$ROOT/Applications" "$ROOT/Library/LaunchDaemons" "$ROOT/Library/Launc
 MIHOMO=v1.19.33
 for pair in "osx-arm64 agent-arm64 darwin-arm64" "osx-x64 agent-x64 darwin-amd64-compatible"; do
   set -- $pair
-  # Leyra's own code is obfuscated (scripts/obfuscate.py) before it goes into the single file: build (the output
-  # folder has the framework files to resolve against), obfuscate there, put the result back as the build output,
-  # then make the single file from it without compiling again.
-  SF=(-c Release -r "$1" --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -v q)
-  dotnet build mac/Leyra.Mac.Agent/Leyra.Mac.Agent.csproj "${SF[@]}"
-  BIN="mac/Leyra.Mac.Agent/bin/Release/net8.0/$1"
-  python3 scripts/obfuscate.py "$BIN" leyra-agent.dll Leyra.Windows.Core.dll
-  cp "$BIN/leyra-agent.dll" "mac/Leyra.Mac.Agent/obj/Release/net8.0/$1/leyra-agent.dll"
-  cp "$BIN/Leyra.Windows.Core.dll" windows/Leyra.Windows.Core/bin/Release/net8.0/Leyra.Windows.Core.dll
-  dotnet publish mac/Leyra.Mac.Agent/Leyra.Mac.Agent.csproj "${SF[@]}" --no-build -o "$SUP/$2"
-  if strings "$SUP/$2/leyra-agent" | grep -q ObserveExit; then echo "the single file still has readable Leyra code"; exit 1; fi
+  # The service is compiled to machine code, from its code with names renamed and strings hidden first.
+  python3 scripts/aot_publish.py mac/Leyra.Mac.Agent/Leyra.Mac.Agent.csproj "$1" "$SUP/$2" leyra-agent.dll Leyra.Windows.Core.dll
   curl -fsSL --retry 3 -o "$OUT/mihomo.gz" "https://github.com/MetaCubeX/mihomo/releases/download/$MIHOMO/mihomo-$3-$MIHOMO.gz"
   gunzip -c "$OUT/mihomo.gz" > "$SUP/$2/mihomo"; chmod 755 "$SUP/$2/mihomo"; rm "$OUT/mihomo.gz"
   codesign --force -s - "$SUP/$2/mihomo" "$SUP/$2/leyra-agent"
   SHA=$(shasum -a 256 "$SUP/$2/mihomo" | cut -d' ' -f1)
   printf '{"version":"%s","source":"https://github.com/MetaCubeX/mihomo/releases/download/%s/mihomo-%s-%s.gz","binary_sha256":"%s"}\n' "$MIHOMO" "$MIHOMO" "$3" "$MIHOMO" "$SHA" > "$SUP/$2/kernel-origin.json"
-  rm -f "$SUP/$2"/*.pdb
+  rm -f "$SUP/$2"/*.pdb "$SUP/$2"/*.dbg
 done
 cp mac/packaging/xin.leyra.agent.plist "$ROOT/Library/LaunchDaemons/"
 cp mac/packaging/xin.leyra.app.plist "$ROOT/Library/LaunchAgents/"
