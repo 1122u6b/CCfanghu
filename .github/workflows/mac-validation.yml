@@ -217,4 +217,4 @@ jobs:
             "release=\$(ls -d /opt/leyra-connect/releases/*/ | sort | tail -n1); sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $TEST_CODE; [ -n '$UI_CODE' ] && sudo -n python3 \"\${release}admin.py\" --profile /root/leyra-server-connection.json --connect 127.0.0.1 license-revoke $UI_CODE; pkill -f \"[l]eyra-ci-socks.py $SOCKS_PORT \" || true"
 
 
-# fresh run 20261120T0720 (0.4.29 again: the Intel runner went offline during the coexist step)
+# fresh run 20261120T0740 (0.4.29: PAC script read with retries)

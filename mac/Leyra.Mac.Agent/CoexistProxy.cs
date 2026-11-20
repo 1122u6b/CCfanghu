@@ -51,15 +51,23 @@ static class CoexistProxy
  static Upstream? FromPac(Setting s)
  {
   if(!s.On||!Uri.TryCreate(s.Server,UriKind.Absolute,out var u)||u.Scheme is not ("http" or "https")||u.Host is not ("127.0.0.1" or "localhost" or "[::1]"))return null;
-  try
+  // The proxy app serving the script may answer slowly right after it starts: a few tries.
+  for(var attempt=1;;attempt++)
   {
-   using var http=new HttpClient(new HttpClientHandler{UseProxy=false}){Timeout=TimeSpan.FromSeconds(3),MaxResponseContentBufferSize=1024*1024};
-   var script=http.GetStringAsync(u).GetAwaiter().GetResult();
-   var found=FromPacScript(script);
-   if(found is null)Program.Log("PAC script names no proxy on this Mac",new Exception(s.Server+" ("+script.Length+" characters)"));
-   return found;
+   try
+   {
+    using var http=new HttpClient(new HttpClientHandler{UseProxy=false}){Timeout=TimeSpan.FromSeconds(4),MaxResponseContentBufferSize=1024*1024};
+    var script=http.GetStringAsync(u).GetAwaiter().GetResult();
+    var found=FromPacScript(script);
+    if(found is null)Program.Log("PAC script names no proxy on this Mac",new Exception(s.Server+" ("+script.Length+" characters)"));
+    return found;
+   }
+   catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidOperationException)
+   {
+    if(attempt>=3){Program.Log("reading the PAC script "+s.Server,e);return null;}
+    Thread.Sleep(1000);
+   }
   }
-  catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidOperationException){Program.Log("reading the PAC script "+s.Server,e);return null;}
  }
  static bool Local(Setting s)=>s.Kind!="autoproxy"&&s.On&&s.Port is >0 and <65536&&s.Port!=LocalPort&&s.Server is "127.0.0.1" or "localhost" or "::1";
  public static bool Taken=>File.Exists(Saved);

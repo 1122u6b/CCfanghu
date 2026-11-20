@@ -90,7 +90,9 @@ rm -rf $FAKE
 
 echo "6. the customer's proxy app uses a PAC script (Clash's PAC mode): Leyra recognises it and puts it back exactly"
 mkdir -p /tmp/leyrapac && echo "function FindProxyForURL(u,h){return 'PROXY 127.0.0.1:7890; DIRECT';}" > /tmp/leyrapac/proxy.pac
-python3 -m http.server 18181 --bind 127.0.0.1 --directory /tmp/leyrapac >/dev/null 2>&1 & PAC=$!; sleep 1
+python3 -m http.server 18181 --bind 127.0.0.1 --directory /tmp/leyrapac >/dev/null 2>&1 & PAC=$!
+end=$((SECONDS+30)); until curl -s --noproxy '*' --max-time 3 -o /dev/null http://127.0.0.1:18181/proxy.pac || [ $SECONDS -gt $end ]; do sleep 1; done
+echo "   PAC script served after $((SECONDS-end+30)) s"
 echo "$SVC" | while read -r s; do sudo networksetup -setwebproxystate "$s" off; sudo networksetup -setsecurewebproxystate "$s" off; sudo networksetup -setautoproxyurl "$s" http://127.0.0.1:18181/proxy.pac; sudo networksetup -setautoproxystate "$s" on; done
 ask '{"type":"resume"}' >/dev/null
 CO=""; end=$((SECONDS+90)); until [ "$CO" = "True" ] || [ $SECONDS -gt $end ]; do sleep 3; CO=$(python3 ask.py '{"type":"status"}' --full 2>/dev/null | python3 -c 'import json,sys;v=json.load(sys.stdin)["value"];print(v.get("coexist") and v["protection"]["state"]=="protected")' 2>/dev/null); done
