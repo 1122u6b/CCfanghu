@@ -27,6 +27,8 @@ sealed class AgentSettings
  public string UpdateAtBootDigest{get;set;}="";
  // 出口连不上时自动换到其他能用的出口（默认开）。关了：直接断网并提醒，出口 IP 不会自己变。
  public bool AutoSwitchExit{get;set;}=true;
+ // 只让 Claude 走出口 / 全部走出口 选过没有。新装默认只让 Claude 走出口（已选）；老客户升级后为空，界面问一次。
+ public bool? ModeChosen{get;set;}
 }
 sealed class AgentStore
 {
@@ -37,7 +39,7 @@ sealed class AgentStore
  public AgentStore()
  {
   Owner=new SecurityIdentifier(File.ReadAllText(Path.Combine(Root,"owner.sid")).Trim());
-  Settings=File.Exists(Path.Combine(Root,"state.json"))?JsonSerializer.Deserialize<AgentSettings>(File.ReadAllBytes(Path.Combine(Root,"state.json")))??throw new InvalidDataException("本机状态文件无效"):new();
+  Settings=File.Exists(Path.Combine(Root,"state.json"))?JsonSerializer.Deserialize<AgentSettings>(File.ReadAllBytes(Path.Combine(Root,"state.json")))??throw new InvalidDataException("本机状态文件无效"):new(){ProxyOnlyListed=true,ModeChosen=true}; // a new install: only Claude through the exit
   if(Settings.Schema!=1 || Settings.DirectRules.Count>64)throw new InvalidDataException("本机状态版本无效");
   Settings.DirectRules=Settings.DirectRules.Select(r=>DirectRule.Parse(r.Cidr,r.Note,r.Public)).ToList();
   try{Settings.ProxyDomains=Leyra.Windows.Core.MihomoConfiguration.ProxyDomains(Settings.ProxyDomains??[]).ToList();}

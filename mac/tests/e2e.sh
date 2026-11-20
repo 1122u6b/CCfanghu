@@ -19,6 +19,8 @@ ask '{"type":"activate","code":"ZZZZ-ZZZZ-ZZZZ-ZZZZ","contact":"ci"}' && fail "w
 ask '{"type":"consent","version":99}' >/dev/null || true
 ask "{\"type\":\"activate\",\"code\":\"$TEST_CODE\",\"contact\":\"automated mac test\"}" || fail "activation failed"
 s=$(wait_for 'provisioning' 60) || fail "after activation it should wait for the own exit: $s"
+FRESH=$(python3 ask.py '{"type":"status"}' --full | python3 -c 'import json,sys;v=json.load(sys.stdin)["value"];print(v.get("listed"),v.get("mode_offer"))')
+echo "   fresh install: only Claude through the exit, asks which way = $FRESH"; [ "$FRESH" = "True False" ] || fail "a new install should send only Claude through the exit and not ask: $FRESH"
 
 echo "3. own exit -> protected"
 ask "{\"type\":\"own_exit\",\"links\":\"socks5://ci:$SOCKS_PASS@127.0.0.1:$SOCKS_PORT\"}" || fail "importing the own exit failed"
@@ -38,6 +40,18 @@ ip2(){ for k in 1 2 3; do r=$(curl -s --max-time 20 https://icanhazip.com | tr -
 ask '{"type":"set_route_mode","listed":true,"domains":["icanhazip.com"]}' >/dev/null; sleep 4; wait_for '^protected' 150 >/dev/null || fail "list mode not protected"
 L=$(ip2); ask '{"type":"set_route_mode","listed":true,"domains":["example.com"]}' >/dev/null; sleep 4; wait_for '^protected' 150 >/dev/null
 D=$(ip2); W=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://www.apple.com/)
+echo "   only Claude through the exit and the exit dies: only Claude (and the list) is cut off, everything else keeps working"
+curl -s --max-time 8 -x http://127.0.0.1:17890 http://stop-60.leyra-ci.invalid/ >/dev/null || true
+s=$(wait_for '^blocked' 100); echo "   exit dead in list mode: $s"
+[[ "$s" == blocked* ]] || fail "list mode: a dead exit should cut Claude off: $s"
+OTHER=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 https://icanhazip.com || true)
+LISTED=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 https://example.com || true)
+CLAUDE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 https://claude.ai || true)
+echo "   while the exit is down: other site $OTHER, listed site $LISTED, claude.ai $CLAUDE"
+[ "$OTHER" = "200" ] || fail "list mode with the exit down: other sites must keep working, got $OTHER"
+[ "$LISTED" = "000" ] || fail "list mode with the exit down: a listed site answered ($LISTED)"
+[ "$CLAUDE" = "000" ] || fail "list mode with the exit down: claude.ai answered ($CLAUDE)"
+s=$(wait_for '^protected' 150) || fail "list mode: not protected again once the exit came back: $s"; echo "   exit back: $s"
 ask '{"type":"set_route_mode","listed":false}' >/dev/null; sleep 4; wait_for '^protected' 150 >/dev/null
 B=$(ip); echo "   listed: $L, not listed: $D (other site $W), back: $B"
 [ "$L" = "$EXIT" ] || fail "listed site did not go through the exit: $L"

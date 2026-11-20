@@ -247,3 +247,24 @@ test('all exits down and switching turned off have their own cut-off pages',asyn
   }
  }finally{await cleanup(w);}
 });
+
+test('only Claude through the exit: asked once after updating, explained on the overview and when cut off',async()=>{
+ let status={protection:{state:'protected'},listed:false,mode_offer:true,holding:false};
+ const calls=[];
+ const w=await setup((command,args)=>{if(command==='daemon')calls.push(args.request);
+  return command==='daemon'&&args.request.type==='account'?{activated:true,account_id:5,suite:{kind:'soft'},own_exit:'connected',exits:{list:[]},channels:[]}:command==='daemon'&&args.request.type==='status'?status:command==='daemon'&&args.request.type==='choose_mode'?{saved:true,listed:args.request.listed}:{};});
+ try{
+  await settle();
+  assert.equal(w.__proto.S.dialog&&w.__proto.S.dialog.type,'modeOffer','asked once after updating');
+  w.__proto.render();assert.match(w.document.body.textContent,/只让 Claude 走出口（推荐）/);assert.match(w.document.body.textContent,/保持全部走出口/);
+  w.__proto.A.modeChoose('claude');await settle();
+  const sent=calls.filter(c=>c.type==='choose_mode').pop();assert.equal(sent&&sent.listed,true);
+  assert.equal(w.__proto.S.dialog,null);
+  // overview wording in this mode
+  Object.assign(w.__proto.S,{status:'ok',listed:true});const home=render(w,'overview');w.__proto.S.status='ok';w.__proto.render();
+  assert.match(w.document.body.textContent,/Claude 看不到你的真实 IP。其他软件照常直连/);
+  // cut off while holding: other software keeps working
+  Object.assign(w.__proto.S,{status:'pm',reason:'exits',holding:true});w.__proto.render();
+  assert.match(w.document.body.textContent,/只有 Claude 暂时断开/);
+ }finally{await cleanup(w);}
+});

@@ -231,10 +231,14 @@
     S.screen = 'trialStopped'; S.trial = 'stopped';
   }
 
-  var failoverSeen = 0;
+  var failoverSeen = 0, modeAsked = false;
   function apply(st) {
     applyLines(st);
     if (st.auto_exit != null) S.autoExit = !!st.auto_exit;
+    if (st.listed != null) S.listed = !!st.listed;
+    S.holding = !!st.holding;
+    // 老客户升级后问一次走出口的方式（新装的已经是「只让 Claude 走出口」，不问）。
+    if (st.mode_offer && !modeAsked && S.screen === 'main' && !S.dialog) { modeAsked = true; S.dialog = { type: 'modeOffer' }; }
     // 出口连不上、已自动换到另一个：系统通知 + 界面提示（同一次只提醒一次；打开软件时 10 分钟前的旧事不再提）。
     var lf = st.last_failover;
     if (lf && lf.at && lf.at !== failoverSeen) {
@@ -1011,6 +1015,15 @@
       S.autoExit = !!(r && r.on); P.render();
       P.toast(S.autoExit ? '已打开：出口连不上时自动换到能用的出口并通知你' : '已关闭：出口连不上时直接断网提醒，IP 不会自己变');
     }).catch(function (e) { P.toast('没改成：' + msg(e), 'info'); });
+  };
+  A.modeChoose = function (which) {
+    var listed = which === 'claude';
+    S.dialog = null; P.render();
+    call({ type: 'choose_mode', listed: listed }).then(function () {
+      S.listed = listed; P.render();
+      P.toast(listed ? '已改为只让 Claude 走出口，其他软件照常上网' : '保持全部走出口');
+      if (typeof loadRoute === 'function') loadRoute();
+    }).catch(function (e) { modeAsked = false; P.toast('没改成：' + msg(e), 'info'); });
   };
   A.autoExitOn = function () { if (S.autoExit === false) A.autoExit(); };
   // 本机直连 ⇄ 经香港中转：正在用的出口改了走法，防护会重新建一次线路（几秒，期间真实 IP 照样挡住）。

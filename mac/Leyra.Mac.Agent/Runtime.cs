@@ -200,7 +200,7 @@ sealed partial class Runtime:IDisposable
   MihomoConfiguration.ValidateNodes(nodes);
   try{NoteExpiry(await cloud.RpcAsync(new{type="account"},ct));}catch(Exception e)when(e is not OperationCanceledException){Program.Log("reading the authorization expiry",e);}
   var remoteRules=await Remote(new{type="direct_rules"},ct);ReadRules(remoteRules);
-  var dns=PrivateDns.Parse(await cloud.RpcAsync(new{type="dns_config"},ct),profile);
+  var dns=PrivateDns.Parse(await cloud.RpcAsync(new{type="dns_config"},ct),profile);lastDns=dns;
   // The gateway accepts multiplexed connections: new connections then cost one round trip to Hong Kong.
   var mux=config.TryGetProperty("mux",out var muxKind)&&muxKind.ValueKind==JsonValueKind.String&&muxKind.GetString()=="yamux";
   var listed=coexist||store.Settings.ProxyOnlyListed;
@@ -302,6 +302,7 @@ sealed partial class Runtime:IDisposable
   retryAt=DateTimeOffset.UtcNow.AddSeconds(Math.Min(60,5*Math.Pow(2,Math.Min(failures++,4))));
   triedExits.Clear();
   Record("blocked",reason);Program.Log("protection blocked",e);
+  HoldListed();
  }
  // ---------- 「本机直连」的流量：网关看不到，本机数好了报给服务器（「本月流量」照样显示） ----------
  bool directExit;GatewayEndpoint[] directEndpoints=[];
@@ -350,6 +351,41 @@ sealed partial class Runtime:IDisposable
   exitDownloads=seen;
   if(stuck>=2&&!progress){stallAt=now;if(now>=stallProbeAt){stallProbeAt=now.AddSeconds(15);nextNetProbe=now;}}
  }
+ // ---------- 只让 Claude 走出口时线路断了：只拦 Claude，其他软件照常上网 ----------
+ // A holding kernel runs the tunnel: Claude's programs, Claude's sites, the customer's list and Anthropic's ranges are
+ // refused, browsers may not send UDP, everything else goes out directly as it would without Leyra. The firewall
+ // keeps every program but the kernel off the physical network, so nothing reaches Claude another way. If the holding
+ // kernel cannot start, the whole computer stays cut off as before (never the bare real network for Claude).
+ PrivateDns? lastDns;
+ internal bool holding;
+ void HoldListed()
+ {
+  holding=false;
+  if(coexist||!store.Settings.ProxyOnlyListed||lastDns is null||nodes.ValueKind!=JsonValueKind.Array)return;
+  try
+  {
+   var built=System.Text.Json.Nodes.JsonNode.Parse(MihomoConfiguration.Build(nodes,kernel.Secret,true,lastDns,store.Settings.DirectRules,false,store.Settings.ProxyDomains))!.AsObject();
+   built["rules"]=new System.Text.Json.Nodes.JsonArray(HoldingRules(store.Settings.ProxyDomains).Select(x=>(System.Text.Json.Nodes.JsonNode?)x).ToArray());
+   // Names are looked up directly (the private resolver is reached through the exit, which is down).
+   var dnsNode=built["dns"]!.AsObject();
+   dnsNode["nameserver"]=new System.Text.Json.Nodes.JsonArray("https://223.5.5.5/dns-query","https://1.1.1.1/dns-query");
+   dnsNode.Remove("nameserver-policy");dnsNode.Remove("respect-rules");
+   built["find-process-mode"]="strict";
+   using var limit=new CancellationTokenSource(TimeSpan.FromSeconds(15));
+   kernel.Start(System.Text.Encoding.UTF8.GetBytes(built.ToJsonString()),limit.Token).GetAwaiter().GetResult();
+   for(var i=0;i<40;i++){tunnel=KernelSession.Tunnel();if(tunnel!=0)break;Thread.Sleep(200);}
+   if(tunnel==0)throw new InvalidOperationException("没有找到守门用的本机 TUN 接口");
+   ApplyGuard(tunnel);holding=true;
+  }
+  catch(Exception e)when(e is not OutOfMemoryException)
+  {
+   Program.Log("holding Claude while the line is down",e);
+   try{kernel.Stop();ApplyGuard(0);}catch(Exception e2)when(e2 is not OutOfMemoryException){Program.Log("cutting off after holding failed",e2);}
+  }
+ }
+ // Claude (programs, sites, the customer's list, Anthropic's ranges) and browsers' UDP refused; the rest direct.
+ internal static string[] HoldingRules(IEnumerable<string> listed)=>
+  LockRules("REJECT").Concat(MihomoConfiguration.ClaudeAlways.Concat(MihomoConfiguration.Expand(listed)).Distinct().Select(d=>MihomoConfiguration.Rule(d,"REJECT"))).Append("MATCH,DIRECT").ToArray();
  // ---------- 换出口：不重建防护 ----------
  // Every exit is reached through the same Leyra gateway, which picks the customer's selected exit for each new
  // connection, so nothing on this computer has to be rebuilt: close the connections opened before the switch
@@ -420,7 +456,7 @@ sealed partial class Runtime:IDisposable
   if(pick is not {} next)
   {
    // None of the customer's exits works right now: stay cut off (the real IP is never used), say so, try again shortly.
-   triedExits.Clear();state="blocked";reason="all_exits_down";retryAt=DateTimeOffset.UtcNow.AddSeconds(30);Record("blocked",reason);return;
+   triedExits.Clear();state="blocked";reason="all_exits_down";retryAt=DateTimeOffset.UtcNow.AddSeconds(30);Record("blocked",reason);HoldListed();return;
   }
   await Remote(new{type="select_exit",id=next.Id},stop);triedExits.Add(next.Id);
   configured=false;retryAt=DateTimeOffset.UtcNow;
@@ -549,7 +585,7 @@ sealed partial class Runtime:IDisposable
   var lastCheck=last is null?(JsonElement?)null:JsonSerializer.SerializeToElement(last);
   var index=nodes.ValueKind==JsonValueKind.Array?nodes.EnumerateArray().Select((x,i)=>(Name:Text(x,"name"),Index:i+1)).FirstOrDefault(x=>x.Name==selected).Index:0;
   var remaining=Math.Max(0,store.Settings.PausedUntil-DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-  return new{version=Program.Version,coexist,consent_version=store.Settings.ConsentVersion,protection=new{state=visible,reason,remaining_secs=remaining,auto_resume_on_node=false,quit=store.Settings.QuitPause,off=visible=="paused"&&!store.Settings.Enabled,blocked=visible=="blocked",since_secs=0},lines,current_line=index==0?"1":index.ToString(),line_mode=new{mode},rate=visible=="protected"?new{up_bps=up,down_bps=down}:null,guard=visible=="protected"?new{since=guardSince.ToUnixTimeSeconds(),blocked=(int?)null}:null,checks=bypassCheck is not null&&visible=="protected"&&JsonSerializer.SerializeToElement(bypassCheck).GetProperty("verdict").GetString()=="fail"?new[]{bypassCheck}:Array.Empty<object>(),conflicts,proxy_undo=proxy.UndoAvailable,last_error=lastError,update=updateReady,update_at_boot=store.Settings.UpdateAtBoot,auto_exit=store.Settings.AutoSwitchExit,last_failover=lastFailover,last_check=lastCheck is JsonElement lc?new{at=lc.GetProperty("at").GetInt64(),kind=Text(lc,"kind"),problems=lc.GetProperty("problems").GetInt32()}:null};
+  return new{version=Program.Version,coexist,consent_version=store.Settings.ConsentVersion,protection=new{state=visible,reason,remaining_secs=remaining,auto_resume_on_node=false,quit=store.Settings.QuitPause,off=visible=="paused"&&!store.Settings.Enabled,blocked=visible=="blocked",since_secs=0},lines,current_line=index==0?"1":index.ToString(),line_mode=new{mode},rate=visible=="protected"?new{up_bps=up,down_bps=down}:null,guard=visible=="protected"?new{since=guardSince.ToUnixTimeSeconds(),blocked=(int?)null}:null,checks=bypassCheck is not null&&visible=="protected"&&JsonSerializer.SerializeToElement(bypassCheck).GetProperty("verdict").GetString()=="fail"?new[]{bypassCheck}:Array.Empty<object>(),conflicts,proxy_undo=proxy.UndoAvailable,last_error=lastError,update=updateReady,update_at_boot=store.Settings.UpdateAtBoot,auto_exit=store.Settings.AutoSwitchExit,last_failover=lastFailover,listed=store.Settings.ProxyOnlyListed,mode_offer=store.Settings.ModeChosen!=true,holding,last_check=lastCheck is JsonElement lc?new{at=lc.GetProperty("at").GetInt64(),kind=Text(lc,"kind"),problems=lc.GetProperty("problems").GetInt32()}:null};
  }
  string writtenState="";
  void Publish()
@@ -644,7 +680,7 @@ sealed partial class Runtime:IDisposable
      {
       var listed=Bool(request,"listed");
       var domains=request.TryGetProperty("domains",out var ds)&&ds.ValueKind==JsonValueKind.Array?MihomoConfiguration.ProxyDomains(ds.EnumerateArray().Select(x=>x.GetString()??"")).ToList():store.Settings.ProxyDomains;
-      store.Settings.ProxyOnlyListed=listed;store.Settings.ProxyDomains=domains;store.Save();
+      store.Settings.ProxyOnlyListed=listed;store.Settings.ProxyDomains=domains;store.Settings.ModeChosen=true;store.Save();
       // Rebuild the line with the new routing (blocking rules stay on while it does).
       configured=false;retryAt=DateTimeOffset.MinValue;return new{saved=true,listed,domains};
      }
@@ -683,6 +719,12 @@ sealed partial class Runtime:IDisposable
     case "report_bad_line":return await Remote(new{type="new_ticket",kind=1,title="线路问题",body="客户反馈当前线路不可用，请检查服务端出口。"},stop);
     case "install_update":return InstallUpdate();
     case "update_at_boot":return UpdateAtBoot();
+    case "choose_mode":
+     {
+      // The one-time question after updating: only Claude through the exit, or everything (as before).
+      var listed=Bool(request,"listed");store.Settings.ProxyOnlyListed=listed;store.Settings.ModeChosen=true;store.Save();
+      configured=false;retryAt=DateTimeOffset.MinValue;return new{saved=true,listed};
+     }
     case "set_auto_exit":store.Settings.AutoSwitchExit=Bool(request,"on");store.Save();return new{saved=true,on=store.Settings.AutoSwitchExit};
     case "own_exit":case "store_exit":return await AddExit(request,stop);
     case "block_before_ready":

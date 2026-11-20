@@ -262,6 +262,10 @@ jobs:
           if ($s -notmatch 'provisioning') { $failures += "after activation it should wait for the customer's own exit: $s" }
           Ask '{"type":"account"}' | Out-Null
           if ((Get-Content "C:\LeyraCi\out_$script:n.json" -Raw) -notmatch '"own_exit":"waiting"') { $failures += 'account does not ask for the own exit' }
+          Ask '{"type":"status"}' | Out-Null
+          $fresh = (Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value
+          Write-Host "   fresh install: only Claude through the exit = $($fresh.listed), asks which way = $($fresh.mode_offer)"
+          if ($fresh.listed -ne $true -or $fresh.mode_offer -ne $false) { $failures += "a new install should send only Claude through the exit and not ask: listed=$($fresh.listed) ask=$($fresh.mode_offer)" }
           Write-Host '   customer pastes their own IP in 接入你的出口'
           if (-not $env:SOCKS_PORT -or -not $env:SOCKS_PASS) { $failures += 'test setup: the temporary proxy details did not arrive' }
           $link = "socks5://ci:$($env:SOCKS_PASS)@127.0.0.1:$($env:SOCKS_PORT)"
@@ -385,6 +389,21 @@ jobs:
           $s = Route '{"type":"set_route_mode","listed":true,"domains":["example.com"]}'
           $ipDirect = SeenIp2; $web = try { (Invoke-WebRequest https://www.microsoft.com -UseBasicParsing -TimeoutSec 25).StatusCode } catch { 0 }
           Write-Host "   list = example.com: icanhazip (not listed) sees $ipDirect, another site answers $web"
+          Write-Host '   only Claude through the exit and the exit dies: only Claude (and the list) is cut off, everything else keeps working'
+          function Code($u, $t) { try { (Invoke-WebRequest $u -UseBasicParsing -TimeoutSec $t).StatusCode } catch { if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 } } }
+          # two working exits here: switching is turned off so the exit in use stays down and only Claude is held
+          Ask '{"type":"set_auto_exit","on":false}' | Out-Null
+          try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 8 -Proxy http://127.0.0.1:17890 http://stop-60.leyra-ci.invalid/ | Out-Null } catch { }
+          $s = WaitFor 'blocked' 100; Write-Host "   exit dead in list mode: $s"
+          $other = Code https://icanhazip.com 15; $listedNow = Code https://example.com 8; $claudeNow = Code https://claude.ai 8
+          Write-Host "   while the exit is down: other site $other, listed site $listedNow, claude.ai $claudeNow"
+          if ($s -notmatch 'blocked') { $failures += "list mode: a dead exit should cut Claude off: $s" }
+          if ($other -ne 200) { $failures += "list mode with the exit down: other sites must keep working, got $other" }
+          if ($listedNow -ne 0) { $failures += "list mode with the exit down: a listed site answered ($listedNow)" }
+          if ($claudeNow -ne 0) { $failures += "list mode with the exit down: claude.ai answered ($claudeNow)" }
+          $s = WaitFor 'protected' 150; Write-Host "   exit back: $s"
+          if ($s -notmatch 'protected') { $failures += "list mode: not protected again once the exit came back: $s" }
+          Ask '{"type":"set_auto_exit","on":true}' | Out-Null
           $s = Route '{"type":"set_route_mode","listed":false}'
           $ipBack = SeenIp; Write-Host "   list mode off again: sites see $ipBack"
           if ($ipAll -notmatch '^\d+\.\d+\.\d+\.\d+$') { $failures += "could not read the exit IP: $ipAll" }

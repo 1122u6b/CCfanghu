@@ -97,6 +97,19 @@ using(var stopped=new CancellationTokenSource()){
  Check(Pick("{\"selected\":null,\"items\":[{\"id\":1,\"name\":\"a\",\"health\":"+unknown+"}]}").Contains("a"),"no exit selected yet: any exit will do");
 }
 
+// 「只让 Claude 走出口」on Windows: Claude's programs and browsers' UDP are held by program, ahead of every other rule.
+{
+ var lockdown=type.GetMethod("Lockdown",BindingFlags.Static|BindingFlags.NonPublic)!;
+ var plain="{\"rules\":[\"DOMAIN-SUFFIX,claude.ai,出口\",\"MATCH,DIRECT\"]}"u8.ToArray();
+ var locked=JsonDocument.Parse((byte[])lockdown.Invoke(null,[plain,"出口"])!).RootElement;
+ var rules=locked.GetProperty("rules").EnumerateArray().Select(x=>x.GetString()!).ToList();
+ Check(rules[0]=="PROCESS-NAME,claude.exe,出口","the Claude programs come first and go through the exit");
+ Check(rules.Contains("AND,((NETWORK,UDP),(PROCESS-NAME,chrome.exe)),REJECT")&&rules.Contains("AND,((NETWORK,UDP),(PROCESS-NAME,msedge.exe)),REJECT"),"browsers may not send UDP (WebRTC)");
+ Check(rules.IndexOf("DOMAIN-SUFFIX,claude.ai,出口")>rules.IndexOf("IP-CIDR,160.79.104.0/23,出口,no-resolve")&&rules[^1]=="MATCH,DIRECT","the list and the rest keep their order after the program rules");
+ Check(locked.GetProperty("find-process-mode").GetString()=="strict","programs are always looked up");
+ var dump=Environment.GetEnvironmentVariable("LEYRA_DUMP_LOCKDOWN");if(dump is not null)File.WriteAllBytes(dump,(byte[])lockdown.Invoke(null,[plain,"出口"])!);
+}
+
 sealed class SlowDownload:Stream
 {
  bool sent;

@@ -425,7 +425,7 @@
     if (st === 'ok') {
       g = H.statusGraphic('ok', f); title = '已保护';
       // 防护记录（01 §5.3）：这次连续保护的时长和挡下的直连次数；守护程序没给就不显示。
-      body = '<p>真实 IP 已隐藏，所有流量经' + (byo() ? '你的出口' : '独享线路') + '传输。</p>' + (S.guard ? '<span class="p-sub p-guard">已连续保护 ' + S.guard.dur + (S.guard.blocked != null ? ' · 挡下 ' + S.guard.blocked + ' 次直连' : '') + '</span>' : '');
+      body = (S.listed ? '<p>Claude 经' + (byo() ? '你的出口' : '独享线路') + '访问，Claude 看不到你的真实 IP。其他软件照常直连，或走你自己的 VPN。</p>' : '<p>真实 IP 已隐藏，所有流量经' + (byo() ? '你的出口' : '独享线路') + '传输。</p>') + (S.guard ? '<span class="p-sub p-guard">已连续保护 ' + S.guard.dur + (S.guard.blocked != null ? ' · 挡下 ' + S.guard.blocked + ' 次直连' : '') + '</span>' : '');
       acts = S.busy.resume ? '' : btn('danger', I('lock', 14) + '暂停防护', 'pause') + btn('text', '安全检查', 'go:check');
     } else if (st === 'starting') {
       g = H.statusGraphic('neutral', f); title = S.starting.switching ? '正在切换出口' : '启动中';
@@ -437,7 +437,7 @@
       g = H.statusGraphic('danger', f); title = '已断网';
       if (S.reason === 'checking') body = '<p>网络已断开。</p>' + inline('正在确认原因');
       else {
-        body = '<p>' + (renewing ? '网络已断开。续费申请已提交，开通后自动恢复' : R.desc) + '</p>' + (R.desc2 ? '<p class="hint">' + R.desc2 + '</p>' : '');
+        body = '<p>' + (renewing ? '网络已断开。续费申请已提交，开通后自动恢复' : R.desc) + '</p>' + (S.holding ? '<p class="hint">只有 Claude 暂时断开（真实 IP 不会给 Claude 看到），其他软件照常上网。</p>' : '') + (R.desc2 ? '<p class="hint">' + R.desc2 + '</p>' : '');
       }
       body += busy('status');
       acts = (S.busy.status ? '' : (renewing ? [['primary', '查看进度', 'renewView']] : (R.btns || [])).map(function (b) { return btn(b[0], b[1], b[2]); }).join('')) + (R.noPause ? '' : btn('danger', I('lock', 14) + (R.pause || '暂停防护'), R.pause ? 'pauseLogin' : 'pause'));
@@ -1339,6 +1339,12 @@
       h = '<div class="hx-dialog' + k + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">用原授权码恢复</h3><p>输入这台电脑原来的授权码，接回原来的账户。</p>' +
         '<label class="hx-field"><span class="p-sronly">授权码</span><input class="hx-input' + (D.err ? ' is-error' : '') + '" data-keep="restore-code" id="f-restore-code" placeholder="例如 K7QM-29XF-H4TD-8NWP" data-autofocus>' + (D.err ? '<span class="hx-help is-error">' + I('warning', 16) + D.err + '</span>' : '') + '</label>' +
         '<div class="acts">' + btn('secondary', '取消', 'close') + btn('primary', '恢复', 'restoreUse') + '</div></div>';
+    } else if (D.type === 'modeOffer') {
+      // 升级后问一次：只让 Claude 走出口（新的默认）还是全部走出口（以前的方式）
+      h = '<div class="hx-dialog' + k + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">选择走出口的方式</h3>' +
+        '<p>新版本可以<b>只让 Claude 走出口</b>：Claude 桌面版、Claude Code、Claude 网页和它用到的服务都经出口，Claude 看不到你的真实 IP；其他软件照常直连，或走你自己的 VPN，不受影响。出口断了也只有 Claude 断开。</p>' +
+        '<p class="p-sub">也可以保持以前的方式：电脑上所有流量都走出口。以后在「设置」里随时能改。</p>' +
+        '<div class="acts">' + btn('secondary', '保持全部走出口', 'modeChoose:all') + btn('primary', '只让 Claude 走出口（推荐）', 'modeChoose:claude', ' data-autofocus') + '</div></div>';
     } else if (D.type === 'tz') {
       h = '<div class="hx-dialog' + k + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><h3 id="dlg-t">' + I('clock', 20, 'c-warn') + '电脑时区和出口不一致</h3><p>' + tzWhere() + '，电脑时区是' + lat(TZN.sys) + '，境外网站可能据此判断你所在的地区。是否把电脑时区改为' + lat(TZN.exit) + '？</p>' +
         '<div class="acts">' + btn('secondary', '暂不', 'tzLater') + btn('primary', '更换时区', 'tzDo', ' data-autofocus') + '</div></div>';
