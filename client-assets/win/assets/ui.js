@@ -1128,7 +1128,10 @@
     var R = S.splitRoute || { listed: false, domains: [] };
     // 共存模式（开着客户自己的代理）：名单里的走 Leyra 出口，其他交给客户自己的代理；名单一直可以改。
     if (S.coexist) return '<div class="hx-card p-setcard"><div class="hx-setrow"><div class="l"><span>走 Leyra 出口的网站</span><small>' +
-      '共存模式：检测到你开着自己的代理。名单里的网站走 Leyra 出口，其他照常走你自己的代理。加好后点「保存名单」，生效后刷新网页即可</small></div></div>' + routeEditor(R) + '</div>';
+      (S.sharedVpn ? '共存模式：检测到你开着自己的 VPN（' + esc(S.sharedVpn) + '）。Claude 和名单里的网站走 Leyra 出口，其他照常走你自己的 VPN。' : '共存模式：检测到你开着自己的代理。名单里的网站走 Leyra 出口，其他照常走你自己的代理。') +
+      '加好后点「保存名单」，生效后刷新网页即可</small></div></div>' + routeEditor(R) +
+      // Claude Code 不认系统代理：共存模式下它只能连 Leyra，要给它设一下代理（不设也不会暴露真实 IP，只是连不上）
+      '<div class="hx-setrow"><div class="l"><span>Claude Code</span><small>共存模式下 Claude Code 要走 Leyra 本机代理：在终端里先执行 <code>set HTTPS_PROXY=http://127.0.0.1:17890</code>（Mac 上是 <code>export HTTPS_PROXY=http://127.0.0.1:17890</code>）再启动 claude。不设置时 Claude Code 连不上，但不会暴露真实 IP</small></div></div></div>';
     return '<div class="hx-card p-setcard"><div class="hx-setrow"><div class="l"><span>只让名单里的网站走出口</span><small>' +
       (R.listed ? '已开启：名单外的网站和应用直连，速度和平时一样，但会看到你的真实 IP' : '关闭时所有流量都走出口（最安全）；开启后只有名单里的网站走出口，其他直连更快') +
       '</small></div>' + sw(!!R.listed, 'routeListed', '只让名单里的网站走出口') + '</div>' +

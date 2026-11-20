@@ -491,6 +491,27 @@ jobs:
           }
           if (-not $fake.HasExited) { Stop-Process -Id $fake.Id -Force }
           Set-ItemProperty $is ProxyEnable 0
+          Write-Host '   another VPN with its own virtual network card (like Clash TUN mode): Leyra shares instead of fighting'
+          $s = Route '{"type":"set_route_mode","listed":true,"domains":["claude.ai"]}'
+          $vpnDir = Join-Path $env:TEMP 'othervpn'; New-Item -ItemType Directory -Force $vpnDir | Out-Null
+          $vpnKernel = (Get-ChildItem 'C:\Apps\Leyra\versions\*\mihomo.exe' | Select-Object -First 1).FullName
+          Set-Content (Join-Path $vpnDir 'config.yaml') "mixed-port: 27890`nmode: rule`nlog-level: warning`nexternal-controller: 127.0.0.1:29090`ntun:`n  enable: true`n  device: OtherVPN`n  stack: gvisor`n  auto-route: true`n  auto-detect-interface: true`nrules:`n  - MATCH,DIRECT`n" -Encoding ascii
+          $vpn = Start-Process -FilePath $vpnKernel -ArgumentList '-d',$vpnDir -WindowStyle Hidden -PassThru
+          $end = (Get-Date).AddSeconds(90); $shared = ''
+          while ((Get-Date) -lt $end -and -not $shared) { Start-Sleep 4; Ask '{"type":"status"}' | Out-Null; $st = (Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value; if ($st.shared_vpn -and $st.protection.state -eq 'protected') { $shared = $st.shared_vpn } }
+          $viaLeyra = SeenIp; $otherSite = SeenIp2
+          $claudeDirect = & "$fakeDir\claude.exe" -s -o NUL -w '%{http_code}' --noproxy '*' --max-time 8 https://1.1.1.1/cdn-cgi/trace
+          Write-Host "   shared with: '$shared'; the self-check site sees $viaLeyra (exit $ipAll), another site sees $otherSite, Claude app directly: $claudeDirect"
+          if ($shared -ne 'OtherVPN') { $failures += "Leyra did not share with the other VPN's network card: '$shared'" }
+          if ($viaLeyra -ne $ipAll) { $failures += "sharing with another VPN: the exit was not used for the self-check site: $viaLeyra" }
+          if ($otherSite -eq $ipAll -or $otherSite -notmatch '^\d+\.\d+\.\d+\.\d+$') { $failures += "sharing with another VPN: other sites should go through that VPN, not the exit: $otherSite" }
+          if ($claudeDirect -eq '200') { $failures += 'sharing with another VPN: the Claude app reached the internet without Leyra' }
+          Stop-Process -Id $vpn.Id -Force -ErrorAction SilentlyContinue
+          $end = (Get-Date).AddSeconds(90); $back = $false
+          while ((Get-Date) -lt $end -and -not $back) { Start-Sleep 4; Ask '{"type":"status"}' | Out-Null; $st = (Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value; if (-not $st.shared_vpn -and -not $st.coexist -and $st.protection.state -eq 'protected') { $back = $true } }
+          Write-Host "   other VPN closed: back to Leyra's own network card: $back"
+          if (-not $back) { $failures += "after the other VPN closed, Leyra did not go back to its own network card" }
+          $s = Route '{"type":"set_route_mode","listed":false}'
           Write-Host '   before pausing: running Claude programs are listed and can be closed'
           $ct = Join-Path $env:TEMP 'claudetest'; New-Item -ItemType Directory -Force $ct | Out-Null
           Copy-Item "$env:SystemRoot\System32\PING.EXE" (Join-Path $ct 'claude.exe') -Force

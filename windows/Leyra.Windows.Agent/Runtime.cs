@@ -117,7 +117,7 @@ sealed partial class Runtime:IDisposable
  }
  // Coexist mode: the customer's own proxy app stays the way out for everything but the listed sites.
  string? realIp; // coexist mode: this computer's own address (asked directly), to tell real leaks from the customer's proxy
- bool coexist;CoexistProxy.Upstream? upstream;
+ bool coexist;CoexistProxy.Upstream? upstream;string? foreignTunnel;readonly List<DateTimeOffset> proxyRetakes=new();
  void Unguard(){filters.RemoveOwned();appGuardKey="";coexistProxy.Restore();}
  // Coexist mode: the Claude desktop app is locked to 127.0.0.1 (Leyra) and browsers may not send UDP to the internet.
  string appGuardKey="";
@@ -142,8 +142,8 @@ sealed partial class Runtime:IDisposable
    var reject=MihomoConfiguration.ClaudeAlways.Concat(MihomoConfiguration.Expand(store.Settings.ProxyDomains)).Distinct().Select(d=>MihomoConfiguration.Rule(d,"REJECT"));
    var hold=new Dictionary<string,object>{{"mixed-port",17890},{"allow-lan",false},{"bind-address","127.0.0.1"},{"mode","rule"},{"log-level","warning"},
     {"external-controller","127.0.0.1:19090"},{"secret",kernel.Secret},{"ipv6",false},
-    {"proxies",new object[]{new Dictionary<string,object>{{"name","本机原代理"},{"type",upstream.Type},{"server","127.0.0.1"},{"port",upstream.Port},{"udp",false}}}},
-    {"rules",reject.Append("MATCH,本机原代理").ToArray()},{"dns",new{enable=false}},{"tun",new{enable=false}}};
+    {"proxies",upstream.Type=="direct"?Array.Empty<object>():new object[]{new Dictionary<string,object>{{"name","本机原代理"},{"type",upstream.Type},{"server","127.0.0.1"},{"port",upstream.Port},{"udp",false}}}},
+    {"rules",reject.Append(upstream.Type=="direct"?"MATCH,DIRECT":"MATCH,本机原代理").ToArray()},{"dns",new{enable=false}},{"tun",new{enable=false}}};
    using var limit=new CancellationTokenSource(TimeSpan.FromSeconds(15));
    kernel.Start(JsonSerializer.SerializeToUtf8Bytes(hold),limit.Token).GetAwaiter().GetResult();
    coexistProxy.Take();
@@ -185,7 +185,13 @@ sealed partial class Runtime:IDisposable
  async Task StartProtected(CancellationToken stop)
  {
   if(profile is null || cloud is null)return;
-  upstream=coexistProxy.Find();coexist=upstream is not null;
+  upstream=coexistProxy.Find();
+  // Only Claude through the exit while another VPN holds a virtual network card: Leyra builds no network card of its
+  // own (two would fight over the routes). It stands in as the system proxy: Claude (programs, sites, the list) goes
+  // through the exit, everything else straight on, which the other VPN then carries as before.
+  foreignTunnel=upstream is null&&store.Settings.ProxyOnlyListed?ForeignTunnel():null;
+  if(foreignTunnel is not null)upstream=new CoexistProxy.Upstream("direct",0);
+  coexist=upstream is not null;
   state="starting";dnsVerified=false;exitVerified=false;Publish();ApplyGuard(0);
   if(startCancel.IsCancellationRequested){startCancel.Dispose();startCancel=new();}
   using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop,startCancel.Token);deadline.CancelAfter(TimeSpan.FromSeconds(90));var ct=deadline.Token;
@@ -204,8 +210,13 @@ sealed partial class Runtime:IDisposable
   {
    // Local proxy only: listed sites through the exit, everything else to the customer's own proxy.
    var built=System.Text.Json.Nodes.JsonNode.Parse(MihomoConfiguration.Build(nodes,kernel.Secret,false,null,store.Settings.DirectRules,mux,store.Settings.ProxyDomains))!.AsObject();
-   ((System.Text.Json.Nodes.JsonArray)built["proxies"]!).Add(new System.Text.Json.Nodes.JsonObject{["name"]="本机原代理",["type"]=upstream.Type,["server"]="127.0.0.1",["port"]=upstream.Port,["udp"]=false});
-   var rules=(System.Text.Json.Nodes.JsonArray)built["rules"]!;rules[rules.Count-1]="MATCH,本机原代理";
+   if(upstream.Type!="direct")
+   {
+    ((System.Text.Json.Nodes.JsonArray)built["proxies"]!).Add(new System.Text.Json.Nodes.JsonObject{["name"]="本机原代理",["type"]=upstream.Type,["server"]="127.0.0.1",["port"]=upstream.Port,["udp"]=false});
+    var rules=(System.Text.Json.Nodes.JsonArray)built["rules"]!;rules[rules.Count-1]="MATCH,本机原代理";
+   }
+   // Claude's programs are held by program here too (they may only reach Leyra; the firewall rules below).
+   built=System.Text.Json.Nodes.JsonNode.Parse(Lockdown(System.Text.Encoding.UTF8.GetBytes(built.ToJsonString()),"出口"))!.AsObject();
    await kernel.Start(System.Text.Encoding.UTF8.GetBytes(built.ToJsonString()),ct);
    coexistProxy.Take();ApplyAppGuard(true);dnsVerified=true;tunnel=0;
    try{using var direct=new HttpClient(new HttpClientHandler{UseProxy=false}){Timeout=TimeSpan.FromSeconds(10)};var ip=(await direct.GetStringAsync("https://api.ipify.org",ct)).Trim();realIp=System.Net.IPAddress.TryParse(ip,out _)?ip:null;}
@@ -546,12 +557,24 @@ sealed partial class Runtime:IDisposable
  async Task Health(CancellationToken stop)
  {
   if(cloud is null)throw new InvalidOperationException("尚未连接服务器");
+  // Only Claude through the exit: the customer turned another VPN's virtual network card on (share with it) or off
+  // (build Leyra's own again). Not while sharing with the customer's proxy app (that is decided by the system proxy).
+  if(store.Settings.ProxyOnlyListed&&!(coexist&&foreignTunnel is null)&&(ForeignTunnel() is not null)!=(foreignTunnel is not null))
+  {
+   Program.Log("another VPN's network card "+(foreignTunnel is null?"appeared":"went away")+": rebuilding the line",new Exception(ForeignTunnel()??foreignTunnel));
+   configured=false;retryAt=DateTimeOffset.MinValue;return;
+  }
   if(coexist)
   {
    if(!kernel.Alive)throw new InvalidOperationException("网络组件已退出");
    // The customer's proxy app may set the system proxy back to itself, or clear it when it quits: take it again
    // at once, so the listed sites never leave through anything but the exit.
-   if(!coexistProxy.Holding()){coexistProxy.Take();Record("repair","系统代理被其他软件改动，已接回 Leyra");}
+   if(!coexistProxy.Holding())
+   {
+    coexistProxy.Take();Record("repair","系统代理被其他软件改动，已接回 Leyra");
+    // The customer's proxy app keeps setting itself back ("system proxy guard"): say so instead of fighting quietly.
+    var now=DateTimeOffset.UtcNow;proxyRetakes.Add(now);proxyRetakes.RemoveAll(t=>now-t>TimeSpan.FromMinutes(2));
+   }
    // A Claude update (new folder) or a newly started browser gets its rule within seconds.
    ApplyAppGuard();
   }
@@ -581,7 +604,7 @@ sealed partial class Runtime:IDisposable
   var lastCheck=last is null?(JsonElement?)null:JsonSerializer.SerializeToElement(last);
   var index=nodes.ValueKind==JsonValueKind.Array?nodes.EnumerateArray().Select((x,i)=>(Name:Text(x,"name"),Index:i+1)).FirstOrDefault(x=>x.Name==selected).Index:0;
   var remaining=Math.Max(0,store.Settings.PausedUntil-DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-  return new{version=Program.Version,coexist,consent_version=store.Settings.ConsentVersion,protection=new{state=visible,reason,remaining_secs=remaining,auto_resume_on_node=false,quit=store.Settings.QuitPause,off=visible=="paused"&&!store.Settings.Enabled,blocked=visible=="blocked",since_secs=0},lines,current_line=index==0?"1":index.ToString(),line_mode=new{mode},rate=visible=="protected"?new{up_bps=up,down_bps=down}:null,guard=visible=="protected"?new{since=guardSince.ToUnixTimeSeconds(),blocked=(int?)null}:null,checks=bypassCheck is not null&&visible=="protected"&&JsonSerializer.SerializeToElement(bypassCheck).GetProperty("verdict").GetString()=="fail"?new[]{bypassCheck}:Array.Empty<object>(),conflicts,proxy_undo=proxy.UndoAvailable,last_error=lastError,update=updateReady,update_at_boot=store.Settings.UpdateAtBoot,auto_exit=store.Settings.AutoSwitchExit,last_failover=lastFailover,listed=store.Settings.ProxyOnlyListed,mode_offer=store.Settings.ModeChosen!=true,holding,last_check=lastCheck is JsonElement lc?new{at=lc.GetProperty("at").GetInt64(),kind=Text(lc,"kind"),problems=lc.GetProperty("problems").GetInt32()}:null};
+  return new{version=Program.Version,coexist,consent_version=store.Settings.ConsentVersion,protection=new{state=visible,reason,remaining_secs=remaining,auto_resume_on_node=false,quit=store.Settings.QuitPause,off=visible=="paused"&&!store.Settings.Enabled,blocked=visible=="blocked",since_secs=0},lines,current_line=index==0?"1":index.ToString(),line_mode=new{mode},rate=visible=="protected"?new{up_bps=up,down_bps=down}:null,guard=visible=="protected"?new{since=guardSince.ToUnixTimeSeconds(),blocked=(int?)null}:null,checks=bypassCheck is not null&&visible=="protected"&&JsonSerializer.SerializeToElement(bypassCheck).GetProperty("verdict").GetString()=="fail"?new[]{bypassCheck}:Array.Empty<object>(),conflicts,proxy_undo=proxy.UndoAvailable,last_error=lastError,update=updateReady,update_at_boot=store.Settings.UpdateAtBoot,auto_exit=store.Settings.AutoSwitchExit,last_failover=lastFailover,listed=store.Settings.ProxyOnlyListed,mode_offer=store.Settings.ModeChosen!=true,holding,shared_vpn=coexist?foreignTunnel:null,proxy_fight=coexist&&proxyRetakes.Count(t=>DateTimeOffset.UtcNow-t<TimeSpan.FromMinutes(2))>3,last_check=lastCheck is JsonElement lc?new{at=lc.GetProperty("at").GetInt64(),kind=Text(lc,"kind"),problems=lc.GetProperty("problems").GetInt32()}:null};
  }
  string writtenState="";
  void Publish()

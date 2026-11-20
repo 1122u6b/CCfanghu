@@ -87,6 +87,21 @@ proxyof | grep -q "Port: 7890" || fail "the customer's system proxy was not rest
 PA=$("$FAKE/Claude.app/Contents/MacOS/Claude" -s -o /dev/null -w '%{http_code}' --noproxy '*' --interface $LOCAL --max-time 10 https://1.1.1.1/cdn-cgi/trace)
 echo "   after pause programs connect normally again: $PA"; [ "$PA" = "200" ] || fail "the lock stayed after pausing Leyra: $PA"
 rm -rf $FAKE
+
+echo "6. the customer's proxy app uses a PAC script (Clash's PAC mode): Leyra recognises it and puts it back exactly"
+mkdir -p /tmp/leyrapac && echo "function FindProxyForURL(u,h){return 'PROXY 127.0.0.1:7890; DIRECT';}" > /tmp/leyrapac/proxy.pac
+python3 -m http.server 18181 --bind 127.0.0.1 --directory /tmp/leyrapac >/dev/null 2>&1 & PAC=$!; sleep 1
+echo "$SVC" | while read -r s; do sudo networksetup -setwebproxystate "$s" off; sudo networksetup -setsecurewebproxystate "$s" off; sudo networksetup -setautoproxyurl "$s" http://127.0.0.1:18181/proxy.pac; sudo networksetup -setautoproxystate "$s" on; done
+ask '{"type":"resume"}' >/dev/null
+CO=""; end=$((SECONDS+90)); until [ "$CO" = "True" ] || [ $SECONDS -gt $end ]; do sleep 3; CO=$(python3 ask.py '{"type":"status"}' --full 2>/dev/null | python3 -c 'import json,sys;v=json.load(sys.stdin)["value"];print(v.get("coexist") and v["protection"]["state"]=="protected")' 2>/dev/null); done
+echo "   with a PAC script as the system proxy: sharing with the customer's proxy = $CO"
+[ "$CO" = "True" ] || fail "a PAC script on this Mac was not recognised as the customer's own proxy"
+ask '{"type":"pause","minutes":10}' >/dev/null; wait_for '^paused' 30 >/dev/null || fail "did not pause"
+AUTO=$(networksetup -getautoproxyurl "$(echo "$SVC" | head -1)" | tr '\n' ' ')
+echo "   after pause the customer's PAC setting: $AUTO"
+echo "$AUTO" | grep -q "proxy.pac" && echo "$AUTO" | grep -q "Enabled: Yes" || fail "the customer's PAC setting was not put back: $AUTO"
+echo "$SVC" | while read -r s; do sudo networksetup -setautoproxystate "$s" off; done
+kill $PAC 2>/dev/null
 kill $OWN 2>/dev/null
 if [ ${#FAIL[@]} -gt 0 ]; then echo "LEYRA_MAC_COEXIST=FAIL (${#FAIL[@]})"; exit 1; fi
 echo "LEYRA_MAC_COEXIST=PASS"

@@ -315,6 +315,23 @@ sealed partial class Runtime
  /// straight to the internet instead (bypassing the exit); -1 when the app is not running.</summary>
  /// <summary>Programs the coexist rules apply to: every copy of the Claude desktop app (its install folder and any
  /// running copy; updates move it to a new folder) and the installed or running browsers.</summary>
+ // ---------- 和虚拟网卡型 VPN 共存 ----------
+ // Another VPN's virtual network card is up (Clash TUN mode, enterprise zero-trust clients, accelerators: Wintun,
+ // WireGuard, TAP or a PPP link). Its name, or null.
+ static string? ForeignTunnel()
+ {
+  foreach(var nic in NetworkInterface.GetAllNetworkInterfaces())
+  {
+   if(nic.OperationalStatus!=OperationalStatus.Up||nic.Name=="LeyraConnect")continue;
+   var d=nic.Description;
+   // Windows' own tunnels (IPv6 transition) are not VPNs.
+   if(new[]{"Teredo","ISATAP","6to4","IP-HTTPS","Microsoft Kernel Debug"}.Any(x=>d.Contains(x,StringComparison.OrdinalIgnoreCase)))continue;
+   // Wintun is named after the program that made it ("Meta Tunnel" for Clash/mihomo, "sing-tun Tunnel" ...).
+   if(d.Contains("TAP-Windows",StringComparison.OrdinalIgnoreCase)||d.Contains("WireGuard",StringComparison.OrdinalIgnoreCase)||d.Contains("Wintun",StringComparison.OrdinalIgnoreCase)||
+      d.Contains("Tunnel",StringComparison.OrdinalIgnoreCase)||nic.NetworkInterfaceType==NetworkInterfaceType.Ppp)return nic.Name;
+  }
+  return null;
+ }
  // ---------- 暂停前：正在运行的 Claude 程序（可一键关闭） ----------
  // Claude's desktop app (with its helper processes) lives under AnthropicClaude; any other claude.exe is Claude Code
  // (the stand-alone install); Claude Code installed with npm runs as node.exe with "claude-code" in its command line.

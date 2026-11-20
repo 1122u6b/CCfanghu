@@ -31,13 +31,37 @@ sealed class CoexistProxy(SecurityIdentifier owner)
   }
   return socks;
  }
+ /// <summary>A proxy auto-configuration script served on this computer (Clash's "PAC mode" and the like): the local
+ /// proxy it names. Scripts elsewhere are not fetched (they are not the customer's own app).</summary>
+ internal static Upstream? FromPac(string? url)
+ {
+  if(string.IsNullOrWhiteSpace(url)||!Uri.TryCreate(url,UriKind.Absolute,out var u)||u.Scheme is not ("http" or "https")||u.Host is not ("127.0.0.1" or "localhost" or "[::1]"))return null;
+  try
+  {
+   using var http=new HttpClient(new HttpClientHandler{UseProxy=false}){Timeout=TimeSpan.FromSeconds(3),MaxResponseContentBufferSize=1024*1024};
+   return FromPacScript(http.GetStringAsync(u).GetAwaiter().GetResult());
+  }
+  catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidOperationException){return null;}
+ }
+ internal static Upstream? FromPacScript(string script)
+ {
+  // "PROXY 127.0.0.1:7890", "SOCKS5 127.0.0.1:7891", "HTTPS localhost:7890"; HTTP proxies are preferred.
+  Upstream? socks=null;
+  foreach(System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(script,@"\b(PROXY|HTTPS|HTTP|SOCKS5|SOCKS4|SOCKS)\s+(127\.0\.0\.1|localhost):(\d{1,5})\b",System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+  {
+   if(!int.TryParse(m.Groups[3].Value,out var port)||port is <1 or >65535||port==LocalPort)continue;
+   if(m.Groups[1].Value.StartsWith("SOCKS",StringComparison.OrdinalIgnoreCase)){socks??=new("socks5",port);continue;}
+   return new("http",port);
+  }
+  return socks;
+ }
  /// <summary>The customer's own local proxy: from the saved settings while Leyra is in front, else from the system.</summary>
  public Upstream? Find()
  {
   try
   {
-   if(Taken){var s=JsonSerializer.Deserialize<Saved>(File.ReadAllBytes(SavedPath));return s is null?null:Parse(s.ProxyEnable,s.ProxyServer);}
-   using var key=Open(false);return Parse(key.GetValue("ProxyEnable") as int?,key.GetValue("ProxyServer") as string);
+   if(Taken){var s=JsonSerializer.Deserialize<Saved>(File.ReadAllBytes(SavedPath));return s is null?null:Parse(s.ProxyEnable,s.ProxyServer)??FromPac(s.AutoConfigURL);}
+   using var key=Open(false);return Parse(key.GetValue("ProxyEnable") as int?,key.GetValue("ProxyServer") as string)??FromPac(key.GetValue("AutoConfigURL") as string);
   }
   catch(Exception e)when(e is InvalidOperationException or JsonException or IOException){return null;}
  }

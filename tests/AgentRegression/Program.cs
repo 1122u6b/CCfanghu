@@ -110,6 +110,17 @@ using(var stopped=new CancellationTokenSource()){
  var dump=Environment.GetEnvironmentVariable("LEYRA_DUMP_LOCKDOWN");if(dump is not null)File.WriteAllBytes(dump,(byte[])lockdown.Invoke(null,[plain,"出口"])!);
 }
 
+// Proxy auto-configuration (Clash's PAC mode): the customer's local proxy is read from the script.
+{
+ var proxyType=assembly.GetType("Leyra.Windows.Agent.CoexistProxy",true)!;
+ var fromScript=proxyType.GetMethod("FromPacScript",BindingFlags.Static|BindingFlags.NonPublic)!;
+ string Up(string js){var r=fromScript.Invoke(null,[js]);return r is null?"none":r.ToString()!;}
+ Check(Up("function FindProxyForURL(u,h){if(isPlainHostName(h))return 'DIRECT';return 'PROXY 127.0.0.1:7890; SOCKS5 127.0.0.1:7891; DIRECT';}").Contains("7890"),"PAC: the local HTTP proxy is found");
+ Check(Up("function FindProxyForURL(u,h){return 'SOCKS5 localhost:7891';}").Contains("socks5"),"PAC: a SOCKS-only script gives a SOCKS proxy");
+ Check(Up("function FindProxyForURL(u,h){return 'PROXY 10.0.0.2:8080';}")=="none","PAC: a proxy on another machine is not the customer's own app");
+ Check(Up("function FindProxyForURL(u,h){return 'PROXY 127.0.0.1:17890';}")=="none","PAC: Leyra itself is never taken for the customer's proxy");
+}
+
 sealed class SlowDownload:Stream
 {
  bool sent;

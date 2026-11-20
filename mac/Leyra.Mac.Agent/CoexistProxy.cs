@@ -28,17 +28,49 @@ static class CoexistProxy
   int.TryParse(Regex.Match(o,@"^Port:\s*(\d+)",RegexOptions.Multiline).Groups[1].Value,out var port);
   return new(service,kind,Regex.IsMatch(o,@"^Enabled:\s*Yes",RegexOptions.Multiline),Regex.Match(o,@"^Server:\s*(\S*)",RegexOptions.Multiline).Groups[1].Value,port);
  }
- static List<Setting> Current()=>Services().SelectMany(s=>Kinds.Select(k=>Read(s,k))).ToList();
- static bool Local(Setting s)=>s.On&&s.Port is >0 and <65536&&s.Port!=LocalPort&&s.Server is "127.0.0.1" or "localhost" or "::1";
+ // The automatic proxy configuration (PAC) of a service: kept so it is put back exactly, and read as the customer's proxy.
+ static Setting ReadAuto(string service)
+ {
+  var o=Run("-getautoproxyurl",service);
+  var url=Regex.Match(o,@"^URL:\s*(\S*)",RegexOptions.Multiline).Groups[1].Value;if(url=="(null)")url="";
+  return new(service,"autoproxy",Regex.IsMatch(o,@"^Enabled:\s*Yes",RegexOptions.Multiline),url,0);
+ }
+ static List<Setting> Current()=>Services().SelectMany(s=>Kinds.Select(k=>Read(s,k)).Append(ReadAuto(s))).ToList();
+ /// <summary>The local proxy a PAC script served on this Mac names ("PROXY 127.0.0.1:7890", "SOCKS5 127.0.0.1:7891").</summary>
+ internal static Upstream? FromPacScript(string script)
+ {
+  Upstream? socks=null;
+  foreach(Match m in Regex.Matches(script,@"\b(PROXY|HTTPS|HTTP|SOCKS5|SOCKS4|SOCKS)\s+(127\.0\.0\.1|localhost):(\d{1,5})\b",RegexOptions.IgnoreCase))
+  {
+   if(!int.TryParse(m.Groups[3].Value,out var port)||port is <1 or >65535||port==LocalPort)continue;
+   if(m.Groups[1].Value.StartsWith("SOCKS",StringComparison.OrdinalIgnoreCase)){socks??=new("socks5",port);continue;}
+   return new("http",port);
+  }
+  return socks;
+ }
+ static Upstream? FromPac(Setting s)
+ {
+  if(!s.On||!Uri.TryCreate(s.Server,UriKind.Absolute,out var u)||u.Scheme is not ("http" or "https")||u.Host is not ("127.0.0.1" or "localhost" or "[::1]"))return null;
+  try
+  {
+   using var http=new HttpClient(new HttpClientHandler{UseProxy=false}){Timeout=TimeSpan.FromSeconds(3),MaxResponseContentBufferSize=1024*1024};
+   return FromPacScript(http.GetStringAsync(u).GetAwaiter().GetResult());
+  }
+  catch(Exception e)when(e is HttpRequestException or TaskCanceledException or InvalidOperationException){return null;}
+ }
+ static bool Local(Setting s)=>s.Kind!="autoproxy"&&s.On&&s.Port is >0 and <65536&&s.Port!=LocalPort&&s.Server is "127.0.0.1" or "localhost" or "::1";
  public static bool Taken=>File.Exists(Saved);
  /// <summary>The customer's own local proxy: from the saved settings while Leyra is in front, else from the system.</summary>
  public static Upstream? Find()
  {
   var list=Taken?JsonSerializer.Deserialize<List<Setting>>(File.ReadAllBytes(Saved))??[]:Current();
-  var http=list.FirstOrDefault(s=>Local(s)&&s.Kind!="socksfirewallproxy");
+  var http=list.FirstOrDefault(s=>Local(s)&&s.Kind is "webproxy" or "securewebproxy");
   if(http is not null)return new("http",http.Port);
   var socks=list.FirstOrDefault(s=>Local(s)&&s.Kind=="socksfirewallproxy");
-  return socks is null?null:new("socks5",socks.Port);
+  if(socks is not null)return new("socks5",socks.Port);
+  // Clash's "PAC mode" and the like: the system proxy is a script on this Mac naming the customer's local proxy.
+  foreach(var auto in list.Where(s=>s.Kind=="autoproxy"&&s.On))if(FromPac(auto) is Upstream fromScript)return fromScript;
+  return null;
  }
  /// <summary>Leyra's local proxy becomes the system proxy (HTTP, HTTPS and SOCKS) on every network service.</summary>
  public static void Take()
@@ -51,7 +83,11 @@ static class CoexistProxy
   }
  }
  /// <summary>True when every network service still points at Leyra (another app may have changed it).</summary>
- public static bool Holding()=>Current().Where(s=>s.Kind!="socksfirewallproxy").All(s=>s.On&&s.Server=="127.0.0.1"&&s.Port==LocalPort);
+ public static bool Holding()
+ {
+  var now=Current();
+  return now.Where(s=>s.Kind is "webproxy" or "securewebproxy").All(s=>s.On&&s.Server=="127.0.0.1"&&s.Port==LocalPort)&&now.Where(s=>s.Kind=="autoproxy").All(s=>!s.On);
+ }
  public static void Restore()
  {
   if(!Taken)return;
@@ -60,6 +96,12 @@ static class CoexistProxy
    var before=JsonSerializer.Deserialize<List<Setting>>(File.ReadAllBytes(Saved))??[];
    foreach(var s in before)
    {
+    if(s.Kind=="autoproxy")
+    {
+     // The customer's automatic proxy configuration (PAC) comes back exactly as it was.
+     if(s.Server.Length>0)Run("-setautoproxyurl",s.Service,s.Server);
+     Run("-setautoproxystate",s.Service,s.On?"on":"off");continue;
+    }
     if(s.Server.Length>0&&s.Port>0)Run("-set"+s.Kind,s.Service,s.Server,s.Port.ToString());
     Run("-set"+s.Kind+"state",s.Service,s.On?"on":"off");
    }

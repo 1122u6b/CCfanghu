@@ -279,7 +279,10 @@
     }
     // 刚替用户关掉系统代理：两分钟里横幅给「撤销」。
     S.proxyUndo = !!st.proxy_undo && Date.now() - proxyOffAt < PROXY_UNDO_MS && !proxyUndoHidden;
-    S.coexist = !!st.coexist;   // 共存模式：名单里的走 Leyra 出口，其他走客户自己的代理
+    S.coexist = !!st.coexist;
+    S.sharedVpn = st.shared_vpn || '';
+    // 客户的代理软件一直把系统代理改回去（「系统代理守护」）：提示一次让他关掉，不然两边一直抢
+    if (st.proxy_fight) { notifyOnce('proxyfight.' + new Date().toDateString(), '代理软件一直在抢系统代理', '请在你的代理软件设置里关闭「系统代理守护」或类似选项，Claude 才能一直走 Leyra 出口'); if (!S.proxyFightShown) { S.proxyFightShown = true; P.toast('你的代理软件一直把系统代理改回去，请在它的设置里关闭「系统代理守护」', 'info'); } }   // 和客户自己的虚拟网卡型 VPN 共存时，那个 VPN 的网卡名   // 共存模式：名单里的走 Leyra 出口，其他走客户自己的代理
     applyUpdate(st);
     // 后台运行没允许（E10）：显示「请在系统设置里允许」页；允许了回到首页。
     var bgBad = (st.checks || []).some(function (c) { return c.id === 'E10' && c.verdict === 'fail'; });
