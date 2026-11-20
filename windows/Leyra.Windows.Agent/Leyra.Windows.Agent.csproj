@@ -9,10 +9,18 @@
   <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
  </PropertyGroup>
  <ItemGroup>
-  <ProjectReference Include="../Leyra.Windows.Core/Leyra.Windows.Core.csproj" />
-  <ProjectReference Include="../Leyra.Windows.Platform/Leyra.Windows.Platform.csproj" />
   <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
   <!-- LeyraJson reads the properties of Leyra's own objects: keep them all in the machine-code build. -->
-  <TrimmerRootAssembly Include="Leyra.Agent" /><TrimmerRootAssembly Include="Leyra.Windows.Core" /><TrimmerRootAssembly Include="Leyra.Windows.Platform" />
+  <TrimmerRootAssembly Include="Leyra.Agent" />
+ </ItemGroup>
+ <ItemGroup Condition="'$(LeyraOneAssembly)'!='true'">
+  <ProjectReference Include="../Leyra.Windows.Core/Leyra.Windows.Core.csproj" />
+  <ProjectReference Include="../Leyra.Windows.Platform/Leyra.Windows.Platform.csproj" />
+  <TrimmerRootAssembly Include="Leyra.Windows.Core" /><TrimmerRootAssembly Include="Leyra.Windows.Platform" />
+ </ItemGroup>
+ <!-- Shipped build (scripts/aot_publish.py): the shared code is compiled into the service itself, so one assembly is
+      obfuscated and then compiled to machine code (no copies of the shared code to keep in step). -->
+ <ItemGroup Condition="'$(LeyraOneAssembly)'=='true'">
+  <Compile Include="../Leyra.Windows.Core/**/*.cs;../Leyra.Windows.Platform/**/*.cs" Exclude="../Leyra.Windows.Core/obj/**;../Leyra.Windows.Core/bin/**;../Leyra.Windows.Platform/obj/**;../Leyra.Windows.Platform/bin/**" />
  </ItemGroup>
 </Project>

@@ -12,8 +12,16 @@
   <StripSymbols>true</StripSymbols><IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
  </PropertyGroup>
  <ItemGroup>
-  <ProjectReference Include="../../windows/Leyra.Windows.Core/Leyra.Windows.Core.csproj" />
   <!-- LeyraJson reads the properties of Leyra's own objects: keep them all in the machine-code build. -->
-  <TrimmerRootAssembly Include="leyra-agent" /><TrimmerRootAssembly Include="Leyra.Windows.Core" />
+  <TrimmerRootAssembly Include="leyra-agent" />
+ </ItemGroup>
+ <ItemGroup Condition="'$(LeyraOneAssembly)'!='true'">
+  <ProjectReference Include="../../windows/Leyra.Windows.Core/Leyra.Windows.Core.csproj" />
+  <TrimmerRootAssembly Include="Leyra.Windows.Core" />
+ </ItemGroup>
+ <!-- Shipped build (scripts/aot_publish.py): the shared code is compiled into the service itself, so one assembly is
+      obfuscated and then compiled to machine code. -->
+ <ItemGroup Condition="'$(LeyraOneAssembly)'=='true'">
+  <Compile Include="../../windows/Leyra.Windows.Core/**/*.cs" Exclude="../../windows/Leyra.Windows.Core/obj/**;../../windows/Leyra.Windows.Core/bin/**" />
  </ItemGroup>
 </Project>

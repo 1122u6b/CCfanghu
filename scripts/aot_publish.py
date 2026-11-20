@@ -25,7 +25,7 @@ def run(*args):
 
 def main(project, rid, out, modules):
     project = Path(project).resolve(); folder = project if project.is_dir() else project.parent
-    common = ['-c', 'Release', '-r', rid, '--self-contained', 'true', '-nr:false', '-p:UseSharedCompilation=false']
+    common = ['-c', 'Release', '-r', rid, '--self-contained', 'true', '-nr:false', '-p:UseSharedCompilation=false', '-p:LeyraOneAssembly=true']
     # A full build: an earlier run left obfuscated copies that an incremental build would take as up to date.
     run('dotnet', 'build', project, *common, '--no-incremental')
     bins = [p for p in (folder / 'bin' / 'Release').glob('*/' + rid) if p.is_dir()]

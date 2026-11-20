@@ -16,7 +16,7 @@ def main():
  # The service: machine code, from its code with names renamed and strings hidden first (scripts/aot_publish.py).
  service=ROOT/'artifacts/service'
  if service.exists():shutil.rmtree(service)
- subprocess.run([sys.executable,str(ROOT/'scripts/aot_publish.py'),str(ROOT/'windows/Leyra.Windows.Agent'),'win-x64',str(service),'Leyra.Agent.dll','Leyra.Windows.Core.dll','Leyra.Windows.Platform.dll'],check=True)
+ subprocess.run([sys.executable,str(ROOT/'scripts/aot_publish.py'),str(ROOT/'windows/Leyra.Windows.Agent'),'win-x64',str(service),'Leyra.Agent.dll'],check=True)
  for f in service.iterdir():
   if f.suffix.lower()!='.dll':shutil.copy2(f,payload/f.name)
  # The service (Leyra.Agent.exe) is compiled to machine code (PublishAot in its project file). The window's code

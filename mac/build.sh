@@ -12,7 +12,7 @@ MIHOMO=v1.19.33
 for pair in "osx-arm64 agent-arm64 darwin-arm64" "osx-x64 agent-x64 darwin-amd64-compatible"; do
   set -- $pair
   # The service is compiled to machine code, from its code with names renamed and strings hidden first.
-  python3 scripts/aot_publish.py mac/Leyra.Mac.Agent/Leyra.Mac.Agent.csproj "$1" "$SUP/$2" leyra-agent.dll Leyra.Windows.Core.dll
+  python3 scripts/aot_publish.py mac/Leyra.Mac.Agent/Leyra.Mac.Agent.csproj "$1" "$SUP/$2" leyra-agent.dll
   curl -fsSL --retry 3 -o "$OUT/mihomo.gz" "https://github.com/MetaCubeX/mihomo/releases/download/$MIHOMO/mihomo-$3-$MIHOMO.gz"
   gunzip -c "$OUT/mihomo.gz" > "$SUP/$2/mihomo"; chmod 755 "$SUP/$2/mihomo"; rm "$OUT/mihomo.gz"
   codesign --force -s - "$SUP/$2/mihomo" "$SUP/$2/leyra-agent"
