@@ -517,6 +517,30 @@
       P.toast(cancelled + '：' + msg(e), 'info'); return false;
     });
   }
+  // 暂停前：查正在运行的 Claude 程序，弹窗里列出来，可以一键关闭（暂停期间它们会用真实 IP）。
+  var openPauseDialog = A.pause;
+  A.pause = function () {
+    openPauseDialog.apply(this, arguments);
+    var D = S.dialog;
+    call({ type: 'claude_processes' }).then(function (r) {
+      if (S.dialog !== D) return;
+      D.claude = (r && r.groups) || []; D.pick = {};
+      D.claude.forEach(function (g) { D.pick[g.id] = true; });
+      P.render();
+    }).catch(function () {});
+  };
+  A.claudePick = function (id) { var D = S.dialog; if (!D || !D.pick) return; D.pick[id] = !D.pick[id]; P.render(); };
+  A.claudeClose = function () {
+    var D = S.dialog; if (!D || !D.claude || D.closing) return;
+    var ids = D.claude.filter(function (g) { return D.pick[g.id]; }).map(function (g) { return g.id; });
+    if (!ids.length) return;
+    D.closing = true; P.render();
+    call({ type: 'close_claude', ids: ids }).then(function (r) {
+      D.closing = false; D.claude = (r && r.left && r.left.groups) || [];
+      P.toast(D.claude.length ? '有的 Claude 程序没关掉，请手动退出后再暂停' : '已关闭 Claude 程序');
+      if (S.dialog === D) P.render();
+    }).catch(function (e) { D.closing = false; P.render(); P.toast('没关成：' + msg(e), 'info'); });
+  };
   A.pauseGo = function () {
     var d = S.dialog || {};
     var req = { type: 'pause', minutes: d.login ? 10 : (d.min || 10), reason: d.login ? 'wifi_login' : 'user' };

@@ -44,9 +44,10 @@ async def handle(r, w, user, password):
         port = struct.unpack('!H', await r.readexactly(2))[0]
         if cmd != 1:
             w.write(b'\x05\x07\x00\x01' + b'\x00' * 6); return
-        if host == 'resume.leyra-ci.invalid':   # every account passes traffic again
+        # Also under ipify.org: Leyra always sends that through the exit (in every mode), so the request reaches here.
+        if host in ('resume.leyra-ci.invalid', 'resume.leyra-ci.ipify.org'):   # every account passes traffic again
             STOPPED.clear(); w.write(b'\x05\x05\x00\x01' + b'\x00' * 6); return
-        stop = re.fullmatch(r'stop-(\d{1,3})\.leyra-ci\.invalid', host)
+        stop = re.fullmatch(r'stop-(\d{1,3})\.leyra-ci\.(?:invalid|ipify\.org)', host)
         if stop:
             STOPPED[account] = time.monotonic() + min(300, int(stop.group(1)))
             w.write(b'\x05\x05\x00\x01' + b'\x00' * 6); return

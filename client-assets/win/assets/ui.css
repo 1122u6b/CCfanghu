@@ -1024,3 +1024,5 @@ b, strong { font-weight: 500; }
 .lx-direct .p-sub { font-size: 12px; }
 .lx-recovered { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .lx-recovered .msg { flex: 1; }
+.lx-claudeprocs { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; margin: 12px 0; }
+.lx-claudeprocs .lx-cpacts { display: flex; justify-content: flex-end; }

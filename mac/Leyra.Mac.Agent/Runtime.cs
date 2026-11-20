@@ -725,6 +725,8 @@ sealed partial class Runtime:IDisposable
       var listed=Bool(request,"listed");store.Settings.ProxyOnlyListed=listed;store.Settings.ModeChosen=true;store.Save();
       configured=false;retryAt=DateTimeOffset.MinValue;return new{saved=true,listed};
      }
+    case "claude_processes":return ClaudeProcesses();
+    case "close_claude":return CloseClaude(request);
     case "set_auto_exit":store.Settings.AutoSwitchExit=Bool(request,"on");store.Save();return new{saved=true,on=store.Settings.AutoSwitchExit};
     case "own_exit":case "store_exit":return await AddExit(request,stop);
     case "block_before_ready":

@@ -197,6 +197,43 @@ sealed partial class Runtime
    updateReady=null;Program.Log("update at startup skipped",e);
   }
  }
+ // ---------- 暂停前：正在运行的 Claude 程序（可一键关闭） ----------
+ // Programs of the person using this Mac: inside Claude.app → the desktop app; the claude command, or node running
+ // @anthropic-ai/claude-code → Claude Code.
+ Dictionary<string,List<int>> ClaudeProcessGroups()
+ {
+  var groups=new Dictionary<string,List<int>>{["desktop"]=new(),["code"]=new()};
+  try
+  {
+   var start=new ProcessStartInfo("/bin/ps",["-axo","pid=,uid=,args="]){UseShellExecute=false,RedirectStandardOutput=true};
+   using var ps=Process.Start(start);if(ps is null)return groups;
+   var output=ps.StandardOutput.ReadToEnd();ps.WaitForExit(5000);
+   foreach(var raw in output.Split('\n'))
+   {
+    var parts=raw.Trim().Split(' ',3,StringSplitOptions.RemoveEmptyEntries);
+    if(parts.Length<3||!int.TryParse(parts[0],out var pid)||!uint.TryParse(parts[1],out var uid)||uid!=store.Owner)continue;
+    var args=parts[2];var program=args.Split(' ')[0];
+    if(args.Contains("/Claude.app/"))groups["desktop"].Add(pid);
+    else if(Path.GetFileName(program)=="claude"||args.Contains("@anthropic-ai/claude-code")||args.Contains("/claude-code/"))groups["code"].Add(pid);
+   }
+  }
+  catch(Exception e)when(e is System.ComponentModel.Win32Exception or IOException or InvalidOperationException){Program.Log("looking for Claude programs",e);}
+  return groups;
+ }
+ object ClaudeProcesses()
+ {
+  var g=ClaudeProcessGroups();
+  return new{groups=new[]{new{id="desktop",name="Claude 桌面版",count=g["desktop"].Count},new{id="code",name="Claude Code",count=g["code"].Count}}.Where(x=>x.count>0).ToArray()};
+ }
+ object CloseClaude(JsonElement request)
+ {
+  var wanted=request.TryGetProperty("ids",out var ids)&&ids.ValueKind==JsonValueKind.Array?ids.EnumerateArray().Select(x=>x.GetString()??"").ToHashSet():[];
+  var g=ClaudeProcessGroups();var pids=wanted.Where(g.ContainsKey).SelectMany(id=>g[id]).Distinct().ToList();
+  void Signal(string sig,IEnumerable<int> list){var l=list.Select(x=>x.ToString()).ToList();if(l.Count==0)return;using var k=Process.Start(new ProcessStartInfo("/bin/kill",["-"+sig,..l]){UseShellExecute=false,RedirectStandardError=true});k?.WaitForExit(3000);}
+  try{Signal("TERM",pids);Thread.Sleep(2000);var still=ClaudeProcessGroups();Signal("KILL",pids.Where(p=>still.Values.Any(v=>v.Contains(p))));}
+  catch(Exception e)when(e is System.ComponentModel.Win32Exception or IOException or InvalidOperationException){Program.Log("closing Claude programs",e);}
+  return new{closed=pids.Count,left=ClaudeProcesses()};
+ }
  object InstallUpdate()
  {
   var version=updateReady??throw new InvalidOperationException("没有已下载并核对的新版本");

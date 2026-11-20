@@ -346,7 +346,7 @@ jobs:
           $s = WaitFor 'protected' 60; Start-Sleep 5
           $ipAllExpected = try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 https://api.ipify.org).Content.Trim() } catch { '' }
           Write-Host "   before: sites see $ipAllExpected"
-          try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 8 -Proxy http://127.0.0.1:17890 http://stop-240.leyra-ci.invalid/ | Out-Null } catch { }
+          try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 8 -Proxy http://127.0.0.1:17890 http://stop-240.leyra-ci.ipify.org/ | Out-Null } catch { }
           $t0 = Get-Date; $moved = $false; $leaked = @()
           while (((Get-Date) - $t0).TotalSeconds -lt 90) {
             # someone keeps browsing meanwhile; nothing may come back from anywhere but an exit
@@ -370,7 +370,7 @@ jobs:
           # Automatic switching turned off (cut off instead of switching) is checked on the Mac runs: it keeps this
           # machine offline for about two minutes, and GitHub drops a Windows runner that long out of contact.
           # the first test account passes traffic again for the later steps
-          try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 8 -Proxy http://127.0.0.1:17890 http://resume.leyra-ci.invalid/ | Out-Null } catch { }
+          try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 8 -Proxy http://127.0.0.1:17890 http://resume.leyra-ci.ipify.org/ | Out-Null } catch { }
           Write-Host '   only listed sites go through the exit, the rest connects directly (and back to everything through the exit)'
           function SeenIp {
             for ($k = 1; $k -le 3; $k++) {
@@ -393,7 +393,7 @@ jobs:
           function Code($u, $t) { try { (Invoke-WebRequest $u -UseBasicParsing -TimeoutSec $t).StatusCode } catch { if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 } } }
           # two working exits here: switching is turned off so the exit in use stays down and only Claude is held
           Ask '{"type":"set_auto_exit","on":false}' | Out-Null
-          try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 8 -Proxy http://127.0.0.1:17890 http://stop-60.leyra-ci.invalid/ | Out-Null } catch { }
+          try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 8 -Proxy http://127.0.0.1:17890 http://stop-60.leyra-ci.ipify.org/ | Out-Null } catch { }
           $s = WaitFor 'blocked' 100; Write-Host "   exit dead in list mode: $s"
           $other = Code https://icanhazip.com 15; $listedNow = Code https://example.com 8; $claudeNow = Code https://claude.ai 8
           Write-Host "   while the exit is down: other site $other, listed site $listedNow, claude.ai $claudeNow"
@@ -491,6 +491,18 @@ jobs:
           }
           if (-not $fake.HasExited) { Stop-Process -Id $fake.Id -Force }
           Set-ItemProperty $is ProxyEnable 0
+          Write-Host '   before pausing: running Claude programs are listed and can be closed'
+          $ct = Join-Path $env:TEMP 'claudetest'; New-Item -ItemType Directory -Force $ct | Out-Null
+          Copy-Item "$env:SystemRoot\System32\PING.EXE" (Join-Path $ct 'claude.exe') -Force
+          $fake = Start-Process -FilePath (Join-Path $ct 'claude.exe') -ArgumentList '-n','300','127.0.0.1' -WindowStyle Hidden -PassThru
+          Start-Sleep 2
+          Ask '{"type":"claude_processes"}' | Out-Null
+          $groups = (Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value.groups
+          Write-Host "   running Claude programs: $(($groups | ForEach-Object { "$($_.name) x$($_.count)" }) -join ', ')"
+          if (-not ($groups | Where-Object { $_.id -eq 'code' -and $_.count -ge 1 })) { $failures += 'a running claude.exe was not listed as Claude Code' }
+          Ask '{"type":"close_claude","ids":["code"]}' | Out-Null
+          Start-Sleep 1
+          if (-not $fake.HasExited) { $failures += 'closing Claude Code did not end the claude.exe process'; Stop-Process -Id $fake.Id -Force -ErrorAction SilentlyContinue } else { Write-Host '   the claude.exe process was closed' }
           Write-Host '   dropped connections while protected'
           dotnet $tool --pipe-stress 200 | Select-Object -Last 3 | ForEach-Object { Write-Host "   $_" }
           if ($LASTEXITCODE -ne 0) { $failures += 'service stopped answering after dropped connections (protected)' }

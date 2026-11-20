@@ -315,6 +315,55 @@ sealed partial class Runtime
  /// straight to the internet instead (bypassing the exit); -1 when the app is not running.</summary>
  /// <summary>Programs the coexist rules apply to: every copy of the Claude desktop app (its install folder and any
  /// running copy; updates move it to a new folder) and the installed or running browsers.</summary>
+ // ---------- 暂停前：正在运行的 Claude 程序（可一键关闭） ----------
+ // Claude's desktop app (with its helper processes) lives under AnthropicClaude; any other claude.exe is Claude Code
+ // (the stand-alone install); Claude Code installed with npm runs as node.exe with "claude-code" in its command line.
+ static Dictionary<string,List<int>> ClaudeProcessGroups()
+ {
+  var groups=new Dictionary<string,List<int>>{["desktop"]=new(),["code"]=new()};
+  foreach(var p in Process.GetProcessesByName("claude").Concat(Process.GetProcessesByName("Claude")))using(p)
+  {
+   string path="";try{path=p.MainModule?.FileName??"";}catch(Exception e)when(e is System.ComponentModel.Win32Exception or InvalidOperationException){}
+   if(!groups["desktop"].Contains(p.Id)&&!groups["code"].Contains(p.Id))groups[path.Contains(@"\AnthropicClaude\",StringComparison.OrdinalIgnoreCase)?"desktop":"code"].Add(p.Id);
+  }
+  try
+  {
+   var start=new ProcessStartInfo(Path.Combine(Environment.SystemDirectory,"WindowsPowerShell","v1.0","powershell.exe")){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true};
+   start.ArgumentList.Add("-NoProfile");start.ArgumentList.Add("-NonInteractive");start.ArgumentList.Add("-Command");
+   start.ArgumentList.Add("Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }");
+   using var ps=Process.Start(start);
+   if(ps is not null)
+   {
+    var output=ps.StandardOutput.ReadToEndAsync();
+    if(ps.WaitForExit(8000))
+     foreach(var line in output.Result.Split('\n'))
+     {
+      var tab=line.IndexOf('\t');if(tab<1||!int.TryParse(line[..tab],out var pid))continue;
+      var cmd=line[(tab+1)..];
+      if(cmd.Contains("claude-code",StringComparison.OrdinalIgnoreCase)||cmd.Contains("@anthropic-ai",StringComparison.OrdinalIgnoreCase))groups["code"].Add(pid);
+     }
+    else try{ps.Kill();}catch(InvalidOperationException){}
+   }
+  }
+  catch(Exception e)when(e is System.ComponentModel.Win32Exception or IOException or InvalidOperationException){Program.Log("looking for Claude Code started with node",e);}
+  return groups;
+ }
+ static object ClaudeProcesses()
+ {
+  var g=ClaudeProcessGroups();
+  return new{groups=new[]{new{id="desktop",name="Claude 桌面版",count=g["desktop"].Count},new{id="code",name="Claude Code",count=g["code"].Count}}.Where(x=>x.count>0).ToArray()};
+ }
+ static object CloseClaude(JsonElement request)
+ {
+  var wanted=request.TryGetProperty("ids",out var ids)&&ids.ValueKind==JsonValueKind.Array?ids.EnumerateArray().Select(x=>x.GetString()??"").ToHashSet():[];
+  var g=ClaudeProcessGroups();var closed=0;
+  foreach(var id in wanted.Where(g.ContainsKey))foreach(var pid in g[id])
+  {
+   try{using var p=Process.GetProcessById(pid);if(p.CloseMainWindow()&&p.WaitForExit(2000)){closed++;continue;}p.Kill(entireProcessTree:true);p.WaitForExit(3000);closed++;}
+   catch(Exception e)when(e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception){}
+  }
+  return new{closed,left=ClaudeProcesses()};
+ }
  (string[] Claude,string[] Browsers) GuardedApps()
  {
   static IEnumerable<string> Running(params string[] names)

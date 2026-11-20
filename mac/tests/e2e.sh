@@ -41,7 +41,7 @@ ask '{"type":"set_route_mode","listed":true,"domains":["icanhazip.com"]}' >/dev/
 L=$(ip2); ask '{"type":"set_route_mode","listed":true,"domains":["example.com"]}' >/dev/null; sleep 4; wait_for '^protected' 150 >/dev/null
 D=$(ip2); W=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://www.apple.com/)
 echo "   only Claude through the exit and the exit dies: only Claude (and the list) is cut off, everything else keeps working"
-curl -s --max-time 8 -x http://127.0.0.1:17890 http://stop-60.leyra-ci.invalid/ >/dev/null || true
+curl -s --max-time 8 -x http://127.0.0.1:17890 http://stop-60.leyra-ci.ipify.org/ >/dev/null || true
 s=$(wait_for '^blocked' 100); echo "   exit dead in list mode: $s"
 [[ "$s" == blocked* ]] || fail "list mode: a dead exit should cut Claude off: $s"
 OTHER=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 https://icanhazip.com || true)
@@ -92,7 +92,7 @@ curid(){ python3 ask.py '{"type":"account"}' --full 2>/dev/null | python3 -c 'im
 SPARE=$(python3 ask.py "{\"type\":\"own_exit\",\"links\":\"socks5://ci2:$SOCKS_PASS@127.0.0.1:$SOCKS_PORT\",\"name\":\"spare\"}" --full | python3 -c 'import json,sys;print(json.load(sys.stdin)["value"]["id"])')
 ask "{\"type\":\"select_exit\",\"id\":$CUR}" >/dev/null || fail "could not go back to the first exit"
 wait_for '^protected' 60 >/dev/null; sleep 5; BEFORE=$(ip)
-curl -s --max-time 8 -x http://127.0.0.1:17890 http://stop-240.leyra-ci.invalid/ >/dev/null || true
+curl -s --max-time 8 -x http://127.0.0.1:17890 http://stop-240.leyra-ci.ipify.org/ >/dev/null || true
 T0=$(date +%s); MOVED=""
 while [ $(( $(date +%s) - T0 )) -lt 90 ]; do
   P=$(curl -s --max-time 4 https://api.ipify.org || true)
@@ -116,13 +116,20 @@ for i in 1 2 3; do P=$(curl -s --max-time 5 https://api.ipify.org || true); [ -n
 ask '{"type":"set_auto_exit","on":true}' >/dev/null || fail "could not turn automatic switching back on"
 ask "{\"type\":\"select_exit\",\"id\":$SPARE}" >/dev/null || fail "could not select the spare exit"
 s=$(wait_for '^protected' 150) || fail "not protected again on the spare exit: $s"; echo "   back on the spare exit: $s"
-curl -s --max-time 8 -x http://127.0.0.1:17890 http://resume.leyra-ci.invalid/ >/dev/null || true   # the first test account passes traffic again for the later steps
+curl -s --max-time 8 -x http://127.0.0.1:17890 http://resume.leyra-ci.ipify.org/ >/dev/null || true   # the first test account passes traffic again for the later steps
 
+echo "   before pausing: running Claude programs are listed and can be closed"
+mkdir -p /tmp/claudetest && cp /bin/sleep /tmp/claudetest/claude && /tmp/claudetest/claude 300 & FAKE=$!; sleep 2
+G=$(python3 ask.py '{"type":"claude_processes"}' --full | python3 -c 'import json,sys;print(",".join(g["id"]+":"+str(g["count"]) for g in json.load(sys.stdin)["value"]["groups"]))')
+echo "   running Claude programs: $G"; [[ "$G" == *"code:"* ]] || fail "a running claude command was not listed as Claude Code: $G"
+ask '{"type":"close_claude","ids":["code"]}' >/dev/null; sleep 1
+if kill -0 $FAKE 2>/dev/null; then fail "closing Claude Code did not end the claude process"; kill -9 $FAKE; else echo "   the claude process was closed"; fi
 echo "7. pause: rules removed, normal network back"
 ask '{"type":"pause","minutes":10}' >/dev/null || ask '{"type":"pause","reason":"quit"}' >/dev/null
 s=$(wait_for '^paused' 30) || fail "did not pause: $s"
 sudo pfctl -a com.apple/250.LeyraConnect -s rules | grep -q leyra-default-block && fail "pf rules still loaded after pause"
-P=$(ip); [ "$P" = "$REAL" ] || fail "network not back to normal after pause: $P"
+# The runner's own address can change between neighbouring addresses of its provider: what matters is that it is no longer the exit.
+P=$(ip); [[ "$P" =~ ^[0-9.]+$ && "$P" != "$EXIT" ]] || fail "network not back to normal after pause: $P (exit $EXIT, real at start $REAL)"
 
 echo "--- service log ---"; sudo cat "/Library/Application Support/LeyraConnect/agent-error.log" 2>/dev/null | tail -20
 if [ ${#FAIL[@]} -gt 0 ]; then echo "LEYRA_MAC_E2E=FAIL (${#FAIL[@]})"; exit 1; fi

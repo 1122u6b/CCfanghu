@@ -309,6 +309,14 @@
     else if (S.status === 'pm') { startStarting({ hold: false }); }
     else toast('当前状态无需模拟线路连接', 'info');
   }
+  // 暂停弹窗里：正在运行的 Claude 程序，建议暂停前关闭（默认都勾上，点「关闭所选」）
+  function claudeRunning(D) {
+    var L = D.claude || []; if (!L.length) return '';
+    var pick = D.pick || {};
+    return '<div class="hx-card lx-claudeprocs"><b>以下 Claude 程序正在运行，建议暂停前关闭</b>' +
+      L.map(function (g) { return '<label class="p-check"><input type="checkbox" data-act="claudePick:' + g.id + '"' + (pick[g.id] ? ' checked' : '') + '> ' + esc(g.name) + ' · ' + g.count + ' 个进程</label>'; }).join('') +
+      '<div class="lx-cpacts">' + btn('secondary', D.closing ? '正在关闭…' : '关闭所选', 'claudeClose', D.closing || !L.some(function (g) { return pick[g.id]; }) ? ' disabled' : '') + '</div></div>';
+  }
   function openPause(login) {
     S.tray = false;
     S.dialog = { type: 'pause', min: login ? 10 : 30, login: !!login };
@@ -1309,6 +1317,7 @@
         '<li>' + (D.login ? '先关掉浏览器里的其它网页和别的软件，只留登录 Wi-Fi 的页面' : '要隐藏 IP 的网站和软件，先退出或关掉再暂停') + '</li>' +
         '<li>' + (D.login ? '登录完成、线路连上后自动恢复' : '到时间自动恢复，也可以随时点「恢复防护」') + '</li></ul></div>' +
         '' +
+        claudeRunning(D) +
         (aiActive() ? '<p><span class="p-danger-note">暂停期间不要登录或使用我们提供的 Claude 账号，已经打开的 Claude 页面也先关掉，否则被封不退</span></p>' : '') +
         (D.login ? '' : '<div class="hx-seg" role="group" aria-label="暂停时长">' + [10, 30, 60].map(function (m) { return '<button aria-pressed="' + (D.min === m) + '" data-act="pauseMin:' + m + '">' + m + ' 分钟</button>'; }).join('') + '</div>') +
         '<div class="acts">' + btn('danger', I('lock', 14) + '暂停 ' + D.min + ' 分钟', 'pauseGo') + btn('primary', '取消', 'close', ' data-autofocus') + '</div></div>';

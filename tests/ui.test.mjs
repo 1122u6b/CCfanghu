@@ -268,3 +268,23 @@ test('only Claude through the exit: asked once after updating, explained on the 
   assert.match(w.document.body.textContent,/只有 Claude 暂时断开/);
  }finally{await cleanup(w);}
 });
+
+test('pausing lists the running Claude programs and closes the chosen ones',async()=>{
+ let groups=[{id:'desktop',name:'Claude 桌面版',count:5},{id:'code',name:'Claude Code',count:12}];
+ const calls=[];
+ const w=await setup((command,args)=>{if(command==='daemon')calls.push(args.request);
+  const t=command==='daemon'&&args.request.type;
+  return t==='claude_processes'?{groups}:t==='close_claude'?(groups=groups.filter(g=>!args.request.ids.includes(g.id)),{closed:12,left:{groups}}):t==='status'?{protection:{state:'protected'}}:t==='account'?{activated:true,account_id:5,suite:{kind:'soft'},own_exit:'connected',exits:{list:[]},channels:[]}:{};});
+ try{
+  await settle();Object.assign(w.__proto.S,{screen:'main',page:'overview',status:'ok',dialog:null});
+  w.__proto.A.pause();await settle();
+  let text=w.document.body.textContent;
+  assert.match(text,/以下 Claude 程序正在运行/);assert.match(text,/Claude 桌面版 · 5 个进程/);assert.match(text,/Claude Code · 12 个进程/);
+  w.__proto.A.claudePick('desktop');            // keep the desktop app, close Claude Code
+  w.__proto.A.claudeClose();await settle();
+  const sent=calls.filter(c=>c.type==='close_claude').pop();
+  assert.equal(sent.ids.length,1);assert.equal(sent.ids[0],'code');
+  text=w.document.body.textContent;
+  assert.doesNotMatch(text,/Claude Code · 12/);assert.match(text,/Claude 桌面版 · 5 个进程/);
+ }finally{await cleanup(w);}
+});
