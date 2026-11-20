@@ -167,7 +167,7 @@ sealed partial class Runtime:IDisposable
     ["proxies"]=new System.Text.Json.Nodes.JsonArray(),
     ["rules"]=new System.Text.Json.Nodes.JsonArray(reject.Append("MATCH,DIRECT").Select(x=>(System.Text.Json.Nodes.JsonNode?)x).ToArray()),
     ["tun"]=new System.Text.Json.Nodes.JsonObject{["enable"]=true,["device"]=KernelSession.TunnelName,["stack"]="gvisor",["auto-route"]=true,["auto-detect-interface"]=true,["dns-hijack"]=new System.Text.Json.Nodes.JsonArray("any:53","tcp://any:53"),["route-exclude-address"]=new System.Text.Json.Nodes.JsonArray(exclude.Select(x=>(System.Text.Json.Nodes.JsonNode?)x).ToArray())},
-    ["dns"]=System.Text.Json.Nodes.JsonNode.Parse("{\"enable\":true,\"listen\":\"127.0.0.1:53\",\"ipv6\":false,\"enhanced-mode\":\"fake-ip\",\"fake-ip-range\":\"198.18.0.1/16\",\"nameserver\":[\"https://223.5.5.5/dns-query\",\"https://1.1.1.1/dns-query\"]}")
+    ["dns"]=System.Text.Json.Nodes.JsonNode.Parse("{\"enable\":true,\"listen\":\"127.0.0.1:53\",\"ipv6\":false,\"enhanced-mode\":\"fake-ip\",\"fake-ip-range\":\""+MihomoConfiguration.FakeIpRange+"\",\"nameserver\":[\"https://223.5.5.5/dns-query\",\"https://1.1.1.1/dns-query\"]}")
    };
    Lockdown(hold,"REJECT",upstream);
    using var limit=new CancellationTokenSource(TimeSpan.FromSeconds(15));

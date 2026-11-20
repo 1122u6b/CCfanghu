@@ -18,6 +18,10 @@ namespace Leyra.Windows.Core;
 }
 public static class MihomoConfiguration
 {
+ // Leyra's fake addresses; its network card takes the first one (198.19.0.1/30). Not mihomo's default 198.18.0.1/16:
+ // a customer's Clash/mihomo in TUN mode uses that and could not start next to Leyra ("set ipv4 address: the object
+ // already exists"), so Leyra would never see it to share with it.
+ public const string FakeIpRange="198.19.0.1/16";
  static readonly HashSet<string> Types=["http","socks5","ss","vmess","vless","trojan","hysteria2","tuic"];
  static readonly HashSet<string> Forbidden=["dialer-proxy","proxy","certificate","private-key","ca","ca-str","plugin","plugin-opts","smux"];
  public static void ValidateNodes(JsonElement nodes)
@@ -114,7 +118,7 @@ public static class MihomoConfiguration
   if(protectedMode && dns is not null)
   {
    config["hosts"]=new Dictionary<string,string>{{dns.Resolver.Host,dns.Address}};
-   var dnsConfig=new Dictionary<string,object>{{"enable",true},{"listen","127.0.0.1:53"},{"ipv6",false},{"enhanced-mode","fake-ip"},{"fake-ip-range","198.18.0.1/16"},{"default-nameserver",new[]{dns.Address}},{"nameserver",new[]{dns.Resolver.AbsoluteUri+"#出口"}},{"proxy-server-nameserver",new[]{dns.Resolver.AbsoluteUri}},{"respect-rules",true},{"fake-ip-filter",new[]{"+."+dns.Zone}}};
+   var dnsConfig=new Dictionary<string,object>{{"enable",true},{"listen","127.0.0.1:53"},{"ipv6",false},{"enhanced-mode","fake-ip"},{"fake-ip-range",FakeIpRange},{"default-nameserver",new[]{dns.Address}},{"nameserver",new[]{dns.Resolver.AbsoluteUri+"#出口"}},{"proxy-server-nameserver",new[]{dns.Resolver.AbsoluteUri}},{"respect-rules",true},{"fake-ip-filter",new[]{"+."+dns.Zone}}};
    if(proxyOnly is not null)
    {
     // Sites going direct are looked up over encrypted public DNS (fastest answer of Alibaba and Cloudflare);

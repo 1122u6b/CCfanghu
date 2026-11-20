@@ -352,7 +352,7 @@ sealed partial class Runtime
   {
    var i=line.IndexOf("->",StringComparison.Ordinal);if(!line.StartsWith('n')||i<0)continue;
    var remote=line[(i+2)..];var colon=remote.LastIndexOf(':');var host=(colon>0?remote[..colon]:remote).Trim('[',']');
-   var localPart=line[1..i];if(localPart.StartsWith("198.18.",StringComparison.Ordinal)||localPart.StartsWith("127.",StringComparison.Ordinal))continue;   // through the tunnel or Leyra
+   var localPart=line[1..i];if((localPart.StartsWith("198.18.",StringComparison.Ordinal)||localPart.StartsWith("198.19.",StringComparison.Ordinal))||localPart.StartsWith("127.",StringComparison.Ordinal))continue;   // through the tunnel or Leyra
    if(AddressPolicy.IsPublic(host))count++;
   }
   return count;

@@ -558,7 +558,14 @@ jobs:
           if ($s -notmatch 'protected') { $failures += "protection did not come back after the activation was restored: $s" }
           Write-Host '   彻底退出 while protected takes effect within 10 seconds'
           $t0 = [DateTime]::UtcNow
-          if ((Ask '{"type":"pause","minutes":10,"reason":"quit"}') -ne 0) { $failures += '彻底退出 request failed' }
+          # A lost answer is tried again (the window does the same); what counts is that it stops within 10 seconds.
+          $asked = $false
+          for ($k = 1; $k -le 3 -and -not $asked; $k++) {
+            if ((Ask '{"type":"pause","minutes":10,"reason":"quit"}') -eq 0) { $asked = $true }
+            elseif ((WaitFor 'paused' 3) -match 'paused') { $asked = $true; Write-Host '   (answer lost, but it had stopped)' }
+            else { Start-Sleep 1 }
+          }
+          if (-not $asked) { $failures += '彻底退出 request failed' }
           $took = ([DateTime]::UtcNow - $t0).TotalSeconds; Write-Host ("   彻底退出 answered in {0:N1} s" -f $took)
           if ($took -gt 10) { $failures += "彻底退出 took $took seconds" }
           $s = WaitFor 'paused' 10; if ($s -notmatch 'paused') { $failures += "not stopped after 彻底退出: $s" }
