@@ -92,7 +92,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14   # macos-15 Apple silicon runners were not being assigned
+          - runner: macos-15
             chip: apple-silicon
             code_key: code
           - runner: macos-15-intel
