@@ -81,7 +81,7 @@ sealed partial class Runtime:IDisposable
     // Not activated: nothing of Leyra may block the network (blocking before activation is never installed).
     // Rules left by an earlier installation name the old program path and would block this service too:
     // the activation then times out. Remove them.
-    if(profile is null){state="not_activated";if(filters.DefaultGuardsInstalled()){filters.RemoveOwned();Program.Log("removed blocking rules left by an earlier installation",new Exception("not activated"));}}
+    if(profile is null){state="not_activated";if(filters.DefaultGuardsInstalled()){filters.RemoveOwned();Program.Log("removed blocking rules left by an earlier installation",new Exception("not activated"));}if(CoexistProxy.Taken){coexistProxy.Restore();Program.Log("gave back the system proxy left on Leyra",new Exception("not activated"));}}
     else if(await OwnExitMissing(stop)){kernel.Stop();Unguard();configured=false;state="provisioning";reason="own_exit";}
     else if(!store.Settings.Enabled || store.Settings.PausedUntil>DateTimeOffset.UtcNow.ToUnixTimeSeconds()){kernel.Stop();Unguard();configured=false;state="paused";}
     else if(!kernel.Alive || !configured){if(DateTimeOffset.UtcNow>=retryAt)await StartProtected(stop);}
@@ -224,6 +224,9 @@ sealed partial class Runtime:IDisposable
   }
   else
   {
+  // Back from sharing (the other VPN or the customer's proxy went away): the customer's own system proxy setting
+  // comes back. Left on Leyra, every browser would break as soon as Leyra stops.
+  try{coexistProxy.Restore();}catch(Exception e)when(e is not OutOfMemoryException){Program.Log("giving the system proxy back",e);}
   var kernelConfig=MihomoConfiguration.Build(nodes,kernel.Secret,true,dns,store.Settings.DirectRules,mux,store.Settings.ProxyOnlyListed?store.Settings.ProxyDomains:null);
   // Only Claude through the exit: Claude's programs are held by program too, not only by the sites they name.
   if(store.Settings.ProxyOnlyListed)kernelConfig=Lockdown(kernelConfig,"出口");

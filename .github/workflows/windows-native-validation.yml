@@ -512,6 +512,7 @@ jobs:
           while ((Get-Date) -lt $end -and -not $shared) { Start-Sleep 4; Ask '{"type":"status"}' | Out-Null; $st = (Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value; if ($st.shared_vpn -and $st.protection.state -eq 'protected') { $shared = $st.shared_vpn } }
           $viaLeyra = SeenIp; $otherSite = SeenIp2
           New-Item -ItemType Directory -Force $fakeDir | Out-Null; Copy-Item "$env:SystemRoot\System32\curl.exe" "$fakeDir\claude.exe" -Force
+          Start-Sleep 12   # a newly installed Claude program is put under the firewall rules at the next check
           $claudeDirect = & "$fakeDir\claude.exe" -s -o NUL -w '%{http_code}' --noproxy '*' --max-time 8 https://1.1.1.1/cdn-cgi/trace
           Remove-Item "$env:LOCALAPPDATA\AnthropicClaude" -Recurse -Force -ErrorAction SilentlyContinue
           Write-Host "   shared with: '$shared'; the self-check site sees $viaLeyra (exit $ipAll), another site sees $otherSite, Claude app directly: $claudeDirect"
