@@ -64,8 +64,10 @@ def validate_node(o):
 # (about 3 round trips, ~450 ms from Hong Kong to the US). Keep WARM_SIZE connections per exit that
 # are already authenticated, so a new request only sends CONNECT. Only for exits used in the last
 # minute, each kept at most WARM_MAX_AGE seconds idle; a pooled one that turns out closed is retried
-# fresh by connect_any. Small on purpose: some providers cap simultaneous connections.
-WARM_SIZE=2;WARM_MAX_AGE=20;WARM_IDLE_STOP=60
+# fresh by connect_any. Small on purpose: some providers cap simultaneous connections. A page opens many
+# connections at once: each time the pool runs dry it keeps one more (up to WARM_MAX), refilled all at once,
+# and gives one back for every minute without running dry.
+WARM_SIZE=2;WARM_MAX=6;WARM_MAX_AGE=20;WARM_IDLE_STOP=60;WARM_SHRINK=60
 _warm={}  # key -> {'conns':[(t,r,w)], 'used':t, 'task':Task|None}
 def _warm_key(o):return (o['server'],o['port'],o.get('username') or '')
 async def _socks_greet(o):
@@ -94,23 +96,32 @@ async def _warm_keeper(key,o):
             now=time.monotonic()
             for item in [c for c in entry['conns'] if now-c[0]>WARM_MAX_AGE or c[1].at_eof()]:
                 entry['conns'].remove(item);_warm_close(item)
-            if len(entry['conns'])<WARM_SIZE:
-                try:r,w=await _socks_greet(o);entry['conns'].append((time.monotonic(),r,w))
-                except Exception:await asyncio.sleep(5)
+            if entry.get('target',WARM_SIZE)>WARM_SIZE and now-entry.get('dry',0)>WARM_SHRINK:
+                entry['target']-=1;entry['dry']=now
+            missing=entry.get('target',WARM_SIZE)-len(entry['conns'])
+            if missing>0:
+                done=await asyncio.gather(*[_socks_greet(o) for _ in range(missing)],return_exceptions=True)
+                for item in done:
+                    if isinstance(item,tuple):entry['conns'].append((time.monotonic(),*item))
+                if any(not isinstance(item,tuple) for item in done):await asyncio.sleep(5)
                 continue
-            await asyncio.sleep(2)
+            await asyncio.sleep(0.5 if entry.get('dry',0)>now-2 else 2)
     finally:
         for item in entry['conns']:_warm_close(item)
         entry['conns'].clear();entry['task']=None
 def _warm_take(o):
-    key=_warm_key(o);entry=_warm.setdefault(key,{'conns':[],'used':0,'task':None})
+    key=_warm_key(o);entry=_warm.setdefault(key,{'conns':[],'used':0,'task':None,'target':WARM_SIZE,'dry':0})
     entry['used']=time.monotonic()
     if entry['task'] is None:entry['task']=asyncio.get_running_loop().create_task(_warm_keeper(key,dict(o)))
     now=time.monotonic()
     while entry['conns']:
         t,r,w=entry['conns'].pop(0)
-        if now-t<=WARM_MAX_AGE and not r.at_eof():return r,w
+        if now-t<=WARM_MAX_AGE and not r.at_eof():
+            if not entry['conns']:entry['dry']=now   # the last one: refill right away
+            return r,w
         _warm_close((t,r,w))
+    # Ran dry: this exit is busier than the pool, keep one more next time.
+    entry['target']=min(WARM_MAX,entry.get('target',WARM_SIZE)+1);entry['dry']=now
     return None
 async def upstream_connect(o,target):
     o=validate_upstream(o)
