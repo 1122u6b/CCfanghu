@@ -1,9 +1,9 @@
 using System.Net;
 using Leyra.Windows.Core;
 namespace Leyra.Windows.Platform;
-public sealed record GatewayEndpoint(IPEndPoint Endpoint,byte Protocol);
-public sealed record FilterSpec(bool Ipv6,int Slot,string Name,bool Permit,ulong Weight,string? Network=null,int? RemotePort=null,int? LocalPort=null,byte? Protocol=null,bool Loopback=false,ulong? Interface=null,string? Application=null,bool Transport=false);
-public sealed record WfpPlan(IReadOnlyList<FilterSpec> Filters)
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] public sealed record GatewayEndpoint(IPEndPoint Endpoint,byte Protocol);
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] public sealed record FilterSpec(bool Ipv6,int Slot,string Name,bool Permit,ulong Weight,string? Network=null,int? RemotePort=null,int? LocalPort=null,byte? Protocol=null,bool Loopback=false,ulong? Interface=null,string? Application=null,bool Transport=false);
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] public sealed record WfpPlan(IReadOnlyList<FilterSpec> Filters)
 {
  /// <param name="kernelDirect">"Only listed sites go through the exit": the kernel connects the other sites
  /// directly, so it alone may use the physical network. Other programs stay blocked as always.</param>

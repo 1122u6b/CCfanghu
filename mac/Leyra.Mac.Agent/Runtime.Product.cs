@@ -8,7 +8,7 @@ using Leyra.Windows.Core;
 
 namespace Leyra.Mac.Agent;
 
-sealed record GeoInfo(string Ip,string Country,string Region,string City,string Timezone,string Org)
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] sealed record GeoInfo(string Ip,string Country,string Region,string City,string Timezone,string Org)
 {
  static readonly Dictionary<string,string> Names=new(){{"CN","中国"},{"HK","中国香港"},{"MO","中国澳门"},{"TW","中国台湾"},{"US","美国"},{"JP","日本"},{"KR","韩国"},{"SG","新加坡"},{"GB","英国"},{"DE","德国"},{"FR","法国"},{"NL","荷兰"},{"CA","加拿大"},{"AU","澳大利亚"},{"MY","马来西亚"},{"TH","泰国"},{"VN","越南"},{"PH","菲律宾"},{"ID","印度尼西亚"},{"IN","印度"},{"RU","俄罗斯"},{"TR","土耳其"},{"AE","阿联酋"},{"IT","意大利"},{"ES","西班牙"},{"CH","瑞士"},{"SE","瑞典"},{"BR","巴西"},{"MX","墨西哥"},{"NZ","新西兰"}};
  public string CountryName=>Names.TryGetValue(Country,out var n)?n:Country;
@@ -98,7 +98,7 @@ sealed partial class Runtime
  }
 
  // ---------- 线路质量：内核对每条线路的实际延迟测试 ----------
- sealed record Sample(DateTimeOffset At,int? Ms);
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] sealed record Sample(DateTimeOffset At,int? Ms);
  readonly Dictionary<string,List<Sample>> samples=new();DateTimeOffset lastSample=DateTimeOffset.MinValue;
  (long Down,DateTimeOffset At)? lastSpeed;
  async Task SampleLines(CancellationToken stop)

@@ -1,7 +1,7 @@
 namespace Leyra.Windows.Core;
 public enum AuditVerdict { Passed,Warning,Failed,Skipped }
 public enum ProtectionPhase { Disconnected,Starting,Protected,GuardedFailure,UnprotectedFailure,Paused,RecoveryRequired }
-public sealed record ProtectionEvidence(bool Kernel,bool Tunnel,bool Filters,bool Dns,bool ExitMatches,DateTimeOffset Heartbeat)
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] public sealed record ProtectionEvidence(bool Kernel,bool Tunnel,bool Filters,bool Dns,bool ExitMatches,DateTimeOffset Heartbeat)
 {
     public bool Fresh(DateTimeOffset now)=>Heartbeat<=now+TimeSpan.FromSeconds(5) && now-Heartbeat<=TimeSpan.FromSeconds(12);
     public ProtectionPhase Assess(DateTimeOffset now,bool paused=false)
@@ -11,7 +11,7 @@ public sealed record ProtectionEvidence(bool Kernel,bool Tunnel,bool Filters,boo
         return Kernel && Tunnel && Dns && ExitMatches ? ProtectionPhase.Protected : ProtectionPhase.GuardedFailure;
     }
 }
-public sealed record AuditItem(string Id,string Group,string Name,AuditVerdict Verdict,string Detail);
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] public sealed record AuditItem(string Id,string Group,string Name,AuditVerdict Verdict,string Detail);
 public static class AuditSummary
 {
     public static (int Passed,int Warning,int Failed,int Skipped) Count(IEnumerable<AuditItem> items)

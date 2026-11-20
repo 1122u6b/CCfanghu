@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace Leyra.Windows.Core;
 
-public sealed record DownloadSample(long Bytes,long BytesPerSecond,double Seconds)
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] public sealed record DownloadSample(long Bytes,long BytesPerSecond,double Seconds)
 {
  public static async Task<DownloadSample> MeasureAsync(Stream input,int maximumBytes,TimeSpan duration,CancellationToken stop=default)
  {

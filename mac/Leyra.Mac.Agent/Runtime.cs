@@ -15,7 +15,7 @@ sealed partial class Runtime:IDisposable
  int? exitCount;DateTimeOffset exitAskAt=DateTimeOffset.MinValue;
  DateTimeOffset heartbeat=DateTimeOffset.MinValue,lastHealth=DateTimeOffset.MinValue,guardSince=DateTimeOffset.MinValue;
  bool configured,dnsVerified,exitVerified;long up,down;ulong tunnel;
- sealed record Snapshot(JsonElement Data,DateTimeOffset Heartbeat,bool Protected);
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] sealed record Snapshot(JsonElement Data,DateTimeOffset Heartbeat,bool Protected);
  volatile Snapshot snapshot=new(JsonSerializer.SerializeToElement(new{version=Program.Version,protection=new{state="starting"}}),DateTimeOffset.MinValue,false);
  DateTimeOffset retryAt=DateTimeOffset.MinValue;int failures;
  long? licenseExpiresAt; // unix seconds; null = bought out (never expires) or not known yet

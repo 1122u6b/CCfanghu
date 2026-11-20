@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 namespace Leyra.Windows.Core;
-public sealed record PrivateDns(string Zone,Uri Resolver,string Address)
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] public sealed record PrivateDns(string Zone,Uri Resolver,string Address)
 {
  public static PrivateDns Parse(JsonElement value,ServerProfile server)
  {

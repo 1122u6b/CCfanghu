@@ -11,7 +11,7 @@ namespace Leyra.Windows.Agent;
 sealed class CoexistProxy(SecurityIdentifier owner)
 {
  public const int LocalPort=17890;
- public record Upstream(string Type,int Port);
+ [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] public record Upstream(string Type,int Port);
  [System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] record Saved(int? ProxyEnable,string? ProxyServer,string? ProxyOverride,string? AutoConfigURL);
  const string Suffix=@"\Software\Microsoft\Windows\CurrentVersion\Internet Settings";
  static string SavedPath=>Path.Combine(AgentStore.Root,"proxy-before.json");

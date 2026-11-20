@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 namespace Leyra.Windows.Core;
 
 /// <summary>One upstream the private gateway dials for this device's exit.</summary>
-public sealed record ExitNode(string Type,string Server,int Port,string? Username,string? Password)
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] public sealed record ExitNode(string Type,string Server,int Port,string? Username,string? Password)
 {
  public object Wire()=>Username is null?new{type=Type,server=Server,port=Port}:new{type=Type,server=Server,port=Port,username=Username,password=Password};
 }

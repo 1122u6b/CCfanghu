@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 namespace Leyra.Windows.Core;
 
-public sealed record ServerProfile(string Host, int Port, string Token, string Certificate, string Fingerprint, string Role, string? DeviceId)
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] public sealed record ServerProfile(string Host, int Port, string Token, string Certificate, string Fingerprint, string Role, string? DeviceId)
 {
     public Uri Address(string path) => new UriBuilder("https",Host,Port,path).Uri;
     public static ServerProfile Parse(ReadOnlySpan<byte> data)

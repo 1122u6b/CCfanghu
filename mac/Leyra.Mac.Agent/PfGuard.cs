@@ -5,7 +5,7 @@ using Leyra.Windows.Core;
 namespace Leyra.Mac.Agent;
 
 /// <summary>Where the kernel may connect: the gateway's address and port (TCP).</summary>
-sealed record GatewayEndpoint(IPEndPoint Endpoint,byte Protocol);
+[System.Reflection.Obfuscation(Exclude=true,ApplyToMembers=true)] sealed record GatewayEndpoint(IPEndPoint Endpoint,byte Protocol);
 
 /// <summary>The Mac counterpart of the Windows filtering rules, as pf rules in Leyra's own anchor.</summary>
 static class PfPlan

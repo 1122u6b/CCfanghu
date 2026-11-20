@@ -31,8 +31,12 @@ def obfuscate(folder, modules):
         xml.append('  <Var name=%s value=%s />' % (quoteattr(k), quoteattr(v)))
     xml.append('  <AssemblySearchPath path=%s />' % quoteattr(str(folder)))
     for m in modules:
+        # Anonymous types are written to JSON, which needs their constructor's parameter names.
+        xml.append('  <Module file=%s>' % quoteattr(str(folder / m)))
+        xml.append('    <SkipType name="*AnonymousType*" skipMethods="true" skipFields="true" skipProperties="true" />')
+        xml.append('  </Module>')
+    for m in modules:
         if not (folder / m).is_file(): raise SystemExit('missing assembly to obfuscate: ' + m)
-        xml.append('  <Module file=%s />' % quoteattr(str(folder / m)))
     xml.append('</Obfuscator>')
     config = folder / '.obfuscar.xml'; config.write_text('\n'.join(xml) + '\n', encoding='utf-8')
     env = dict(os.environ, DOTNET_ROLL_FORWARD='Major')
