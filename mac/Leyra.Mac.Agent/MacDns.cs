@@ -21,7 +21,7 @@ static class MacDns
   var o=Run("-getdnsservers",service);
   return o.Contains("aren't any",StringComparison.OrdinalIgnoreCase)?[]:o.Split('\n').Select(x=>x.Trim()).Where(x=>x.Length>0).ToArray();
  }
- static void Flush()
+ internal static void Flush()
  {
   foreach(var (f,a) in new[]{("/usr/bin/dscacheutil",new[]{"-flushcache"}),("/usr/bin/killall",new[]{"-HUP","mDNSResponder"})})
    try{using var p=Process.Start(new ProcessStartInfo(f,a){UseShellExecute=false});p?.WaitForExit(5000);}catch(Exception e)when(e is InvalidOperationException or System.ComponentModel.Win32Exception){}

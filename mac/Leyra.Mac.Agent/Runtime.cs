@@ -264,9 +264,11 @@ sealed partial class Runtime:IDisposable
    }
    catch(Exception e)when(!stop.IsCancellationRequested&&e is OperationCanceledException or System.Net.Sockets.SocketException or HttpRequestException or InvalidDataException or IOException)
    {
-    Program.Log("dns check attempt "+attempt+"/3 failed at "+stage,e);
-    if(attempt>=3)throw new InvalidOperationException("系统 DNS 检测 3 次都没有通过（最后卡在："+stage+"）",e);
-    await Task.Delay(1000,stop);
+    Program.Log("dns check attempt "+attempt+"/5 failed at "+stage,e);
+    if(attempt>=5)throw new InvalidOperationException("系统 DNS 检测 5 次都没有通过（最后卡在："+stage+"）",e);
+    // Right after the kernel restarts, macOS may still hold on to "no answer" from the moment it was down.
+    if(stage=="system lookup")MacDns.Flush();
+    await Task.Delay(2000,stop);
    }
   }
  }

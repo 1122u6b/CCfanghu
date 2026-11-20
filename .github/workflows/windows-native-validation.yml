@@ -502,7 +502,7 @@ jobs:
           $vpnDir = Join-Path $env:TEMP 'othervpn'; New-Item -ItemType Directory -Force $vpnDir | Out-Null
           $vpnKernel = (Get-ChildItem 'C:\Apps\Leyra\versions\*\mihomo.exe' | Select-Object -First 1).FullName
           Set-Content (Join-Path $vpnDir 'config.yaml') "mixed-port: 27890`nmode: rule`nlog-level: warning`nexternal-controller: 127.0.0.1:29090`ntun:`n  enable: true`n  device: OtherVPN`n  stack: gvisor`n  auto-route: true`n  auto-detect-interface: true`nrules:`n  - MATCH,DIRECT`n" -Encoding ascii
-          $vpn = Start-Process -FilePath $vpnKernel -ArgumentList '-d',$vpnDir -WindowStyle Hidden -PassThru
+          $vpn = Start-Process -FilePath $vpnKernel -ArgumentList '-d',$vpnDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $vpnDir 'out.log') -RedirectStandardError (Join-Path $vpnDir 'err.log')
           $end = (Get-Date).AddSeconds(90); $shared = ''
           while ((Get-Date) -lt $end -and -not $shared) { Start-Sleep 4; Ask '{"type":"status"}' | Out-Null; $st = (Get-Content "C:\LeyraCi\out_$script:n.json" -Raw | ConvertFrom-Json).reply.value; if ($st.shared_vpn -and $st.protection.state -eq 'protected') { $shared = $st.shared_vpn } }
           $viaLeyra = SeenIp; $otherSite = SeenIp2
@@ -510,7 +510,12 @@ jobs:
           $claudeDirect = & "$fakeDir\claude.exe" -s -o NUL -w '%{http_code}' --noproxy '*' --max-time 8 https://1.1.1.1/cdn-cgi/trace
           Remove-Item "$env:LOCALAPPDATA\AnthropicClaude" -Recurse -Force -ErrorAction SilentlyContinue
           Write-Host "   shared with: '$shared'; the self-check site sees $viaLeyra (exit $ipAll), another site sees $otherSite, Claude app directly: $claudeDirect"
-          if ($shared -ne 'OtherVPN') { $failures += "Leyra did not share with the other VPN's network card: '$shared'" }
+          if ($shared -ne 'OtherVPN') {
+            $failures += "Leyra did not share with the other VPN's network card: '$shared'"
+            Write-Host "   other VPN still running: $(-not $vpn.HasExited)"
+            Get-NetAdapter -IncludeHidden | Format-Table Name, InterfaceDescription, Status, MediaType -AutoSize | Out-String -Width 200 | Write-Host
+            Get-Content (Join-Path $vpnDir 'out.log'), (Join-Path $vpnDir 'err.log') -ErrorAction SilentlyContinue | Select-Object -Last 30 | Write-Host
+          }
           if ($viaLeyra -ne $ipAll) { $failures += "sharing with another VPN: the exit was not used for the self-check site: $viaLeyra" }
           if ($otherSite -eq $ipAll -or $otherSite -notmatch '^\d+\.\d+\.\d+\.\d+$') { $failures += "sharing with another VPN: other sites should go through that VPN, not the exit: $otherSite" }
           if ($claudeDirect -eq '200') { $failures += 'sharing with another VPN: the Claude app reached the internet without Leyra' }
